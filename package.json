@@ -1,0 +1,17 @@
+{
+  "name": "halftone-studio",
+  "version": "1.0.0",
+  "description": "Photoshop UXP plugin: non-destructive colour halftone rendering engine",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node test/run.js",
+    "test:visual": "node test/run.js --visual",
+    "icons": "node tools/make-icons.js",
+    "bench": "node test/bench.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
