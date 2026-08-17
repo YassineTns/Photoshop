@@ -403,6 +403,7 @@ Poster. Save your own with **Save Preset**.
 npm test              # engine (310 assertions) + mocked host (155 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
+npm run test:layout   # panel geometry, needs playwright (skips if absent)
 ```
 
 The engine suite covers a black image, a white image, a **black→white gradient**
@@ -416,6 +417,17 @@ ordered matrix with L distinct thresholds can only represent tone in steps of
 1/L, so the tolerance is 1/(2L), not a guessed constant. That checks each matrix
 achieves the best it structurally can, instead of hiding a regression behind a
 loose number. Threshold and Atkinson are exempted by name, with the reason.
+
+`test:layout` exists because the panel once shipped with every control piled on
+top of its neighbour. The stylesheet used three things UXP does not implement -
+flex `gap`, a fixed `height` on rows containing form controls, and a flex basis
+on inputs (which assert their own intrinsic width and win) - and none of that is
+visible to a unit test. It now renders the real stylesheet with the real controls
+at 300/360/420px, in both modes and both themes, and asserts geometry: no sibling
+overlap, no stacked-row collision, nothing overflowing the panel, nothing
+collapsed to zero. It cannot prove UXP agrees with Chromium, but every rule that
+broke was one Chromium would have caught, because the fix in each case was to
+stop relying on a feature UXP lacks.
 
 For separation it asserts the properties that matter rather than pixel values:
 pure inks resolve to themselves and drag nothing else in, secondaries decompose

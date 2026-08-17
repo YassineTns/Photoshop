@@ -11,7 +11,8 @@
     "test:visual": "node test/run.js --visual",
     "test:heavy": "node --max-old-space-size=4096 test/run.js --heavy --visual",
     "icons": "node tools/make-icons.js",
-    "playground": "node tools/build-playground.js"
+    "playground": "node tools/build-playground.js",
+    "test:layout": "node tools/build-playground.js && node test/layout.test.mjs"
   },
   "engines": {
     "node": ">=18"

@@ -292,7 +292,8 @@ function createToggle(def, value, onChange) {
   row.appendChild(label);
   row.appendChild(toggle);
   const spacer = el("div");
-  spacer.style.flex = "1 1 auto";
+  spacer.style.flexGrow = "1";
+  spacer.style.flexShrink = "1";
   row.appendChild(spacer);
   set(value);
   return { el: row, set };
@@ -388,7 +389,7 @@ function createPalette(opts) {
     strip.textContent = "";
     current.forEach((hex, i) => {
       const swatchWrap = el("div", "swatch-wrap");
-      const swatch = el("button", "swatch");
+      const swatch = el("div", "swatch");
       swatch.style.background = hex;
       swatch.title =
         `${hex} — click to edit, alt-click for the foreground colour, ` +
@@ -411,7 +412,7 @@ function createPalette(opts) {
       });
       swatchWrap.appendChild(swatch);
       if (locked.indexOf(i) >= 0) {
-        const badge = el("div", "swatch-lock", "\u25CF");
+        const badge = el("div", "swatch-lock");
         badge.title = "Locked: survives re-extraction";
         swatchWrap.appendChild(badge);
       }
@@ -438,14 +439,20 @@ function createColorField(def, value, onChange, getForeground) {
   const label = el("div", "ctl-label", def.label);
   if (def.hint) label.title = def.hint;
 
-  const swatch = el("button", "swatch");
+  const swatch = el("div", "swatch");
   const input = el("input", "ctl-value");
   input.type = "text";
-  input.style.flex = "1 1 auto";
   input.style.textAlign = "left";
+  input.style.width = "70px";
+  input.style.minWidth = "70px";
 
   const autoBtn = el("button", "seg-item", "Auto");
-  autoBtn.style.flex = "0 0 34px";
+  autoBtn.style.width = "38px";
+  autoBtn.style.minWidth = "38px";
+  autoBtn.style.flexGrow = "0";
+  autoBtn.style.flexShrink = "0";
+  autoBtn.style.border = "1px solid var(--border-strong)";
+  autoBtn.style.borderRadius = "2px";
   autoBtn.addEventListener("click", () => {
     set("auto");
     onChange("auto", true);
@@ -495,13 +502,17 @@ function createColorField(def, value, onChange, getForeground) {
 function createSection(id, label, open) {
   const section = el("div", "section" + (open ? " open" : ""));
   const head = el("div", "section-head");
-  head.appendChild(el("div", "section-caret"));
+  // A text glyph rather than a CSS triangle or a pseudo-element: UXP renders
+  // neither, and a border-triangle came out as a solid square.
+  const caret = el("div", "section-caret", open ? "\u25BC" : "\u25B6");
+  head.appendChild(caret);
   head.appendChild(el("div", null, label));
   const body = el("div", "section-body");
   const api = { el: section, body, onToggle: null };
   head.addEventListener("click", () => {
     const isOpen = section.className.indexOf("open") >= 0;
     section.className = "section" + (isOpen ? "" : " open");
+    caret.textContent = isOpen ? "\u25B6" : "\u25BC";
     // Collapse state is owned by the caller so it survives a rebuild.
     if (api.onToggle) api.onToggle(!isOpen);
   });

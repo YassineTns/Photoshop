@@ -11,6 +11,31 @@
  * Kept deliberately plain: flat surfaces, one accent, no shadows or gradients,
  * so the panel reads as part of Photoshop rather than as a web page embedded in
  * it. Colours are tokens so the light theme is a token swap, not a rewrite.
+ *
+ * WRITTEN FOR UXP, NOT FOR A BROWSER
+ * ----------------------------------
+ * UXP's CSS engine is a subset, and the gaps are not the ones you would guess.
+ * Four rules here exist because the obvious version rendered as a pile of
+ * overlapping controls:
+ *
+ *  1. NO `gap`. Flex gap is ignored, so every space is an explicit margin.
+ *     Without this, controls sit flush against each other.
+ *
+ *  2. NO fixed `height` on anything containing a form control. UXP's native
+ *     input is taller than a text line, so a 22px row let its input overflow
+ *     into the row below. Everything uses `min-height`.
+ *
+ *  3. INPUTS GET AN EXPLICIT `width`, never just a flex basis. A UXP text input
+ *     asserts its own intrinsic width and wins against `flex: 0 0 46px`, which
+ *     is what collapsed every slider to nothing and stretched the number field
+ *     across the panel.
+ *
+ *  4. NO `::before` / `::after`. Pseudo-elements do not render, so anything they
+ *     would have drawn (the disclosure caret, the user-preset marker) is a real
+ *     element with real text in it.
+ *
+ * Flex longhand is used throughout rather than the shorthand, for the same
+ * reason: it is the form UXP handles predictably.
  */
 
 :root {
@@ -29,7 +54,6 @@
   --danger: #d9534f;
   --ok: #57a55a;
   --radius: 3px;
-  --row-h: 22px;
 }
 
 @media (prefers-color-scheme: light) {
@@ -66,15 +90,18 @@ body {
   display: flex;
   flex-direction: column;
   padding: 8px;
-  gap: 8px;
+}
+
+#app > * {
+  margin-bottom: 8px;
 }
 
 /* ----------------------------------------------------------- status */
 
 .status {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
   color: var(--text-dim);
   font-size: 10px;
   min-height: 14px;
@@ -83,9 +110,12 @@ body {
 .status-dot {
   width: 6px;
   height: 6px;
+  min-width: 6px;
   border-radius: 50%;
   background: var(--text-faint);
-  flex: 0 0 auto;
+  flex-grow: 0;
+  flex-shrink: 0;
+  margin-right: 6px;
 }
 
 .status-dot.ready { background: var(--ok); }
@@ -96,6 +126,9 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 /* ---------------------------------------------------------- preview */
@@ -105,8 +138,9 @@ body {
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  min-height: 120px;
+  min-height: 130px;
   display: flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   overflow: hidden;
@@ -116,7 +150,6 @@ body {
   display: none;
   max-width: 100%;
   height: auto;
-  image-rendering: auto;
 }
 
 .preview.visible { display: block; }
@@ -135,32 +168,41 @@ body {
   position: absolute;
   right: 4px;
   bottom: 4px;
-  background: rgba(0, 0, 0, 0.55);
+  background: #000000;
   color: #d0d0d0;
   font-size: 9px;
   padding: 1px 5px;
   border-radius: 2px;
-  pointer-events: none;
 }
 
 /* --------------------------------------------------------- controls */
 
 .toolbar {
   display: flex;
-  gap: 4px;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.toolbar > * {
+  margin-right: 4px;
 }
 
 .btn {
-  flex: 1 1 auto;
-  height: 24px;
-  padding: 0 8px;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0 6px;
   background: var(--bg-raised);
   color: var(--text);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   font-size: 11px;
+  font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .btn:hover { border-color: var(--accent); }
@@ -180,9 +222,10 @@ body {
   color: var(--accent-text);
 }
 
-.btn-small { height: 20px; font-size: 10px; }
+.btn-small { min-height: 20px; font-size: 10px; }
 
 .progress {
+  min-height: 2px;
   height: 2px;
   background: var(--track);
   border-radius: 1px;
@@ -193,26 +236,30 @@ body {
 .progress.active { opacity: 1; }
 
 .progress-bar {
-  height: 100%;
+  height: 2px;
   width: 0%;
   background: var(--accent);
 }
 
 /* --------------------------------------------------------- sections */
 
-.sections { display: flex; flex-direction: column; gap: 2px; }
+.sections {
+  display: flex;
+  flex-direction: column;
+}
 
 .section {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
   overflow: hidden;
+  margin-bottom: 3px;
 }
 
 .section-head {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 5px;
   padding: 5px 7px;
   cursor: pointer;
   font-size: 10px;
@@ -220,40 +267,48 @@ body {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-dim);
+  min-height: 20px;
 }
 
 .section-head:hover { color: var(--text); }
 
+/* A real glyph, because pseudo-elements and CSS triangles both fail in UXP. */
 .section-caret {
-  width: 0;
-  height: 0;
-  border-left: 4px solid currentColor;
-  border-top: 3px solid transparent;
-  border-bottom: 3px solid transparent;
-  transition: none;
+  width: 10px;
+  min-width: 10px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  margin-right: 4px;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--text-faint);
 }
 
-.section.open .section-caret {
-  border-left: 3px solid transparent;
-  border-right: 3px solid transparent;
-  border-top: 4px solid currentColor;
-  border-bottom: 0;
+.section-body {
+  display: none;
+  padding: 4px 7px 7px;
 }
 
-.section-body { display: none; padding: 2px 7px 7px; }
 .section.open .section-body { display: block; }
 
 /* ----------------------------------------------------------- slider */
 
 .ctl {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
-  height: var(--row-h);
+  min-height: 26px;
+}
+
+.ctl > * {
+  margin-right: 6px;
 }
 
 .ctl-label {
-  flex: 0 0 62px;
+  width: 62px;
+  min-width: 62px;
+  flex-grow: 0;
+  flex-shrink: 0;
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -264,18 +319,21 @@ body {
 
 .slider {
   position: relative;
-  flex: 1 1 auto;
-  height: var(--row-h);
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 30px;
+  min-height: 22px;
   display: flex;
+  flex-direction: row;
   align-items: center;
   cursor: ew-resize;
-  touch-action: none;
 }
 
 .slider-track {
   position: relative;
   width: 100%;
   height: 3px;
+  min-height: 3px;
   background: var(--track);
   border-radius: 2px;
 }
@@ -284,18 +342,17 @@ body {
   position: absolute;
   left: 0;
   top: 0;
-  height: 100%;
+  height: 3px;
   background: var(--fill);
   border-radius: 2px;
 }
 
 .slider-thumb {
   position: absolute;
-  top: 50%;
+  top: -3px;
   width: 9px;
   height: 9px;
-  margin-top: -4.5px;
-  margin-left: -4.5px;
+  margin-left: -4px;
   border-radius: 50%;
   background: var(--text);
   border: 1px solid var(--bg);
@@ -303,9 +360,13 @@ body {
 
 .slider.dragging .slider-thumb { background: var(--accent); }
 
+/* Explicit width: a UXP input asserts its own and would eat the slider. */
 .ctl-value {
-  flex: 0 0 46px;
-  height: 18px;
+  width: 52px;
+  min-width: 52px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  min-height: 20px;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: 2px;
@@ -318,12 +379,13 @@ body {
   user-select: text;
 }
 
-.ctl-value:focus { border-color: var(--accent); outline: none; }
+.ctl-value:focus { border-color: var(--accent); }
 
 .ctl-reset {
-  flex: 0 0 12px;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  min-width: 14px;
+  flex-grow: 0;
+  flex-shrink: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -331,6 +393,8 @@ body {
   cursor: pointer;
   font-size: 11px;
   line-height: 1;
+  font-family: inherit;
+  margin-right: 0;
   visibility: hidden;
 }
 
@@ -341,16 +405,20 @@ body {
 
 .seg {
   display: flex;
-  flex: 1 1 auto;
+  flex-direction: row;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
 .seg-item {
-  flex: 1 1 0;
-  height: 18px;
-  line-height: 17px;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 20px;
   text-align: center;
   background: var(--bg-raised);
   color: var(--text-dim);
@@ -367,15 +435,21 @@ body {
 
 .seg-item:last-child { border-right: 0; }
 .seg-item.active { background: var(--accent); color: var(--accent-text); }
-.seg-item:hover:not(.active) { color: var(--text); }
+.seg-item:hover { color: var(--text); }
+.seg-item.active:hover { color: var(--accent-text); }
 
 /* ------------------------------------------------------------ chips */
 
 .chip-row {
   display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
-  gap: 3px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.chip-row > * {
+  margin-right: 3px;
+  margin-bottom: 3px;
 }
 
 .chip-group-label {
@@ -383,11 +457,12 @@ body {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin: 3px 0 2px;
+  margin-top: 3px;
+  margin-bottom: 2px;
 }
 
 .algo-chip {
-  height: 18px;
+  min-height: 19px;
   padding: 0 6px;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
@@ -409,9 +484,12 @@ body {
 /* --------------------------------------------------------- toggle */
 
 .toggle {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 15px;
+  width: 30px;
+  min-width: 30px;
+  height: 16px;
+  min-height: 16px;
+  flex-grow: 0;
+  flex-shrink: 0;
   border-radius: 8px;
   background: var(--track);
   border: 1px solid var(--border-strong);
@@ -422,30 +500,40 @@ body {
 
 .toggle-knob {
   position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
   background: var(--text-dim);
 }
 
 .toggle.on { background: var(--accent); border-color: var(--accent); }
-.toggle.on .toggle-knob { left: 14px; background: #fff; }
+.toggle.on .toggle-knob { left: 16px; background: #ffffff; }
 
 /* -------------------------------------------------------- palette */
 
 .palette {
   display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
-  gap: 4px;
   padding: 4px 0;
 }
 
-.swatch-wrap { position: relative; }
+.palette > * {
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
 
+.swatch-wrap {
+  position: relative;
+  width: 28px;
+  height: 22px;
+}
+
+/* A div, not a button: UXP gives buttons a native look that fights back. */
 .swatch {
-  width: 26px;
+  width: 28px;
   height: 22px;
   border: 1px solid var(--border-strong);
   border-radius: 2px;
@@ -453,11 +541,10 @@ body {
   padding: 0;
 }
 
-.swatch.editing { border-color: var(--accent); }
-
 .swatch-input {
-  width: 62px;
-  height: 18px;
+  width: 66px;
+  min-width: 66px;
+  min-height: 20px;
   background: var(--bg-sunken);
   border: 1px solid var(--accent);
   border-radius: 2px;
@@ -469,17 +556,27 @@ body {
   user-select: text;
 }
 
-.palette-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-
 .swatch-lock {
   position: absolute;
-  right: 1px;
-  bottom: 0;
-  font-size: 8px;
-  line-height: 1;
-  color: #fff;
-  text-shadow: 0 0 2px #000, 0 0 2px #000;
-  pointer-events: none;
+  right: 2px;
+  bottom: 1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: #ffffff;
+  border: 1px solid #000000;
+}
+
+.palette-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.palette-actions > * {
+  margin-right: 4px;
+  margin-bottom: 4px;
 }
 
 .hint {
@@ -496,26 +593,41 @@ body {
   padding-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
 }
 
-.preset-list { display: flex; flex-wrap: wrap; gap: 3px; }
+.preset-row { margin-bottom: 5px; }
+
+.preset-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.preset-list > * {
+  margin-right: 3px;
+  margin-bottom: 3px;
+}
 
 .preset-chip {
-  height: 19px;
-  padding: 0 7px;
+  min-height: 20px;
+  padding: 0 8px;
   background: var(--bg-raised);
   border: 1px solid var(--border-strong);
-  border-radius: 9px;
+  border-radius: 10px;
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
   font-family: inherit;
+  white-space: nowrap;
 }
 
 .preset-chip:hover { color: var(--text); border-color: var(--accent); }
-.preset-chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.preset-chip.user::after { content: " •"; color: var(--accent); }
+.preset-chip.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.preset-chip.user { border-style: dashed; }
 
 /* ---------------------------------------------------------- notice */
 
@@ -6032,7 +6144,8 @@ function createToggle(def, value, onChange) {
   row.appendChild(label);
   row.appendChild(toggle);
   const spacer = el("div");
-  spacer.style.flex = "1 1 auto";
+  spacer.style.flexGrow = "1";
+  spacer.style.flexShrink = "1";
   row.appendChild(spacer);
   set(value);
   return { el: row, set };
@@ -6128,7 +6241,7 @@ function createPalette(opts) {
     strip.textContent = "";
     current.forEach((hex, i) => {
       const swatchWrap = el("div", "swatch-wrap");
-      const swatch = el("button", "swatch");
+      const swatch = el("div", "swatch");
       swatch.style.background = hex;
       swatch.title =
         `${hex} — click to edit, alt-click for the foreground colour, ` +
@@ -6151,7 +6264,7 @@ function createPalette(opts) {
       });
       swatchWrap.appendChild(swatch);
       if (locked.indexOf(i) >= 0) {
-        const badge = el("div", "swatch-lock", "\u25CF");
+        const badge = el("div", "swatch-lock");
         badge.title = "Locked: survives re-extraction";
         swatchWrap.appendChild(badge);
       }
@@ -6178,14 +6291,20 @@ function createColorField(def, value, onChange, getForeground) {
   const label = el("div", "ctl-label", def.label);
   if (def.hint) label.title = def.hint;
 
-  const swatch = el("button", "swatch");
+  const swatch = el("div", "swatch");
   const input = el("input", "ctl-value");
   input.type = "text";
-  input.style.flex = "1 1 auto";
   input.style.textAlign = "left";
+  input.style.width = "70px";
+  input.style.minWidth = "70px";
 
   const autoBtn = el("button", "seg-item", "Auto");
-  autoBtn.style.flex = "0 0 34px";
+  autoBtn.style.width = "38px";
+  autoBtn.style.minWidth = "38px";
+  autoBtn.style.flexGrow = "0";
+  autoBtn.style.flexShrink = "0";
+  autoBtn.style.border = "1px solid var(--border-strong)";
+  autoBtn.style.borderRadius = "2px";
   autoBtn.addEventListener("click", () => {
     set("auto");
     onChange("auto", true);
@@ -6235,13 +6354,17 @@ function createColorField(def, value, onChange, getForeground) {
 function createSection(id, label, open) {
   const section = el("div", "section" + (open ? " open" : ""));
   const head = el("div", "section-head");
-  head.appendChild(el("div", "section-caret"));
+  // A text glyph rather than a CSS triangle or a pseudo-element: UXP renders
+  // neither, and a border-triangle came out as a solid square.
+  const caret = el("div", "section-caret", open ? "\u25BC" : "\u25B6");
+  head.appendChild(caret);
   head.appendChild(el("div", null, label));
   const body = el("div", "section-body");
   const api = { el: section, body, onToggle: null };
   head.addEventListener("click", () => {
     const isOpen = section.className.indexOf("open") >= 0;
     section.className = "section" + (isOpen ? "" : " open");
+    caret.textContent = isOpen ? "\u25B6" : "\u25BC";
     // Collapse state is owned by the caller so it survives a rebuild.
     if (api.onToggle) api.onToggle(!isOpen);
   });
