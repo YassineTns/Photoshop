@@ -36,6 +36,19 @@ There is no build step and no dependencies. The plugin is plain CommonJS modules
 loaded directly by UXP, so what you edit is what runs. `npm install` is only
 needed if you want to run the tests.
 
+### Trying it without Photoshop
+
+`playground.html` is the whole rendering engine in one self-contained file.
+Double-click it — any browser, no Photoshop, no Node, no server. Drop in an
+image, and every control, preset and mode behaves exactly as it does in the
+panel, because it *is* the same code: the engine has no dependency on the
+`photoshop` module, which is what makes both this and the Node test suite
+possible.
+
+It is the fastest way to judge the render and to try settings. What it cannot do
+is the Photoshop side — layers, Smart Objects, colour separation into fill
+layers, batch. Rebuild it after changing the engine with `npm run playground`.
+
 ## Use
 
 1. Select a pixel or Smart Object layer.
@@ -88,8 +101,8 @@ Conventions:
 ```
 manifest.json          UXP manifest (v5)
 index.html             panel markup
+main.js                bootstrap (at the root: see the note in the file)
 src/
-  main.js              bootstrap
   engine/              the renderers - pure JS, zero UXP dependencies
     color.js           sRGB/linear, OKLab, HSL, luma
     blur.js            3-pass box blur approximating a Gaussian
@@ -120,8 +133,10 @@ src/
   state/params.js      the parameter schema - single source of truth
   presets/presets.js   the thirteen built-in presets
   util/                PNG encoder, UTF-8 base64
+playground.html        the engine, bundled to run in a browser (generated)
 test/                  engine suite + mocked-host integration suite
 tools/make-icons.js
+tools/build-playground.js
 ```
 
 `src/state/params.js` is the spine: the UI builds itself from it (including

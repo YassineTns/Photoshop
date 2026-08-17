@@ -10,7 +10,8 @@
     "test:plugin": "node test/plugin.test.js",
     "test:visual": "node test/run.js --visual",
     "test:heavy": "node --max-old-space-size=4096 test/run.js --heavy --visual",
-    "icons": "node tools/make-icons.js"
+    "icons": "node tools/make-icons.js",
+    "playground": "node tools/build-playground.js"
   },
   "engines": {
     "node": ">=18"
