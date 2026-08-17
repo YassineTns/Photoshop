@@ -315,6 +315,22 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   const fm = p.screenType === "fm" ? p.fmThreshold : null;
   const cellColor = p.cellColor || null;
 
+  // A viewport lets the caller rasterise a window of a much larger virtual
+  // render - which is what zooming is. The grid is built for the full virtual
+  // size and the window is subtracted here, so a dot lands in exactly the same
+  // place whether you are looking at the whole image or at one corner of it at
+  // 1:1. Cells outside the window are skipped entirely, so a zoomed preview
+  // costs what the window costs rather than what the document costs.
+  const viewX = p.viewX || 0;
+  const viewY = p.viewY || 0;
+  const cull = (grid.cell * Math.max(1, p.radius / 100)) + 2;
+  // Wave: displace each cell along the grid's own Y axis by a smooth function
+  // of its column, so neighbouring cells shift together and the row of dots
+  // becomes one undulating line rather than a jittered row. Deterministic by
+  // construction - it is a function of position, not of a generator.
+  const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
+  const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
+
   const rowStart = chunk.rowStart || 0;
   const rowEnd = chunk.rowEnd === undefined ? grid.rows : Math.min(grid.rows, chunk.rowEnd);
 
@@ -361,16 +377,27 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const col3 = p.palette[pi];
 
       cellCentre(grid, col, row, centre);
+      if (waveAmp) {
+        const d = waveAmp * Math.sin(waveK * col);
+        centre[0] -= grid.sin * d;
+        centre[1] += grid.cos * d;
+      }
+      const px = centre[0] - viewX;
+      const py = centre[1] - viewY;
+      if (px < -cull || py < -cull || px > width + cull || py > height + cull) continue;
+
       let rot = 0;
+      let dx = px;
+      let dy = py;
       if (jit) {
         dotJitter(col, row, jit, grid.cell, jOut);
-        centre[0] += jOut[0];
-        centre[1] += jOut[1];
+        dx += jOut[0];
+        dy += jOut[1];
         r *= jOut[2];
         rot = jOut[3];
         if (r <= 0.008) continue;
       }
-      drawDot(buf, width, height, centre[0], centre[1], r, grid.cell, shape, col3, rot);
+      drawDot(buf, width, height, dx, dy, r, grid.cell, shape, col3, rot);
     }
   }
 
@@ -413,6 +440,10 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
   const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
   const jOut = [0, 0, 1, 0];
   const fm = p.screenType === "fm" ? p.fmThreshold : null;
+  // See rasterize(): the window of a larger virtual render, so zooming shows
+  // the same dots in the same places rather than a re-derived pattern.
+  const viewX = p.viewX || 0;
+  const viewY = p.viewY || 0;
 
   for (let s = first; s < last; s++) {
     const screen = screens[s];
@@ -422,6 +453,9 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
     const colour = screen.color;
     // Misregistration: the whole plate lands a hair off, so it is a constant
     // offset for the screen rather than per-dot noise.
+    const cull = grid.cell * Math.max(1, p.radius / 100) + 2;
+    const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
+    const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
     const mx = screen.offsetX || 0;
     const my = screen.offsetY || 0;
 
@@ -439,18 +473,24 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
         }
         r += gain;
         cellCentre(grid, col, row, centre);
-        centre[0] += mx;
-        centre[1] += my;
+        if (waveAmp) {
+          const d = waveAmp * Math.sin(waveK * col);
+          centre[0] -= grid.sin * d;
+          centre[1] += grid.cos * d;
+        }
+        let px = centre[0] + mx - viewX;
+        let py = centre[1] + my - viewY;
+        if (px < -cull || py < -cull || px > width + cull || py > height + cull) continue;
         let rot = 0;
         if (jit) {
           dotJitter(col, row + s * 31, jit, grid.cell, jOut);
-          centre[0] += jOut[0];
-          centre[1] += jOut[1];
+          px += jOut[0];
+          py += jOut[1];
           r *= jOut[2];
           rot = jOut[3];
           if (r <= 0.008) continue;
         }
-        drawDotMultiply(buf, width, height, centre[0], centre[1], r, grid.cell, shape, colour, rot);
+        drawDotMultiply(buf, width, height, px, py, r, grid.cell, shape, colour, rot);
       }
     }
   }

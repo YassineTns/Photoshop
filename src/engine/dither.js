@@ -599,15 +599,25 @@ function clamp255(v) {
  * @param {number} oh
  * @param {Uint8ClampedArray} [out]
  */
-function indicesToRGBA(indices, iw, ih, palette, ow, oh, out) {
-  const buf = out || new Uint8ClampedArray(ow * oh * 4);
-  const xMap = new Int32Array(ow);
-  for (let x = 0; x < ow; x++) xMap[x] = Math.min(iw - 1, ((x * iw) / ow) | 0);
-  for (let y = 0; y < oh; y++) {
-    const sy = Math.min(ih - 1, ((y * ih) / oh) | 0);
+function indicesToRGBA(indices, iw, ih, palette, ow, oh, out, view) {
+  // `view` renders a window of a larger virtual output, which is what zooming
+  // is: ow/oh stay the *virtual* size so the nearest-neighbour mapping is
+  // unchanged, and only the window is written. Without that, a zoomed view
+  // would resample the grid differently and show different pixels.
+  const vx = view ? view.x : 0;
+  const vy = view ? view.y : 0;
+  const bw = view ? view.width : ow;
+  const bh = view ? view.height : oh;
+  const buf = out || new Uint8ClampedArray(bw * bh * 4);
+  const xMap = new Int32Array(bw);
+  for (let x = 0; x < bw; x++) {
+    xMap[x] = Math.min(iw - 1, Math.max(0, (((x + vx) * iw) / ow) | 0));
+  }
+  for (let y = 0; y < bh; y++) {
+    const sy = Math.min(ih - 1, Math.max(0, (((y + vy) * ih) / oh) | 0));
     const srow = sy * iw;
-    let p = y * ow * 4;
-    for (let x = 0; x < ow; x++, p += 4) {
+    let p = y * bw * 4;
+    for (let x = 0; x < bw; x++, p += 4) {
       const c = palette[indices[srow + xMap[x]]] || palette[0];
       buf[p] = c[0];
       buf[p + 1] = c[1];

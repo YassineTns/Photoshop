@@ -849,15 +849,18 @@ async function main() {
       for (const scaleMode of ["relative", "dpi"]) {
         for (const tonal of [false, true]) {
           for (const screenMode of ["single", "perInk"]) {
-            panel.params = sanitizeAll({
-              mode,
-              scaleMode,
-              screenMode,
-              tonalMapping: tonal,
-              sharpen: 50,
-            });
-            panel.buildSections();
-            Object.keys(panel.controls).forEach((k) => everSeen.add(k));
+            for (const waveAmount of [0, 40]) {
+              panel.params = sanitizeAll({
+                mode,
+                scaleMode,
+                screenMode,
+                tonalMapping: tonal,
+                sharpen: 50,
+                waveAmount,
+              });
+              panel.buildSections();
+              Object.keys(panel.controls).forEach((k) => everSeen.add(k));
+            }
           }
         }
       }
@@ -910,15 +913,36 @@ async function main() {
     ok(await waitFor(() => ps.putPixelsCalls.length === 1), `Apply wrote the render (${ps.putPixelsCalls.length} writes)`);
     ok(!!ps.doc.layers.find((l) => l.kind === "group"), "Apply built the group");
 
-    // Compare view: holding the button swaps in the untouched source.
+    // Compare: a split overlay showing the untouched source beside the render,
+    // rather than swapping one for the other.
     const compareBtn = document.getElementById("btn-compare");
     const rendered = document.getElementById("preview").src;
-    compareBtn.emit("pointerdown", {});
-    const shown = document.getElementById("preview").src;
-    ok(shown.indexOf("data:image/png;base64,") === 0, "compare shows an image");
-    ok(shown !== rendered, "compare swaps in something other than the render");
-    compareBtn.emit("pointerup", {});
-    ok(document.getElementById("preview").src === rendered, "releasing compare restores the render");
+    const split = document.getElementById("split");
+    ok(split.className.indexOf("show") < 0, "the compare overlay starts hidden");
+
+    compareBtn.emit("click", {});
+    ok(split.className.indexOf("show") >= 0, "clicking Compare shows the overlay");
+    const shot = document.getElementById("split-img");
+    ok(shot.src.indexOf("data:image/png;base64,") === 0, "it carries an image of the source");
+    ok(shot.src !== rendered, "which is not the render");
+    ok(
+      document.getElementById("preview").src === rendered,
+      "and the render is still underneath rather than replaced"
+    );
+    ok(
+      document.getElementById("split-clip").style.width === "50%",
+      `the seam starts in the middle (${document.getElementById("split-clip").style.width})`
+    );
+
+    // Drag the handle.
+    const handle = document.getElementById("split-handle");
+    handle.emit("pointerdown", { clientX: 100, pointerId: 1 });
+    handle.emit("pointermove", { clientX: 150, pointerId: 1 });
+    handle.emit("pointerup", { clientX: 150, pointerId: 1 });
+    ok(panel._splitAt > 0 && panel._splitAt <= 1, `dragging moves the seam (${panel._splitAt.toFixed(2)})`);
+
+    compareBtn.emit("click", {});
+    ok(split.className.indexOf("show") < 0, "clicking again hides it");
 
     // SVG export, end to end: button -> engine -> file picker -> write.
     const notice = document.getElementById("notice");
@@ -1043,22 +1067,29 @@ async function main() {
 
     // Size negotiation: a big detached window must make the controls panel
     // rasterise bigger, otherwise the detached view is only magnified.
-    const docked = panel.dockedPreviewSize();
+    const dockedBox = panel.outputBox();
+    const dockedPlan = panel.renderPlan(dockedBox);
     BUS.requestSize({ width: 1200, height: 900 });
-    const bigger = panel.previewSize();
+    const bigBox = panel.outputBox();
+    const bigPlan = panel.renderPlan(bigBox);
     ok(
-      bigger.width > docked.width,
-      `a large detached window raises the render size (${docked.width} -> ${bigger.width})`
+      bigBox.width > dockedBox.width,
+      `a large detached window raises the output box (${dockedBox.width} -> ${bigBox.width})`
     );
     ok(
-      Math.abs(bigger.width / bigger.height - docked.width / docked.height) < 0.01,
-      "and keeps the aspect ratio"
+      bigPlan.width > dockedPlan.width,
+      `and so the frame is rasterised larger (${dockedPlan.width} -> ${bigPlan.width})`
+    );
+    const doc = panel.documentSize();
+    ok(
+      Math.abs(bigPlan.width / bigPlan.height - doc.width / doc.height) < 0.02,
+      "at the document's own aspect ratio"
     );
 
     // A small one must not drag it below what the docked panel needs.
     BUS.requestSize({ width: 80, height: 60 });
     ok(
-      panel.previewSize().width === docked.width,
+      panel.outputBox().width === dockedBox.width,
       "a small detached window never shrinks the docked preview"
     );
 
@@ -1066,7 +1097,7 @@ async function main() {
     preview.dispose();
     ok(BUS.isAttached() === false, "closing the detached panel unregisters it");
     ok(
-      panel.previewSize().width === docked.width,
+      panel.outputBox().width === dockedBox.width,
       "and the controls panel goes back to rendering for itself"
     );
 

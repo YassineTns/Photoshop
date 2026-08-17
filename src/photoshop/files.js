@@ -51,4 +51,38 @@ function safeName(base, ext) {
   return `${cleaned || "halftone"}.${ext}`;
 }
 
-module.exports = { saveText, safeName };
+/**
+ * Ask the user for a folder and write several files into it.
+ *
+ * A plate set is only useful as a set - handing the user one save dialog per
+ * ink for a five-ink separation would be absurd - so this asks once for a
+ * folder and writes every file into it. `getFolder` is the only way UXP grants
+ * write access to a directory; there is no path-based write.
+ *
+ * @param {Array<{name: string, bytes: Uint8Array}>} files
+ * @returns {Promise<{folder: string, written: string[]}|null>} null if cancelled
+ */
+async function saveFilesToFolder(files) {
+  const lfs = fs();
+  if (typeof lfs.getFolder !== "function") {
+    throw new Error(
+      "This Photoshop build does not expose a folder picker, so the plates " +
+        "cannot be written as a set."
+    );
+  }
+  const folder = await lfs.getFolder();
+  if (!folder) return null;
+
+  const binary = uxp().storage.formats.binary;
+  const written = [];
+  for (const f of files) {
+    // eslint-disable-next-line no-await-in-loop
+    const entry = await folder.createFile(f.name, { overwrite: true });
+    // eslint-disable-next-line no-await-in-loop
+    await entry.write(f.bytes, { format: binary });
+    written.push(f.name);
+  }
+  return { folder: folder.name || "the chosen folder", written };
+}
+
+module.exports = { saveText, safeName, saveFilesToFolder };

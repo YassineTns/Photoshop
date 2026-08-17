@@ -39,10 +39,30 @@
             Select a layer, then press <b>Load Layer</b>
           </div>
           <img id="preview" class="preview" />
+          <!--
+            The split compare overlay. The original is drawn on top of the
+            render and clipped to the left of the handle, so both are on screen
+            at once against the same edge - which is what makes a difference
+            visible at all. Hidden until Compare is switched on.
+          -->
+          <div id="split" class="split">
+            <div id="split-clip" class="split-clip">
+              <img id="split-img" class="split-img" />
+            </div>
+            <div id="split-handle" class="split-handle"><div class="split-grip"></div></div>
+          </div>
           <div id="preview-badge" class="preview-badge"></div>
         </div>
         <div id="preview-grip" class="preview-grip" title="Drag to resize the preview, double-click to reset">
           <div class="grip-line"></div>
+        </div>
+
+        <div class="zoombar">
+          <button id="btn-zoom-out" class="zoom-btn" title="Zoom out">−</button>
+          <button id="btn-zoom-in" class="zoom-btn" title="Zoom in">+</button>
+          <div id="zoom-level" class="zoom-level">Fit</div>
+          <button id="btn-zoom-fit" class="zoom-btn zoom-word">Fit</button>
+          <button id="btn-zoom-1" class="zoom-btn zoom-word" title="One output pixel per document pixel">1:1</button>
         </div>
 
         <div id="status" class="status">
@@ -59,9 +79,12 @@
             <button id="btn-update" class="btn">Update</button>
           </div>
           <div class="toolbar toolbar-tail">
-            <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
+            <button id="btn-compare" class="btn btn-small">Compare</button>
             <button id="btn-batch" class="btn btn-small">Batch Apply</button>
             <button id="btn-svg" class="btn btn-small">Export SVG</button>
+          </div>
+          <div class="toolbar toolbar-tail">
+            <button id="btn-plates" class="btn btn-small">Export Plates</button>
           </div>
           <div class="toolbar toolbar-tail">
             <button id="btn-cancel" class="btn btn-small btn-cancel">Stop After This Layer</button>

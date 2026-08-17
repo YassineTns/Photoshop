@@ -418,6 +418,82 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/*
+ * Split compare.
+ *
+ * The original sits on top of the render, clipped to the left of a draggable
+ * handle. Both halves are the same frame at the same scale, so the seam runs
+ * straight through whatever you are looking at - which is the whole point, and
+ * what a hold-to-swap button cannot do: you cannot compare two things you never
+ * see at the same time.
+ *
+ * Clipping is a wrapper with `overflow: hidden` and a width, not `clip-path`,
+ * which UXP does not implement.
+ */
+.split { display: none; }
+
+.split.show {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.split-clip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 50%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+/*
+ * The image inside a clip that is narrower than the box must not be re-centred
+ * by the flex layout, or the two halves would show different parts of the
+ * picture and the comparison would be a lie. It is pinned to the box's own
+ * geometry instead.
+ */
+.split-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  max-height: none;
+}
+
+.split-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 13px;
+  margin-left: -6px;
+  cursor: ew-resize;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.split-grip {
+  width: 1px;
+  height: 100%;
+  background-color: var(--accent);
+}
+
+.split-handle:hover .split-grip,
+.split.dragging .split-grip {
+  width: 3px;
+  background-color: var(--accent-hi);
+}
+
 /* Drag to resize the preview; double-click to go back to automatic. */
 .preview-grip {
   min-height: 11px;
@@ -440,6 +516,75 @@ body {
 
 .preview-grip:hover .grip-line { background-color: var(--text-faint); }
 .preview-grip.dragging .grip-line { background-color: var(--accent-on-dark-text); }
+
+/*
+ * Zoom bar.
+ *
+ * The preview used to be a thumbnail of the whole document, which on a 6000px
+ * image puts a halftone dot at a third of a screen pixel - you could not see
+ * what you were about to commit to. 1:1 is the point of this row.
+ */
+.zoombar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.zoombar > * {
+  margin-right: 5px;
+}
+
+.zoombar > *:last-child { margin-right: 0; }
+
+.zoom-btn {
+  min-height: 20px;
+  min-width: 24px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  padding: 0 6px;
+  background-color: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoom-btn:hover { color: var(--text); border-color: var(--border-strong); }
+
+.zoom-word {
+  min-width: 34px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.zoom-btn.active {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.zoom-level {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Dragging inside the preview pans it, once there is something to pan. */
+.preview-wrap.pannable { cursor: grab; }
+.preview-wrap.panning { cursor: grabbing; }
 
 /* --------------------------------------------------------- controls */
 

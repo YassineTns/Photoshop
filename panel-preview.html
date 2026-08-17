@@ -425,6 +425,82 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/*
+ * Split compare.
+ *
+ * The original sits on top of the render, clipped to the left of a draggable
+ * handle. Both halves are the same frame at the same scale, so the seam runs
+ * straight through whatever you are looking at - which is the whole point, and
+ * what a hold-to-swap button cannot do: you cannot compare two things you never
+ * see at the same time.
+ *
+ * Clipping is a wrapper with `overflow: hidden` and a width, not `clip-path`,
+ * which UXP does not implement.
+ */
+.split { display: none; }
+
+.split.show {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.split-clip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 50%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+/*
+ * The image inside a clip that is narrower than the box must not be re-centred
+ * by the flex layout, or the two halves would show different parts of the
+ * picture and the comparison would be a lie. It is pinned to the box's own
+ * geometry instead.
+ */
+.split-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  max-height: none;
+}
+
+.split-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 13px;
+  margin-left: -6px;
+  cursor: ew-resize;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.split-grip {
+  width: 1px;
+  height: 100%;
+  background-color: var(--accent);
+}
+
+.split-handle:hover .split-grip,
+.split.dragging .split-grip {
+  width: 3px;
+  background-color: var(--accent-hi);
+}
+
 /* Drag to resize the preview; double-click to go back to automatic. */
 .preview-grip {
   min-height: 11px;
@@ -447,6 +523,75 @@ body {
 
 .preview-grip:hover .grip-line { background-color: var(--text-faint); }
 .preview-grip.dragging .grip-line { background-color: var(--accent-on-dark-text); }
+
+/*
+ * Zoom bar.
+ *
+ * The preview used to be a thumbnail of the whole document, which on a 6000px
+ * image puts a halftone dot at a third of a screen pixel - you could not see
+ * what you were about to commit to. 1:1 is the point of this row.
+ */
+.zoombar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.zoombar > * {
+  margin-right: 5px;
+}
+
+.zoombar > *:last-child { margin-right: 0; }
+
+.zoom-btn {
+  min-height: 20px;
+  min-width: 24px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  padding: 0 6px;
+  background-color: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoom-btn:hover { color: var(--text); border-color: var(--border-strong); }
+
+.zoom-word {
+  min-width: 34px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.zoom-btn.active {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.zoom-level {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Dragging inside the preview pans it, once there is something to pan. */
+.preview-wrap.pannable { cursor: grab; }
+.preview-wrap.panning { cursor: grabbing; }
 
 /* --------------------------------------------------------- controls */
 
@@ -1216,10 +1361,30 @@ body {
             Select a layer, then press <b>Load Layer</b>
           </div>
           <img id="preview" class="preview" />
+          <!--
+            The split compare overlay. The original is drawn on top of the
+            render and clipped to the left of the handle, so both are on screen
+            at once against the same edge - which is what makes a difference
+            visible at all. Hidden until Compare is switched on.
+          -->
+          <div id="split" class="split">
+            <div id="split-clip" class="split-clip">
+              <img id="split-img" class="split-img" />
+            </div>
+            <div id="split-handle" class="split-handle"><div class="split-grip"></div></div>
+          </div>
           <div id="preview-badge" class="preview-badge"></div>
         </div>
         <div id="preview-grip" class="preview-grip" title="Drag to resize the preview, double-click to reset">
           <div class="grip-line"></div>
+        </div>
+
+        <div class="zoombar">
+          <button id="btn-zoom-out" class="zoom-btn" title="Zoom out">−</button>
+          <button id="btn-zoom-in" class="zoom-btn" title="Zoom in">+</button>
+          <div id="zoom-level" class="zoom-level">Fit</div>
+          <button id="btn-zoom-fit" class="zoom-btn zoom-word">Fit</button>
+          <button id="btn-zoom-1" class="zoom-btn zoom-word" title="One output pixel per document pixel">1:1</button>
         </div>
 
         <div id="status" class="status">
@@ -1236,9 +1401,12 @@ body {
             <button id="btn-update" class="btn">Update</button>
           </div>
           <div class="toolbar toolbar-tail">
-            <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
+            <button id="btn-compare" class="btn btn-small">Compare</button>
             <button id="btn-batch" class="btn btn-small">Batch Apply</button>
             <button id="btn-svg" class="btn btn-small">Export SVG</button>
+          </div>
+          <div class="toolbar toolbar-tail">
+            <button id="btn-plates" class="btn btn-small">Export Plates</button>
           </div>
           <div class="toolbar toolbar-tail">
             <button id="btn-cancel" class="btn btn-small btn-cancel">Stop After This Layer</button>
@@ -2292,6 +2460,13 @@ window.__define("src/engine/shapes.js", function (module, exports, require) {
 
 const SQRT2 = Math.SQRT2;
 
+/**
+ * How thick the engraved line gets, as a fraction of the cell, before the
+ * crossing bar appears. Too low and everything is cross-hatched; too high and
+ * the shadows block up before the crossing has anything to do.
+ */
+const ENGRAVE_CROSS_START = 0.2;
+
 /** Ellipse semi-axes as multiples of the radius; a*b = 1 keeps the area equal. */
 const ELLIPSE_RATIO = 1.3;
 const ELLIPSE_A = Math.sqrt(ELLIPSE_RATIO);
@@ -2395,6 +2570,43 @@ const SHAPES = {
       return 2 * (2 * arm) * (2 * t) - (2 * t) * (2 * t);
     },
     extent: (r) => r * 1.35 + 1,
+  },
+
+  /*
+   * The banknote engraving mark.
+   *
+   * Line engraving carries tone two ways at once: a continuous line whose
+   * *thickness* follows the tone, and, once that line is thick enough to be
+   * closing up, a second line crossing it. That crossover is what stops the
+   * shadows becoming a solid black bar and is the reason engraved portraits
+   * read as modelled rather than flat.
+   *
+   * Both bars span the whole cell, so neighbouring cells join into unbroken
+   * lines rather than a row of separate dashes - which is the difference
+   * between an engraving and a line screen.
+   */
+  engrave: {
+    id: "engrave",
+    label: "Engrave",
+    sdf: (dx, dy, r, cell) => {
+      const halfW = cell * 0.5 + 0.5;
+      // Equal area to a circle of radius r, as every other shape here.
+      const halfH = (r * r * Math.PI) / (4 * halfW);
+      const ax = Math.abs(dx);
+      const ay = Math.abs(dy);
+      const main = boxSdf(ax, ay, halfW, halfH);
+      // The crossing bar starts only once the main line is thick enough that a
+      // darker tone could not be told from the one before it.
+      const cross = halfH - cell * ENGRAVE_CROSS_START;
+      if (cross <= 0) return main;
+      return Math.min(main, boxSdf(ax, ay, cross, halfW));
+    },
+    area: (r) => Math.PI * r * r,
+    extent: (r, cell) => {
+      const halfW = cell * 0.5 + 0.5;
+      const halfH = (r * r * Math.PI) / (4 * halfW);
+      return Math.max(halfW, halfH) + 1;
+    },
   },
 
   line: {
@@ -3354,6 +3566,22 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   const fm = p.screenType === "fm" ? p.fmThreshold : null;
   const cellColor = p.cellColor || null;
 
+  // A viewport lets the caller rasterise a window of a much larger virtual
+  // render - which is what zooming is. The grid is built for the full virtual
+  // size and the window is subtracted here, so a dot lands in exactly the same
+  // place whether you are looking at the whole image or at one corner of it at
+  // 1:1. Cells outside the window are skipped entirely, so a zoomed preview
+  // costs what the window costs rather than what the document costs.
+  const viewX = p.viewX || 0;
+  const viewY = p.viewY || 0;
+  const cull = (grid.cell * Math.max(1, p.radius / 100)) + 2;
+  // Wave: displace each cell along the grid's own Y axis by a smooth function
+  // of its column, so neighbouring cells shift together and the row of dots
+  // becomes one undulating line rather than a jittered row. Deterministic by
+  // construction - it is a function of position, not of a generator.
+  const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
+  const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
+
   const rowStart = chunk.rowStart || 0;
   const rowEnd = chunk.rowEnd === undefined ? grid.rows : Math.min(grid.rows, chunk.rowEnd);
 
@@ -3400,16 +3628,27 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const col3 = p.palette[pi];
 
       cellCentre(grid, col, row, centre);
+      if (waveAmp) {
+        const d = waveAmp * Math.sin(waveK * col);
+        centre[0] -= grid.sin * d;
+        centre[1] += grid.cos * d;
+      }
+      const px = centre[0] - viewX;
+      const py = centre[1] - viewY;
+      if (px < -cull || py < -cull || px > width + cull || py > height + cull) continue;
+
       let rot = 0;
+      let dx = px;
+      let dy = py;
       if (jit) {
         dotJitter(col, row, jit, grid.cell, jOut);
-        centre[0] += jOut[0];
-        centre[1] += jOut[1];
+        dx += jOut[0];
+        dy += jOut[1];
         r *= jOut[2];
         rot = jOut[3];
         if (r <= 0.008) continue;
       }
-      drawDot(buf, width, height, centre[0], centre[1], r, grid.cell, shape, col3, rot);
+      drawDot(buf, width, height, dx, dy, r, grid.cell, shape, col3, rot);
     }
   }
 
@@ -3452,6 +3691,10 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
   const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
   const jOut = [0, 0, 1, 0];
   const fm = p.screenType === "fm" ? p.fmThreshold : null;
+  // See rasterize(): the window of a larger virtual render, so zooming shows
+  // the same dots in the same places rather than a re-derived pattern.
+  const viewX = p.viewX || 0;
+  const viewY = p.viewY || 0;
 
   for (let s = first; s < last; s++) {
     const screen = screens[s];
@@ -3461,6 +3704,9 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
     const colour = screen.color;
     // Misregistration: the whole plate lands a hair off, so it is a constant
     // offset for the screen rather than per-dot noise.
+    const cull = grid.cell * Math.max(1, p.radius / 100) + 2;
+    const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
+    const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
     const mx = screen.offsetX || 0;
     const my = screen.offsetY || 0;
 
@@ -3478,18 +3724,24 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
         }
         r += gain;
         cellCentre(grid, col, row, centre);
-        centre[0] += mx;
-        centre[1] += my;
+        if (waveAmp) {
+          const d = waveAmp * Math.sin(waveK * col);
+          centre[0] -= grid.sin * d;
+          centre[1] += grid.cos * d;
+        }
+        let px = centre[0] + mx - viewX;
+        let py = centre[1] + my - viewY;
+        if (px < -cull || py < -cull || px > width + cull || py > height + cull) continue;
         let rot = 0;
         if (jit) {
           dotJitter(col, row + s * 31, jit, grid.cell, jOut);
-          centre[0] += jOut[0];
-          centre[1] += jOut[1];
+          px += jOut[0];
+          py += jOut[1];
           r *= jOut[2];
           rot = jOut[3];
           if (r <= 0.008) continue;
         }
-        drawDotMultiply(buf, width, height, centre[0], centre[1], r, grid.cell, shape, colour, rot);
+        drawDotMultiply(buf, width, height, px, py, r, grid.cell, shape, colour, rot);
       }
     }
   }
@@ -4819,15 +5071,25 @@ function clamp255(v) {
  * @param {number} oh
  * @param {Uint8ClampedArray} [out]
  */
-function indicesToRGBA(indices, iw, ih, palette, ow, oh, out) {
-  const buf = out || new Uint8ClampedArray(ow * oh * 4);
-  const xMap = new Int32Array(ow);
-  for (let x = 0; x < ow; x++) xMap[x] = Math.min(iw - 1, ((x * iw) / ow) | 0);
-  for (let y = 0; y < oh; y++) {
-    const sy = Math.min(ih - 1, ((y * ih) / oh) | 0);
+function indicesToRGBA(indices, iw, ih, palette, ow, oh, out, view) {
+  // `view` renders a window of a larger virtual output, which is what zooming
+  // is: ow/oh stay the *virtual* size so the nearest-neighbour mapping is
+  // unchanged, and only the window is written. Without that, a zoomed view
+  // would resample the grid differently and show different pixels.
+  const vx = view ? view.x : 0;
+  const vy = view ? view.y : 0;
+  const bw = view ? view.width : ow;
+  const bh = view ? view.height : oh;
+  const buf = out || new Uint8ClampedArray(bw * bh * 4);
+  const xMap = new Int32Array(bw);
+  for (let x = 0; x < bw; x++) {
+    xMap[x] = Math.min(iw - 1, Math.max(0, (((x + vx) * iw) / ow) | 0));
+  }
+  for (let y = 0; y < bh; y++) {
+    const sy = Math.min(ih - 1, Math.max(0, (((y + vy) * ih) / oh) | 0));
     const srow = sy * iw;
-    let p = y * ow * 4;
-    for (let x = 0; x < ow; x++, p += 4) {
+    let p = y * bw * 4;
+    for (let x = 0; x < bw; x++, p += 4) {
       const c = palette[indices[srow + xMap[x]]] || palette[0];
       buf[p] = c[0];
       buf[p + 1] = c[1];
@@ -4951,6 +5213,19 @@ function shapeMarkup(shapeId, cx, cy, r, cell, colour, rot) {
         `</g>`
       );
     }
+    case "engrave": {
+      const halfW = cell * 0.5;
+      const halfH = (r * r * Math.PI) / (4 * halfW);
+      const cross = halfH - cell * 0.2;
+      const main =
+        `<rect x="${fmt(cx - halfW)}" y="${fmt(cy - halfH)}" width="${fmt(halfW * 2)}" height="${fmt(halfH * 2)}"/>`;
+      if (cross <= 0) return `<g${t}${fill}>${main}</g>`;
+      return (
+        `<g${t}${fill}>${main}` +
+        `<rect x="${fmt(cx - cross)}" y="${fmt(cy - halfW)}" width="${fmt(cross * 2)}" height="${fmt(halfW * 2)}"/>` +
+        `</g>`
+      );
+    }
     case "line": {
       const halfW = cell * 0.5;
       const halfH = (r * r * Math.PI) / (4 * halfW);
@@ -4981,6 +5256,8 @@ function halftoneSVG(cells, p, width, height) {
   const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
   const jOut = [0, 0, 1, 0];
   const fm = p.screenType === "fm" ? p.fmThreshold : null;
+  const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
+  const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
 
   // Grouped by colour: far smaller output, and it gives the printer one object
   // per ink to select.
@@ -5014,6 +5291,11 @@ function halftoneSVG(cells, p, width, height) {
       const hex = rgbToHex(col3[0], col3[1], col3[2]);
 
       cellCentre(grid, col, row, centre);
+      if (waveAmp) {
+        const d = waveAmp * Math.sin(waveK * col);
+        centre[0] -= grid.sin * d;
+        centre[1] += grid.cos * d;
+      }
       let rot = 0;
       let cx = centre[0];
       let cy = centre[1];
@@ -5061,6 +5343,8 @@ function screensSVG(screens, p, width, height) {
     const hex = rgbToHex(screen.color[0], screen.color[1], screen.color[2]);
     const mx = screen.offsetX || 0;
     const my = screen.offsetY || 0;
+    const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
+    const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
     const list = [];
 
     for (let row = 0; row < grid.rows; row++) {
@@ -5077,6 +5361,11 @@ function screensSVG(screens, p, width, height) {
         }
         r += gain;
         cellCentre(grid, col, row, centre);
+        if (waveAmp) {
+          const d = waveAmp * Math.sin(waveK * col);
+          centre[0] -= grid.sin * d;
+          centre[1] += grid.cos * d;
+        }
         let cx = centre[0] + mx;
         let cy = centre[1] + my;
         let rot = 0;
@@ -5371,9 +5660,48 @@ const PARAM_DEFS = [
     section: "halftone",
     type: "chips",
     def: "circle",
-    options: ["circle", "ellipse", "square", "diamond", "cross", "line"],
+    options: ["circle", "ellipse", "square", "diamond", "cross", "engrave", "line"],
+    optionLabels: {
+      circle: "Circle",
+      ellipse: "Ellipse",
+      square: "Square",
+      diamond: "Diamond",
+      cross: "Cross",
+      engrave: "Engrave",
+      line: "Line",
+    },
     modes: ["halftone"],
     hint: "Ellipse joins its neighbours gradually, avoiding the hard 50% tone jump a circle makes.",
+  },
+  {
+    key: "waveAmount",
+    label: "Wave",
+    section: "halftone",
+    modes: ["halftone"],
+    type: "slider",
+    min: 0,
+    max: 200,
+    step: 1,
+    def: 0,
+    unit: "%",
+    hint:
+      "Undulate each row of dots, as a percentage of the cell. Neighbouring " +
+      "cells move together, so a line screen becomes one continuous wavy line " +
+      "- the engraved banknote look. Works with any shape.",
+  },
+  {
+    key: "waveLength",
+    label: "Wavelength",
+    section: "halftone",
+    modes: ["halftone"],
+    type: "slider",
+    min: 2,
+    max: 64,
+    step: 1,
+    def: 12,
+    unit: " cells",
+    showIf: (p) => p.waveAmount > 0,
+    hint: "How many cells one wave takes.",
   },
   {
     key: "dotGain",
@@ -6550,6 +6878,8 @@ class HalftoneEngine {
         seed: params.seed,
       },
       dotGain: params.dotGain,
+      waveAmount: params.waveAmount,
+      waveLength: params.waveLength,
       gradeBias: params.gradeBias,
       radiusCurve: params.radiusCurve,
       invert: params.invert,
@@ -6580,21 +6910,40 @@ class HalftoneEngine {
    *        `maxDitherGrid` caps the dither grid so previews stay fast; when the
    *        requested resolution exceeds it, the result is flagged `exact: false`.
    */
+  /**
+   * @param {object} params
+   * @param {object} [opts]
+   * @param {number} [opts.width]  the *virtual* render width
+   * @param {number} [opts.height] the *virtual* render height
+   * @param {{x:number,y:number,width:number,height:number}} [opts.view]
+   *        a window of that virtual render to actually produce. This is how
+   *        zooming works: the grid is still built for the full virtual size, so
+   *        a dot sits in exactly the same place whether you are looking at the
+   *        whole image or at one corner of it at 1:1 - it is the same render,
+   *        cropped, not a different one derived at a different scale. Cells
+   *        outside the window are skipped, so the cost is the window's rather
+   *        than the document's.
+   */
   render(params, opts = {}) {
     if (!this.source) throw new Error("HalftoneEngine: no source set");
     const width = opts.width || this.source.width;
     const height = opts.height || this.source.height;
+    const view = opts.view || null;
+    const outW = view ? view.width : width;
+    const outH = view ? view.height : height;
 
     if (params.mode === "dither") {
       const d = this._ensureDither(params, opts.maxDitherGrid);
       const palette = this._outputPalette(params);
       const t0 = now();
-      const data = indicesToRGBA(d.indices, d.width, d.height, palette, width, height, opts.out);
+      const data = indicesToRGBA(
+        d.indices, d.width, d.height, palette, width, height, opts.out, view
+      );
       this.stats.rasterMs = now() - t0;
       return {
         data,
-        width,
-        height,
+        width: outW,
+        height: outH,
         palette: paletteToHex(palette),
         ink: paletteToHex(palette),
         background: palette[0] || [0, 0, 0],
@@ -6605,18 +6954,22 @@ class HalftoneEngine {
     if (params.screenMode === "perInk") {
       const { screens, rp: srp } = this._ensureScreens(params);
       const t0 = now();
+      if (view) {
+        srp.viewX = view.x;
+        srp.viewY = view.y;
+      }
       const data = rasterizeScreens(
         this._scaleScreens(screens, width, height, params),
         srp,
-        width,
-        height,
+        outW,
+        outH,
         opts.out
       );
       this.stats.rasterMs = now() - t0;
       return {
         data,
-        width,
-        height,
+        width: outW,
+        height: outH,
         palette: paletteToHex(srp.fullPalette),
         ink: paletteToHex(srp.palette),
         background: srp.background,
@@ -6630,15 +6983,19 @@ class HalftoneEngine {
     rp.cellColor = this._ensureCellColors(params, cells, rp);
     const grid = scaleGrid(cells.grid, width, height);
     const outCells = { lum: cells.lum, rgb: cells.rgb, count: cells.count, grid };
+    if (view) {
+      rp.viewX = view.x;
+      rp.viewY = view.y;
+    }
 
     const t0 = now();
-    const data = rasterize(outCells, rp, width, height, opts.out);
+    const data = rasterize(outCells, rp, outW, outH, opts.out);
     this.stats.rasterMs = now() - t0;
 
     return {
       data,
-      width,
-      height,
+      width: outW,
+      height: outH,
       palette: paletteToHex(rp.fullPalette),
       ink: paletteToHex(rp.palette),
       background: rp.background,
@@ -7222,6 +7579,39 @@ const BUILTIN_PRESETS = [
       highlightSplit: 0.68,
       contrast: 1.2,
       saturation: 1.15,
+      invert: false,
+    },
+  },
+  {
+    id: "engraved-note",
+    name: "Engraved Note",
+    /*
+     * The banknote look: one dark ink on a warm paper, a fine wavy line screen
+     * that cross-hatches as it darkens. The wave is what separates an engraving
+     * from a line screen - it is why the lines appear to follow the form rather
+     * than to be ruled across it. Angled off the horizontal so the undulation
+     * reads as engraving rather than as a printing fault, and graded hard so
+     * the crossover lands in the mid-tones where the modelling is.
+     */
+    params: {
+      mode: "halftone",
+      shape: "engrave",
+      density: 150,
+      angle: 8,
+      radius: 108,
+      radiusCurve: 0.25,
+      waveAmount: 55,
+      waveLength: 9,
+      palette: ["#EFE7D2", "#1B3A2F"],
+      paletteLocked: true,
+      colorCount: 2,
+      background: "#EFE7D2",
+      contrast: 1.25,
+      gamma: 0.95,
+      gradeBias: 0.15,
+      sharpen: 60,
+      sharpenRadius: 1.2,
+      saturation: 0,
       invert: false,
     },
   },
@@ -11035,7 +11425,41 @@ function safeName(base, ext) {
   return `${cleaned || "halftone"}.${ext}`;
 }
 
-module.exports = { saveText, safeName };
+/**
+ * Ask the user for a folder and write several files into it.
+ *
+ * A plate set is only useful as a set - handing the user one save dialog per
+ * ink for a five-ink separation would be absurd - so this asks once for a
+ * folder and writes every file into it. `getFolder` is the only way UXP grants
+ * write access to a directory; there is no path-based write.
+ *
+ * @param {Array<{name: string, bytes: Uint8Array}>} files
+ * @returns {Promise<{folder: string, written: string[]}|null>} null if cancelled
+ */
+async function saveFilesToFolder(files) {
+  const lfs = fs();
+  if (typeof lfs.getFolder !== "function") {
+    throw new Error(
+      "This Photoshop build does not expose a folder picker, so the plates " +
+        "cannot be written as a set."
+    );
+  }
+  const folder = await lfs.getFolder();
+  if (!folder) return null;
+
+  const binary = uxp().storage.formats.binary;
+  const written = [];
+  for (const f of files) {
+    // eslint-disable-next-line no-await-in-loop
+    const entry = await folder.createFile(f.name, { overwrite: true });
+    // eslint-disable-next-line no-await-in-loop
+    await entry.write(f.bytes, { format: binary });
+    written.push(f.name);
+  }
+  return { folder: folder.name || "the chosen folder", written };
+}
+
+module.exports = { saveText, safeName, saveFilesToFolder };
 
 });
 
@@ -11070,7 +11494,7 @@ const {
 const { ALGORITHMS, ALGORITHM_FAMILIES } = require("../engine/dither.js");
 const { BUILTIN_PRESETS, presetToParams, makeUserPreset } = require("../presets/presets.js");
 const { HalftoneEngine } = require("../engine/pipeline.js");
-const { toDataURL } = require("../util/png.js");
+const { toDataURL, encodePNG } = require("../util/png.js");
 const { downscaleBox: downscale } = require("../engine/resample.js");
 const HOST = require("../photoshop/host.js");
 const RENDER = require("../photoshop/render.js");
@@ -11107,6 +11531,9 @@ const DEBOUNCE_MS = 90;
 const DRAFT_SCALE = 0.6;
 /** How long after the last draft frame to redraw at full size regardless. */
 const DRAFT_UPGRADE_MS = 260;
+/** Zoom multiplier per step, and the ceiling. 8x is well past useful. */
+const ZOOM_STEP = 1.6;
+const ZOOM_MAX = 8;
 
 class Panel {
   constructor(root) {
@@ -11134,6 +11561,17 @@ class Panel {
      * halftone, and a preset that resized your panel would be obnoxious.
      */
     this.ui = { previewHeight: null };
+    /**
+     * The preview viewport.
+     *
+     * `zoom` is output pixels per *document* pixel, so 1 means one preview pixel
+     * per pixel the render will actually produce - which is the only scale at
+     * which dot quality can be judged. null means fit-to-box. `cx`/`cy` are the
+     * point of the document held at the centre of the box, in 0..1.
+     */
+    this.view = { zoom: null, cx: 0.5, cy: 0.5 };
+    this._comparing = false;
+    this._splitAt = 0.5;
   }
 
   /* ---------------------------------------------------------------- */
@@ -11171,6 +11609,7 @@ class Panel {
 
     this.showCancel(false);
     this.bindPreviewGrip();
+    this.bindZoom();
     this.applyPreviewHeight();
     // A detached preview panel resizing means we should re-rasterise for it.
     BUS.onSizeRequest(() => this.schedulePreview());
@@ -11273,7 +11712,8 @@ class Panel {
       key === "mode" ||
       key === "scaleMode" ||
       key === "tonalMapping" ||
-      key === "sharpen"
+      key === "sharpen" ||
+      key === "waveAmount"
     );
   }
 
@@ -11346,6 +11786,7 @@ class Panel {
     this.$("btn-reset").addEventListener("click", () => this.resetAll());
     this.$("btn-batch").addEventListener("click", () => this.batchApply());
     this.$("btn-svg").addEventListener("click", () => this.exportSVG());
+    this.$("btn-plates").addEventListener("click", () => this.exportPlates());
     this.$("btn-cancel").addEventListener("click", () => this.requestCancel());
     this.bindCompare();
     this.$("btn-save-preset").addEventListener("click", () => this.savePreset());
@@ -11522,22 +11963,6 @@ class Panel {
     });
   }
 
-  /** The size the docked preview box can show, after the grip and the cap. */
-  dockedPreviewSize() {
-    const src = this.engine.source;
-    const wrap = this.$("preview-wrap");
-    const availW = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
-    const availH = this.previewBoxHeight();
-
-    // Fit inside both, never upscale: an image smaller than the panel is shown
-    // at its own size rather than blown up into a blur.
-    const scale = Math.min(1, availW / src.width, availH / src.height);
-    return {
-      width: Math.max(1, Math.round(src.width * scale)),
-      height: Math.max(1, Math.round(src.height * scale)),
-    };
-  }
-
   /** How tall the docked preview box is: the user's drag, or the default cap. */
   previewBoxHeight() {
     if (this.ui.previewHeight) return this.ui.previewHeight;
@@ -11549,16 +11974,209 @@ class Panel {
     );
   }
 
+  /* ------------------------------------------------------- viewport */
+
+  /** The document's own pixel dimensions, which is what 1:1 is relative to. */
+  documentSize() {
+    const b = this.sourceInfo && this.sourceInfo.bounds;
+    if (b) {
+      return {
+        width: Math.max(1, Math.round(b.right - b.left)),
+        height: Math.max(1, Math.round(b.bottom - b.top)),
+      };
+    }
+    const src = this.engine.source;
+    return { width: src.width, height: src.height };
+  }
+
+  /** The zoom that makes the whole document fit the preview box. */
+  fitZoom(box) {
+    const doc = this.documentSize();
+    return Math.min(box.width / doc.width, box.height / doc.height);
+  }
+
   /**
-   * The size to actually rasterise at.
+   * Turn the viewport state into engine arguments.
    *
-   * Normally that is the docked box. But when the detached preview panel is
-   * open it asks for its own, larger size, and we render for whichever window
-   * is bigger - otherwise the detached view would only be *bigger*, showing a
-   * frame rasterised for a 360px panel and scaled up, rather than sharper.
-   * The docked <img> caps itself with max-width/max-height, so it simply
-   * displays the larger frame smaller.
+   * The virtual render is always the whole document at the current zoom; what
+   * changes is how much of it we ask for. That is what makes zooming show the
+   * same picture rather than a re-derived one: the grid is built for the virtual
+   * size either way, so a dot does not move when you zoom into it.
+   *
+   * @returns {{width:number, height:number, view:object|null}}
    */
+  renderPlan(box) {
+    const doc = this.documentSize();
+    const fit = this.fitZoom(box);
+    const zoom = this.view.zoom === null ? fit : this.view.zoom;
+
+    const vw = Math.max(1, Math.round(doc.width * zoom));
+    const vh = Math.max(1, Math.round(doc.height * zoom));
+
+    // Smaller than the box in a dimension: nothing to pan there, so render the
+    // whole thing rather than a window with dead space in it.
+    if (vw <= box.width && vh <= box.height) {
+      return { width: vw, height: vh, view: null };
+    }
+
+    const outW = Math.min(box.width, vw);
+    const outH = Math.min(box.height, vh);
+    const x = clampInt(Math.round(this.view.cx * vw - outW / 2), 0, Math.max(0, vw - outW));
+    const y = clampInt(Math.round(this.view.cy * vh - outH / 2), 0, Math.max(0, vh - outH));
+    return { width: vw, height: vh, view: { x, y, width: outW, height: outH } };
+  }
+
+  /* ------------------------------------------------------------ zoom */
+
+  bindZoom() {
+    const wrap = this.$("preview-wrap");
+    this.$("btn-zoom-in").addEventListener("click", () => this.zoomBy(ZOOM_STEP));
+    this.$("btn-zoom-out").addEventListener("click", () => this.zoomBy(1 / ZOOM_STEP));
+    this.$("btn-zoom-fit").addEventListener("click", () => this.setZoom(null));
+    this.$("btn-zoom-1").addEventListener("click", () => this.setZoom(1));
+    if (!wrap) return;
+
+    // The wheel is the natural gesture and costs nothing if UXP does not deliver
+    // the event: the buttons do the same job.
+    wrap.addEventListener("wheel", (e) => {
+      if (!this.engine.hasSource()) return;
+      const dir = (e.deltaY || 0) > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
+      this.zoomBy(dir, this.pointerInView(e));
+      if (e.preventDefault) e.preventDefault();
+    });
+
+    let panning = false;
+    let start = null;
+    wrap.addEventListener("pointerdown", (e) => {
+      if (!this.canPan()) return;
+      panning = true;
+      const box = this.previewBox();
+      start = { x: e.clientX, y: e.clientY, cx: this.view.cx, cy: this.view.cy, box };
+      wrap.className = "preview-wrap panning";
+      try {
+        wrap.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* capture is an optimisation, not a requirement */
+      }
+      if (e.preventDefault) e.preventDefault();
+    });
+
+    wrap.addEventListener("pointermove", (e) => {
+      if (!panning) return;
+      const plan = this.renderPlan(start.box);
+      // Dragging moves the image with the pointer, so the centre moves against
+      // it - hence the negative sign. In fractions of the virtual render.
+      this.view.cx = clamp01(start.cx - (e.clientX - start.x) / plan.width);
+      this.view.cy = clamp01(start.cy - (e.clientY - start.y) / plan.height);
+      this.drawPreview({ draft: true });
+    });
+
+    const endPan = (e) => {
+      if (!panning) return;
+      panning = false;
+      this.updateZoomBar();
+      try {
+        wrap.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        /* ignore */
+      }
+      this.drawPreview();
+    };
+    wrap.addEventListener("pointerup", endPan);
+    wrap.addEventListener("pointercancel", endPan);
+
+    // Double-click toggles between fit and 1:1, which is the gesture people try.
+    wrap.addEventListener("dblclick", () => {
+      this.setZoom(this.view.zoom === null ? 1 : null);
+    });
+  }
+
+  /** Where the pointer is inside the preview box, in 0..1, or null. */
+  pointerInView(e) {
+    const wrap = this.$("preview-wrap");
+    if (!wrap || !wrap.getBoundingClientRect) return null;
+    const r = wrap.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return { x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) };
+  }
+
+  canPan() {
+    if (!this.engine.hasSource()) return false;
+    const plan = this.renderPlan(this.previewBox());
+    return !!plan.view;
+  }
+
+  /** The box the preview is drawn into, in panel pixels. */
+  previewBox() {
+    const wrap = this.$("preview-wrap");
+    const width = Math.max(120, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
+    return { width, height: this.previewBoxHeight() };
+  }
+
+  /**
+   * @param {number} factor
+   * @param {{x:number,y:number}} [anchor] point in the box to keep still
+   */
+  zoomBy(factor, anchor) {
+    if (!this.engine.hasSource()) return;
+    const box = this.previewBox();
+    const from = this.view.zoom === null ? this.fitZoom(box) : this.view.zoom;
+    const to = clampNum(from * factor, this.fitZoom(box) * 0.5, ZOOM_MAX);
+
+    if (anchor) {
+      // Keep the point under the cursor where it is: convert it to a document
+      // fraction at the old zoom, then re-centre so it lands in the same place.
+      const before = this.renderPlan(box);
+      const px = (before.view ? before.view.x : 0) + anchor.x * (before.view ? before.view.width : before.width);
+      const py = (before.view ? before.view.y : 0) + anchor.y * (before.view ? before.view.height : before.height);
+      const fx = px / before.width;
+      const fy = py / before.height;
+      this.view.zoom = to;
+      const after = this.renderPlan(box);
+      if (after.view) {
+        this.view.cx = clamp01(fx + (0.5 - anchor.x) * (after.view.width / after.width));
+        this.view.cy = clamp01(fy + (0.5 - anchor.y) * (after.view.height / after.height));
+      }
+    } else {
+      this.view.zoom = to;
+    }
+    this.afterZoom();
+  }
+
+  setZoom(zoom) {
+    if (!this.engine.hasSource() && zoom !== null) return;
+    this.view.zoom = zoom;
+    if (zoom === null) {
+      this.view.cx = 0.5;
+      this.view.cy = 0.5;
+    }
+    this.afterZoom();
+  }
+
+  afterZoom() {
+    this.updateZoomBar();
+    this.drawPreview();
+  }
+
+  updateZoomBar() {
+    const label = this.$("zoom-level");
+    const wrap = this.$("preview-wrap");
+    if (label) {
+      if (!this.engine.hasSource()) label.textContent = "—";
+      else if (this.view.zoom === null) label.textContent = `Fit · ${Math.round(this.fitZoom(this.previewBox()) * 100)}%`;
+      else label.textContent = `${Math.round(this.view.zoom * 100)}%`;
+    }
+    const fitBtn = this.$("btn-zoom-fit");
+    const oneBtn = this.$("btn-zoom-1");
+    if (fitBtn) fitBtn.className = "zoom-btn zoom-word" + (this.view.zoom === null ? " active" : "");
+    if (oneBtn) {
+      oneBtn.className = "zoom-btn zoom-word" + (this.view.zoom === 1 ? " active" : "");
+    }
+    if (wrap && wrap.className.indexOf("panning") < 0) {
+      wrap.className = "preview-wrap" + (this.canPan() ? " pannable" : "");
+    }
+  }
+
   /**
    * Redraw at full size once the drag goes quiet, in case no commit ever comes.
    */
@@ -11570,15 +12188,40 @@ class Panel {
     }, DRAFT_UPGRADE_MS);
   }
 
-  previewSize() {
-    const docked = this.dockedPreviewSize();
+  /**
+   * The box a frame has to land in.
+   *
+   * Normally the docked preview. But when the detached preview panel is open it
+   * asks for its own, larger size, and we render for whichever window is bigger
+   * - otherwise the detached view would only be *bigger*, showing a frame
+   * rasterised for a 360px panel and scaled up, rather than sharper. The docked
+   * <img> caps itself with max-width/max-height, so it displays the larger
+   * frame smaller.
+   */
+  outputBox() {
+    const box = this.previewBox();
     const want = BUS.requestedSize();
-    if (!want) return docked;
+    if (!want) return box;
+    if (want.width <= box.width && want.height <= box.height) return box;
+    return {
+      width: Math.max(box.width, want.width),
+      height: Math.max(box.height, want.height),
+    };
+  }
+
+  /**
+   * The source shown at fit, for the compare view. Deliberately not the
+   * viewport: Compare answers "what did this look like before", and answering
+   * it at a different zoom than the render would make it useless.
+   */
+  previewSize() {
     const src = this.engine.source;
-    const s = Math.min(1, want.width / src.width, want.height / src.height);
-    const w = Math.max(1, Math.round(src.width * s));
-    if (w <= docked.width) return docked;
-    return { width: w, height: Math.max(1, Math.round(src.height * s)) };
+    const box = this.outputBox();
+    const scale = Math.min(1, box.width / src.width, box.height / src.height);
+    return {
+      width: Math.max(1, Math.round(src.width * scale)),
+      height: Math.max(1, Math.round(src.height * scale)),
+    };
   }
 
   drawPreview(opts = {}) {
@@ -11590,18 +12233,22 @@ class Panel {
     if (!img) return;
     const t0 = Date.now();
     try {
-      const full = this.previewSize();
-      const size = opts.draft
+      const box = this.outputBox();
+      const draftBox = opts.draft
         ? {
-            width: Math.max(32, Math.round(full.width * DRAFT_SCALE)),
-            height: Math.max(32, Math.round(full.height * DRAFT_SCALE)),
+            width: Math.max(32, Math.round(box.width * DRAFT_SCALE)),
+            height: Math.max(32, Math.round(box.height * DRAFT_SCALE)),
           }
-        : full;
+        : box;
       if (opts.draft) this.armFullRedraw();
-      const out = this.engine.render(
-        this.params,
-        Object.assign({ maxDitherGrid: PREVIEW_DITHER_GRID }, size)
-      );
+
+      const plan = this.renderPlan(draftBox);
+      const out = this.engine.render(this.params, {
+        maxDitherGrid: PREVIEW_DITHER_GRID,
+        width: plan.width,
+        height: plan.height,
+        view: plan.view,
+      });
       const url = toDataURL(out.data, out.width, out.height);
       img.src = url;
       img.className = "preview visible";
@@ -11609,8 +12256,10 @@ class Panel {
       this.lastFrameMs = Date.now() - t0;
       const unit = this.params.mode === "dither" ? "px" : "cells";
       const screens = out.angles ? ` · ${out.angles.length} screens @ ${out.angles.join("/")}°` : "";
+      const zoomTag = this.view.zoom === null ? "" : ` · ${Math.round(this.view.zoom * 100)}%`;
       this._lastBadge =
         `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
+        zoomTag +
         (out.exact ? "" : " · approx") +
         // Say so rather than quietly showing a coarser picture than the render.
         (opts.draft ? " · draft" : "");
@@ -11618,6 +12267,7 @@ class Panel {
       // Hand the same frame to the detached panel, if one is open. One object
       // and one callback: the data URL was built for the docked <img> anyway.
       BUS.publish({ url, width: out.width, height: out.height, badge: this._lastBadge });
+      if (this._comparing) this.layoutSplit();
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
       this.notice(`Preview failed: ${e.message}`, "error");
@@ -11633,7 +12283,11 @@ class Panel {
       this.engine.sourceLayerId = src.layerId;
       this.engine.docPPI = src.docPPI || 72;
       this.sourceInfo = src;
+      // A new layer means a new document rectangle, so any zoom into the old
+      // one is meaningless.
+      this.view = { zoom: null, cx: 0.5, cy: 0.5 };
       if (!this.params.paletteLocked) this.syncPaletteFromImage();
+      this.updateZoomBar();
       this.drawPreview();
 
       // If this layer is an existing render, bring its settings back.
@@ -11869,45 +12523,200 @@ class Panel {
     });
   }
 
+  /* ---------------------------------------------------- plate export */
+
+  /**
+   * One image file per ink, for a printer.
+   *
+   * This is what a screen printer or a risograph shop asks for: not the
+   * composite, but each ink on its own, black-on-white, at the document's real
+   * size, so it can be burned to a screen or sent to a drum. The separated
+   * output already computes exactly these coverage masks - this writes them out
+   * instead of turning them into fill layers.
+   *
+   * Black on white rather than the ink's own colour, because that is what an
+   * imagesetter expects: the plate says *where* the ink goes, and the press
+   * decides what colour it is. The paper plate is skipped for the same reason -
+   * paper is not an ink.
+   */
+  async exportPlates() {
+    if (!this.engine.hasSource()) {
+      this.notice("Load a layer first — there are no plates to write yet.", "warn");
+      return;
+    }
+    if (this.params.mode === "dither") {
+      this.notice(
+        "Plate export covers halftone mode only. A dither picks one colour per " +
+          "pixel, so its separations are not printable screens.",
+        "warn"
+      );
+      return;
+    }
+
+    await this.guard("Building plates…", async () => {
+      const doc = this.documentSize();
+      const sep = this.engine.renderSeparated(this.params, doc);
+      const base = (this.sourceInfo && this.sourceInfo.layerName) || "halftone";
+
+      const files = [];
+      for (let i = 0; i < sep.masks.length; i++) {
+        if (i === sep.paperIndex) continue; // paper is not an ink
+        const hex = sep.palette[i];
+        const rgba = maskToPlate(sep.masks[i], doc.width, doc.height);
+        files.push({
+          name: FILES.safeName(`${base} plate ${files.length + 1} ${hex.replace("#", "")}`, "png"),
+          bytes: encodePNG(rgba, doc.width, doc.height),
+          hex,
+        });
+      }
+
+      if (!files.length) {
+        this.notice("This palette has no ink beyond the paper, so there is nothing to plate.", "warn");
+        return;
+      }
+
+      const res = await FILES.saveFilesToFolder(files);
+      if (!res) {
+        this.notice("Plate export cancelled.");
+        return;
+      }
+      this.notice(
+        `Wrote ${res.written.length} plates to ${res.folder} at ${doc.width}x${doc.height}: ` +
+          files.map((f) => f.hex).join(" ") +
+          ". Each is that ink alone, black on white."
+      );
+    });
+  }
+
   /* --------------------------------------------------------- compare */
 
   /**
-   * Hold the Compare button to swap the preview for the untouched source.
-   * Cheaper and less error-prone than a toggle: you cannot leave it stuck on.
+   * Compare: the untouched source over the render, split by a draggable handle.
+   *
+   * A hold-to-swap button could only ever show you one of the two, which is not
+   * comparing - you are left doing it from memory. Here both halves are the same
+   * frame at the same zoom with a seam through the middle, so a difference in
+   * dot size or colour shows up right at the edge where the eye is good at it.
    */
   bindCompare() {
     const btn = this.$("btn-compare");
-    if (!btn) return;
-    const show = () => {
-      if (!this.engine.hasSource()) return;
-      const img = this.$("preview");
-      this._renderedSrc = img.src;
-      img.src = this.sourceDataURL();
-      this.badge("original");
-      BUS.publish({ url: img.src, width: 0, height: 0, badge: "original" });
+    if (btn) btn.addEventListener("click", () => this.toggleCompare());
+
+    const handle = this.$("split-handle");
+    if (!handle) return;
+    let dragging = false;
+
+    handle.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      this.$("split").className = "split show dragging";
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* capture is an optimisation, not a requirement */
+      }
+      if (e.preventDefault) e.preventDefault();
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const wrap = this.$("preview-wrap");
+      const r = wrap.getBoundingClientRect();
+      if (!r.width) return;
+      this._splitAt = clamp01((e.clientX - r.left) / r.width);
+      this.layoutSplit();
+    });
+    const end = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      this.$("split").className = "split show";
+      try {
+        handle.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        /* ignore */
+      }
     };
-    const hide = () => {
-      if (!this._renderedSrc) return;
-      // Restore rather than re-render: nothing can have changed while the
-      // button was held, and a re-render would race a pending preview tick.
-      this.$("preview").src = this._renderedSrc;
-      BUS.publish({ url: this._renderedSrc, width: 0, height: 0, badge: this._lastBadge });
-      this._renderedSrc = null;
-      this.badge(this._lastBadge);
-    };
-    btn.addEventListener("pointerdown", show);
-    btn.addEventListener("pointerup", hide);
-    btn.addEventListener("pointercancel", hide);
-    btn.addEventListener("pointerleave", hide);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
   }
 
-  /** The source, downscaled to preview size and cached. */
+  toggleCompare() {
+    if (!this.engine.hasSource()) {
+      this.notice("Load a layer first — there is nothing to compare against.", "warn");
+      return;
+    }
+    this._comparing = !this._comparing;
+    const btn = this.$("btn-compare");
+    if (btn) btn.className = "btn btn-small" + (this._comparing ? " btn-primary" : "");
+    if (this._comparing && this._splitAt === undefined) this._splitAt = 0.5;
+    this.layoutSplit();
+  }
+
+  /**
+   * Position the overlay.
+   *
+   * The source is drawn at exactly the geometry the render occupies inside the
+   * box - same size, same offset - so the seam lines up with the picture instead
+   * of with the box. Letterboxing makes those two different.
+   */
+  layoutSplit() {
+    const split = this.$("split");
+    if (!split) return;
+    if (!this._comparing || !this.engine.hasSource()) {
+      split.className = "split";
+      return;
+    }
+
+    const img = this.$("preview");
+    const wrap = this.$("preview-wrap");
+    const clip = this.$("split-clip");
+    const shot = this.$("split-img");
+    const handle = this.$("split-handle");
+
+    split.className = "split show";
+    shot.src = this.sourceDataURL();
+
+    // Where the rendered frame actually sits inside the box.
+    const box = wrap && wrap.getBoundingClientRect ? wrap.getBoundingClientRect() : null;
+    const frame = img && img.getBoundingClientRect ? img.getBoundingClientRect() : null;
+    if (box && frame && box.width && frame.width) {
+      shot.style.left = Math.round(frame.left - box.left) + "px";
+      shot.style.top = Math.round(frame.top - box.top) + "px";
+      shot.style.width = Math.round(frame.width) + "px";
+      shot.style.height = Math.round(frame.height) + "px";
+    }
+    const pct = Math.round(this._splitAt * 100);
+    clip.style.width = pct + "%";
+    handle.style.left = pct + "%";
+  }
+
+  /**
+   * The source shown through the same viewport as the render.
+   *
+   * Comparing a zoomed halftone against a fit-to-box original would be
+   * meaningless, so the source is cropped and scaled to match the current plan
+   * exactly. Cached, because it only changes when the layer or the view does.
+   */
   sourceDataURL() {
-    const size = this.previewSize();
-    const key = `${this.engine.sourceId}|${size.width}x${size.height}`;
+    const box = this.outputBox();
+    const plan = this.renderPlan(box);
+    const key = `${this.engine.sourceId}|${plan.width}x${plan.height}|${
+      plan.view ? `${plan.view.x},${plan.view.y},${plan.view.width},${plan.view.height}` : "full"
+    }`;
     if (this._sourceURL && this._sourceURL.key === key) return this._sourceURL.url;
-    const small = downscale(this.engine.source, size.width, size.height);
-    const url = toDataURL(small.data, small.width, small.height);
+
+    const small = downscale(this.engine.source, plan.width, plan.height);
+    let frame = small;
+    if (plan.view) {
+      const v = plan.view;
+      const out = new Uint8ClampedArray(v.width * v.height * 4);
+      for (let y = 0; y < v.height; y++) {
+        const sy = y + v.y;
+        if (sy < 0 || sy >= small.height) continue;
+        const so = (sy * small.width + v.x) * 4;
+        out.set(small.data.subarray(so, so + v.width * 4), y * v.width * 4);
+      }
+      frame = { data: out, width: v.width, height: v.height };
+    }
+    const url = toDataURL(frame.data, frame.width, frame.height);
     this._sourceURL = { key, url };
     return url;
   }
@@ -12157,6 +12966,7 @@ class Panel {
       "btn-reset",
       "btn-batch",
       "btn-svg",
+      "btn-plates",
       // btn-cancel is deliberately absent: it is the one control that must stay
       // usable while an operation is running.
       "btn-save-preset",
@@ -12204,7 +13014,7 @@ const SECTION_SUMMARY = {
   // Not `mode`: the badge in the header already says which engine is running.
   mode: ["lumaMode"],
   scale: ["scaleMode", "density", "dpi", "ditherResolution"],
-  halftone: ["shape", "screenType", "radius", "angle"],
+  halftone: ["shape", "screenType", "waveAmount", "radius", "angle"],
   press: ["jitterPosition", "jitterSize", "misregistration"],
   dither: ["ditherAlgorithm", "ditherStrength"],
   preprocess: ["blur", "sharpen", "noiseReduction"],
@@ -12229,6 +13039,31 @@ for (const a of ALGORITHMS) {
 }
 
 /** Clamp to an integer inside [lo, hi]. */
+/**
+ * A coverage mask as a printable plate: black where the ink lands, white where
+ * it does not, fully opaque. Inverted from the mask's own sense because a mask
+ * is "how much shows through" while a plate is "how much ink".
+ */
+function maskToPlate(mask, width, height) {
+  const out = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0, p = 0; i < mask.length; i++, p += 4) {
+    const v = 255 - mask[i];
+    out[p] = v;
+    out[p + 1] = v;
+    out[p + 2] = v;
+    out[p + 3] = 255;
+  }
+  return out;
+}
+
+function clamp01(v) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function clampNum(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
 function clampInt(v, lo, hi) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return lo;

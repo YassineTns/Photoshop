@@ -28,7 +28,7 @@ const {
 const { ALGORITHMS, ALGORITHM_FAMILIES } = require("../engine/dither.js");
 const { BUILTIN_PRESETS, presetToParams, makeUserPreset } = require("../presets/presets.js");
 const { HalftoneEngine } = require("../engine/pipeline.js");
-const { toDataURL } = require("../util/png.js");
+const { toDataURL, encodePNG } = require("../util/png.js");
 const { downscaleBox: downscale } = require("../engine/resample.js");
 const HOST = require("../photoshop/host.js");
 const RENDER = require("../photoshop/render.js");
@@ -65,6 +65,9 @@ const DEBOUNCE_MS = 90;
 const DRAFT_SCALE = 0.6;
 /** How long after the last draft frame to redraw at full size regardless. */
 const DRAFT_UPGRADE_MS = 260;
+/** Zoom multiplier per step, and the ceiling. 8x is well past useful. */
+const ZOOM_STEP = 1.6;
+const ZOOM_MAX = 8;
 
 class Panel {
   constructor(root) {
@@ -92,6 +95,17 @@ class Panel {
      * halftone, and a preset that resized your panel would be obnoxious.
      */
     this.ui = { previewHeight: null };
+    /**
+     * The preview viewport.
+     *
+     * `zoom` is output pixels per *document* pixel, so 1 means one preview pixel
+     * per pixel the render will actually produce - which is the only scale at
+     * which dot quality can be judged. null means fit-to-box. `cx`/`cy` are the
+     * point of the document held at the centre of the box, in 0..1.
+     */
+    this.view = { zoom: null, cx: 0.5, cy: 0.5 };
+    this._comparing = false;
+    this._splitAt = 0.5;
   }
 
   /* ---------------------------------------------------------------- */
@@ -129,6 +143,7 @@ class Panel {
 
     this.showCancel(false);
     this.bindPreviewGrip();
+    this.bindZoom();
     this.applyPreviewHeight();
     // A detached preview panel resizing means we should re-rasterise for it.
     BUS.onSizeRequest(() => this.schedulePreview());
@@ -231,7 +246,8 @@ class Panel {
       key === "mode" ||
       key === "scaleMode" ||
       key === "tonalMapping" ||
-      key === "sharpen"
+      key === "sharpen" ||
+      key === "waveAmount"
     );
   }
 
@@ -304,6 +320,7 @@ class Panel {
     this.$("btn-reset").addEventListener("click", () => this.resetAll());
     this.$("btn-batch").addEventListener("click", () => this.batchApply());
     this.$("btn-svg").addEventListener("click", () => this.exportSVG());
+    this.$("btn-plates").addEventListener("click", () => this.exportPlates());
     this.$("btn-cancel").addEventListener("click", () => this.requestCancel());
     this.bindCompare();
     this.$("btn-save-preset").addEventListener("click", () => this.savePreset());
@@ -480,22 +497,6 @@ class Panel {
     });
   }
 
-  /** The size the docked preview box can show, after the grip and the cap. */
-  dockedPreviewSize() {
-    const src = this.engine.source;
-    const wrap = this.$("preview-wrap");
-    const availW = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
-    const availH = this.previewBoxHeight();
-
-    // Fit inside both, never upscale: an image smaller than the panel is shown
-    // at its own size rather than blown up into a blur.
-    const scale = Math.min(1, availW / src.width, availH / src.height);
-    return {
-      width: Math.max(1, Math.round(src.width * scale)),
-      height: Math.max(1, Math.round(src.height * scale)),
-    };
-  }
-
   /** How tall the docked preview box is: the user's drag, or the default cap. */
   previewBoxHeight() {
     if (this.ui.previewHeight) return this.ui.previewHeight;
@@ -507,16 +508,209 @@ class Panel {
     );
   }
 
+  /* ------------------------------------------------------- viewport */
+
+  /** The document's own pixel dimensions, which is what 1:1 is relative to. */
+  documentSize() {
+    const b = this.sourceInfo && this.sourceInfo.bounds;
+    if (b) {
+      return {
+        width: Math.max(1, Math.round(b.right - b.left)),
+        height: Math.max(1, Math.round(b.bottom - b.top)),
+      };
+    }
+    const src = this.engine.source;
+    return { width: src.width, height: src.height };
+  }
+
+  /** The zoom that makes the whole document fit the preview box. */
+  fitZoom(box) {
+    const doc = this.documentSize();
+    return Math.min(box.width / doc.width, box.height / doc.height);
+  }
+
   /**
-   * The size to actually rasterise at.
+   * Turn the viewport state into engine arguments.
    *
-   * Normally that is the docked box. But when the detached preview panel is
-   * open it asks for its own, larger size, and we render for whichever window
-   * is bigger - otherwise the detached view would only be *bigger*, showing a
-   * frame rasterised for a 360px panel and scaled up, rather than sharper.
-   * The docked <img> caps itself with max-width/max-height, so it simply
-   * displays the larger frame smaller.
+   * The virtual render is always the whole document at the current zoom; what
+   * changes is how much of it we ask for. That is what makes zooming show the
+   * same picture rather than a re-derived one: the grid is built for the virtual
+   * size either way, so a dot does not move when you zoom into it.
+   *
+   * @returns {{width:number, height:number, view:object|null}}
    */
+  renderPlan(box) {
+    const doc = this.documentSize();
+    const fit = this.fitZoom(box);
+    const zoom = this.view.zoom === null ? fit : this.view.zoom;
+
+    const vw = Math.max(1, Math.round(doc.width * zoom));
+    const vh = Math.max(1, Math.round(doc.height * zoom));
+
+    // Smaller than the box in a dimension: nothing to pan there, so render the
+    // whole thing rather than a window with dead space in it.
+    if (vw <= box.width && vh <= box.height) {
+      return { width: vw, height: vh, view: null };
+    }
+
+    const outW = Math.min(box.width, vw);
+    const outH = Math.min(box.height, vh);
+    const x = clampInt(Math.round(this.view.cx * vw - outW / 2), 0, Math.max(0, vw - outW));
+    const y = clampInt(Math.round(this.view.cy * vh - outH / 2), 0, Math.max(0, vh - outH));
+    return { width: vw, height: vh, view: { x, y, width: outW, height: outH } };
+  }
+
+  /* ------------------------------------------------------------ zoom */
+
+  bindZoom() {
+    const wrap = this.$("preview-wrap");
+    this.$("btn-zoom-in").addEventListener("click", () => this.zoomBy(ZOOM_STEP));
+    this.$("btn-zoom-out").addEventListener("click", () => this.zoomBy(1 / ZOOM_STEP));
+    this.$("btn-zoom-fit").addEventListener("click", () => this.setZoom(null));
+    this.$("btn-zoom-1").addEventListener("click", () => this.setZoom(1));
+    if (!wrap) return;
+
+    // The wheel is the natural gesture and costs nothing if UXP does not deliver
+    // the event: the buttons do the same job.
+    wrap.addEventListener("wheel", (e) => {
+      if (!this.engine.hasSource()) return;
+      const dir = (e.deltaY || 0) > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
+      this.zoomBy(dir, this.pointerInView(e));
+      if (e.preventDefault) e.preventDefault();
+    });
+
+    let panning = false;
+    let start = null;
+    wrap.addEventListener("pointerdown", (e) => {
+      if (!this.canPan()) return;
+      panning = true;
+      const box = this.previewBox();
+      start = { x: e.clientX, y: e.clientY, cx: this.view.cx, cy: this.view.cy, box };
+      wrap.className = "preview-wrap panning";
+      try {
+        wrap.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* capture is an optimisation, not a requirement */
+      }
+      if (e.preventDefault) e.preventDefault();
+    });
+
+    wrap.addEventListener("pointermove", (e) => {
+      if (!panning) return;
+      const plan = this.renderPlan(start.box);
+      // Dragging moves the image with the pointer, so the centre moves against
+      // it - hence the negative sign. In fractions of the virtual render.
+      this.view.cx = clamp01(start.cx - (e.clientX - start.x) / plan.width);
+      this.view.cy = clamp01(start.cy - (e.clientY - start.y) / plan.height);
+      this.drawPreview({ draft: true });
+    });
+
+    const endPan = (e) => {
+      if (!panning) return;
+      panning = false;
+      this.updateZoomBar();
+      try {
+        wrap.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        /* ignore */
+      }
+      this.drawPreview();
+    };
+    wrap.addEventListener("pointerup", endPan);
+    wrap.addEventListener("pointercancel", endPan);
+
+    // Double-click toggles between fit and 1:1, which is the gesture people try.
+    wrap.addEventListener("dblclick", () => {
+      this.setZoom(this.view.zoom === null ? 1 : null);
+    });
+  }
+
+  /** Where the pointer is inside the preview box, in 0..1, or null. */
+  pointerInView(e) {
+    const wrap = this.$("preview-wrap");
+    if (!wrap || !wrap.getBoundingClientRect) return null;
+    const r = wrap.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return { x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) };
+  }
+
+  canPan() {
+    if (!this.engine.hasSource()) return false;
+    const plan = this.renderPlan(this.previewBox());
+    return !!plan.view;
+  }
+
+  /** The box the preview is drawn into, in panel pixels. */
+  previewBox() {
+    const wrap = this.$("preview-wrap");
+    const width = Math.max(120, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
+    return { width, height: this.previewBoxHeight() };
+  }
+
+  /**
+   * @param {number} factor
+   * @param {{x:number,y:number}} [anchor] point in the box to keep still
+   */
+  zoomBy(factor, anchor) {
+    if (!this.engine.hasSource()) return;
+    const box = this.previewBox();
+    const from = this.view.zoom === null ? this.fitZoom(box) : this.view.zoom;
+    const to = clampNum(from * factor, this.fitZoom(box) * 0.5, ZOOM_MAX);
+
+    if (anchor) {
+      // Keep the point under the cursor where it is: convert it to a document
+      // fraction at the old zoom, then re-centre so it lands in the same place.
+      const before = this.renderPlan(box);
+      const px = (before.view ? before.view.x : 0) + anchor.x * (before.view ? before.view.width : before.width);
+      const py = (before.view ? before.view.y : 0) + anchor.y * (before.view ? before.view.height : before.height);
+      const fx = px / before.width;
+      const fy = py / before.height;
+      this.view.zoom = to;
+      const after = this.renderPlan(box);
+      if (after.view) {
+        this.view.cx = clamp01(fx + (0.5 - anchor.x) * (after.view.width / after.width));
+        this.view.cy = clamp01(fy + (0.5 - anchor.y) * (after.view.height / after.height));
+      }
+    } else {
+      this.view.zoom = to;
+    }
+    this.afterZoom();
+  }
+
+  setZoom(zoom) {
+    if (!this.engine.hasSource() && zoom !== null) return;
+    this.view.zoom = zoom;
+    if (zoom === null) {
+      this.view.cx = 0.5;
+      this.view.cy = 0.5;
+    }
+    this.afterZoom();
+  }
+
+  afterZoom() {
+    this.updateZoomBar();
+    this.drawPreview();
+  }
+
+  updateZoomBar() {
+    const label = this.$("zoom-level");
+    const wrap = this.$("preview-wrap");
+    if (label) {
+      if (!this.engine.hasSource()) label.textContent = "—";
+      else if (this.view.zoom === null) label.textContent = `Fit · ${Math.round(this.fitZoom(this.previewBox()) * 100)}%`;
+      else label.textContent = `${Math.round(this.view.zoom * 100)}%`;
+    }
+    const fitBtn = this.$("btn-zoom-fit");
+    const oneBtn = this.$("btn-zoom-1");
+    if (fitBtn) fitBtn.className = "zoom-btn zoom-word" + (this.view.zoom === null ? " active" : "");
+    if (oneBtn) {
+      oneBtn.className = "zoom-btn zoom-word" + (this.view.zoom === 1 ? " active" : "");
+    }
+    if (wrap && wrap.className.indexOf("panning") < 0) {
+      wrap.className = "preview-wrap" + (this.canPan() ? " pannable" : "");
+    }
+  }
+
   /**
    * Redraw at full size once the drag goes quiet, in case no commit ever comes.
    */
@@ -528,15 +722,40 @@ class Panel {
     }, DRAFT_UPGRADE_MS);
   }
 
-  previewSize() {
-    const docked = this.dockedPreviewSize();
+  /**
+   * The box a frame has to land in.
+   *
+   * Normally the docked preview. But when the detached preview panel is open it
+   * asks for its own, larger size, and we render for whichever window is bigger
+   * - otherwise the detached view would only be *bigger*, showing a frame
+   * rasterised for a 360px panel and scaled up, rather than sharper. The docked
+   * <img> caps itself with max-width/max-height, so it displays the larger
+   * frame smaller.
+   */
+  outputBox() {
+    const box = this.previewBox();
     const want = BUS.requestedSize();
-    if (!want) return docked;
+    if (!want) return box;
+    if (want.width <= box.width && want.height <= box.height) return box;
+    return {
+      width: Math.max(box.width, want.width),
+      height: Math.max(box.height, want.height),
+    };
+  }
+
+  /**
+   * The source shown at fit, for the compare view. Deliberately not the
+   * viewport: Compare answers "what did this look like before", and answering
+   * it at a different zoom than the render would make it useless.
+   */
+  previewSize() {
     const src = this.engine.source;
-    const s = Math.min(1, want.width / src.width, want.height / src.height);
-    const w = Math.max(1, Math.round(src.width * s));
-    if (w <= docked.width) return docked;
-    return { width: w, height: Math.max(1, Math.round(src.height * s)) };
+    const box = this.outputBox();
+    const scale = Math.min(1, box.width / src.width, box.height / src.height);
+    return {
+      width: Math.max(1, Math.round(src.width * scale)),
+      height: Math.max(1, Math.round(src.height * scale)),
+    };
   }
 
   drawPreview(opts = {}) {
@@ -548,18 +767,22 @@ class Panel {
     if (!img) return;
     const t0 = Date.now();
     try {
-      const full = this.previewSize();
-      const size = opts.draft
+      const box = this.outputBox();
+      const draftBox = opts.draft
         ? {
-            width: Math.max(32, Math.round(full.width * DRAFT_SCALE)),
-            height: Math.max(32, Math.round(full.height * DRAFT_SCALE)),
+            width: Math.max(32, Math.round(box.width * DRAFT_SCALE)),
+            height: Math.max(32, Math.round(box.height * DRAFT_SCALE)),
           }
-        : full;
+        : box;
       if (opts.draft) this.armFullRedraw();
-      const out = this.engine.render(
-        this.params,
-        Object.assign({ maxDitherGrid: PREVIEW_DITHER_GRID }, size)
-      );
+
+      const plan = this.renderPlan(draftBox);
+      const out = this.engine.render(this.params, {
+        maxDitherGrid: PREVIEW_DITHER_GRID,
+        width: plan.width,
+        height: plan.height,
+        view: plan.view,
+      });
       const url = toDataURL(out.data, out.width, out.height);
       img.src = url;
       img.className = "preview visible";
@@ -567,8 +790,10 @@ class Panel {
       this.lastFrameMs = Date.now() - t0;
       const unit = this.params.mode === "dither" ? "px" : "cells";
       const screens = out.angles ? ` · ${out.angles.length} screens @ ${out.angles.join("/")}°` : "";
+      const zoomTag = this.view.zoom === null ? "" : ` · ${Math.round(this.view.zoom * 100)}%`;
       this._lastBadge =
         `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
+        zoomTag +
         (out.exact ? "" : " · approx") +
         // Say so rather than quietly showing a coarser picture than the render.
         (opts.draft ? " · draft" : "");
@@ -576,6 +801,7 @@ class Panel {
       // Hand the same frame to the detached panel, if one is open. One object
       // and one callback: the data URL was built for the docked <img> anyway.
       BUS.publish({ url, width: out.width, height: out.height, badge: this._lastBadge });
+      if (this._comparing) this.layoutSplit();
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
       this.notice(`Preview failed: ${e.message}`, "error");
@@ -591,7 +817,11 @@ class Panel {
       this.engine.sourceLayerId = src.layerId;
       this.engine.docPPI = src.docPPI || 72;
       this.sourceInfo = src;
+      // A new layer means a new document rectangle, so any zoom into the old
+      // one is meaningless.
+      this.view = { zoom: null, cx: 0.5, cy: 0.5 };
       if (!this.params.paletteLocked) this.syncPaletteFromImage();
+      this.updateZoomBar();
       this.drawPreview();
 
       // If this layer is an existing render, bring its settings back.
@@ -827,45 +1057,200 @@ class Panel {
     });
   }
 
+  /* ---------------------------------------------------- plate export */
+
+  /**
+   * One image file per ink, for a printer.
+   *
+   * This is what a screen printer or a risograph shop asks for: not the
+   * composite, but each ink on its own, black-on-white, at the document's real
+   * size, so it can be burned to a screen or sent to a drum. The separated
+   * output already computes exactly these coverage masks - this writes them out
+   * instead of turning them into fill layers.
+   *
+   * Black on white rather than the ink's own colour, because that is what an
+   * imagesetter expects: the plate says *where* the ink goes, and the press
+   * decides what colour it is. The paper plate is skipped for the same reason -
+   * paper is not an ink.
+   */
+  async exportPlates() {
+    if (!this.engine.hasSource()) {
+      this.notice("Load a layer first — there are no plates to write yet.", "warn");
+      return;
+    }
+    if (this.params.mode === "dither") {
+      this.notice(
+        "Plate export covers halftone mode only. A dither picks one colour per " +
+          "pixel, so its separations are not printable screens.",
+        "warn"
+      );
+      return;
+    }
+
+    await this.guard("Building plates…", async () => {
+      const doc = this.documentSize();
+      const sep = this.engine.renderSeparated(this.params, doc);
+      const base = (this.sourceInfo && this.sourceInfo.layerName) || "halftone";
+
+      const files = [];
+      for (let i = 0; i < sep.masks.length; i++) {
+        if (i === sep.paperIndex) continue; // paper is not an ink
+        const hex = sep.palette[i];
+        const rgba = maskToPlate(sep.masks[i], doc.width, doc.height);
+        files.push({
+          name: FILES.safeName(`${base} plate ${files.length + 1} ${hex.replace("#", "")}`, "png"),
+          bytes: encodePNG(rgba, doc.width, doc.height),
+          hex,
+        });
+      }
+
+      if (!files.length) {
+        this.notice("This palette has no ink beyond the paper, so there is nothing to plate.", "warn");
+        return;
+      }
+
+      const res = await FILES.saveFilesToFolder(files);
+      if (!res) {
+        this.notice("Plate export cancelled.");
+        return;
+      }
+      this.notice(
+        `Wrote ${res.written.length} plates to ${res.folder} at ${doc.width}x${doc.height}: ` +
+          files.map((f) => f.hex).join(" ") +
+          ". Each is that ink alone, black on white."
+      );
+    });
+  }
+
   /* --------------------------------------------------------- compare */
 
   /**
-   * Hold the Compare button to swap the preview for the untouched source.
-   * Cheaper and less error-prone than a toggle: you cannot leave it stuck on.
+   * Compare: the untouched source over the render, split by a draggable handle.
+   *
+   * A hold-to-swap button could only ever show you one of the two, which is not
+   * comparing - you are left doing it from memory. Here both halves are the same
+   * frame at the same zoom with a seam through the middle, so a difference in
+   * dot size or colour shows up right at the edge where the eye is good at it.
    */
   bindCompare() {
     const btn = this.$("btn-compare");
-    if (!btn) return;
-    const show = () => {
-      if (!this.engine.hasSource()) return;
-      const img = this.$("preview");
-      this._renderedSrc = img.src;
-      img.src = this.sourceDataURL();
-      this.badge("original");
-      BUS.publish({ url: img.src, width: 0, height: 0, badge: "original" });
+    if (btn) btn.addEventListener("click", () => this.toggleCompare());
+
+    const handle = this.$("split-handle");
+    if (!handle) return;
+    let dragging = false;
+
+    handle.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      this.$("split").className = "split show dragging";
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* capture is an optimisation, not a requirement */
+      }
+      if (e.preventDefault) e.preventDefault();
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const wrap = this.$("preview-wrap");
+      const r = wrap.getBoundingClientRect();
+      if (!r.width) return;
+      this._splitAt = clamp01((e.clientX - r.left) / r.width);
+      this.layoutSplit();
+    });
+    const end = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      this.$("split").className = "split show";
+      try {
+        handle.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        /* ignore */
+      }
     };
-    const hide = () => {
-      if (!this._renderedSrc) return;
-      // Restore rather than re-render: nothing can have changed while the
-      // button was held, and a re-render would race a pending preview tick.
-      this.$("preview").src = this._renderedSrc;
-      BUS.publish({ url: this._renderedSrc, width: 0, height: 0, badge: this._lastBadge });
-      this._renderedSrc = null;
-      this.badge(this._lastBadge);
-    };
-    btn.addEventListener("pointerdown", show);
-    btn.addEventListener("pointerup", hide);
-    btn.addEventListener("pointercancel", hide);
-    btn.addEventListener("pointerleave", hide);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
   }
 
-  /** The source, downscaled to preview size and cached. */
+  toggleCompare() {
+    if (!this.engine.hasSource()) {
+      this.notice("Load a layer first — there is nothing to compare against.", "warn");
+      return;
+    }
+    this._comparing = !this._comparing;
+    const btn = this.$("btn-compare");
+    if (btn) btn.className = "btn btn-small" + (this._comparing ? " btn-primary" : "");
+    if (this._comparing && this._splitAt === undefined) this._splitAt = 0.5;
+    this.layoutSplit();
+  }
+
+  /**
+   * Position the overlay.
+   *
+   * The source is drawn at exactly the geometry the render occupies inside the
+   * box - same size, same offset - so the seam lines up with the picture instead
+   * of with the box. Letterboxing makes those two different.
+   */
+  layoutSplit() {
+    const split = this.$("split");
+    if (!split) return;
+    if (!this._comparing || !this.engine.hasSource()) {
+      split.className = "split";
+      return;
+    }
+
+    const img = this.$("preview");
+    const wrap = this.$("preview-wrap");
+    const clip = this.$("split-clip");
+    const shot = this.$("split-img");
+    const handle = this.$("split-handle");
+
+    split.className = "split show";
+    shot.src = this.sourceDataURL();
+
+    // Where the rendered frame actually sits inside the box.
+    const box = wrap && wrap.getBoundingClientRect ? wrap.getBoundingClientRect() : null;
+    const frame = img && img.getBoundingClientRect ? img.getBoundingClientRect() : null;
+    if (box && frame && box.width && frame.width) {
+      shot.style.left = Math.round(frame.left - box.left) + "px";
+      shot.style.top = Math.round(frame.top - box.top) + "px";
+      shot.style.width = Math.round(frame.width) + "px";
+      shot.style.height = Math.round(frame.height) + "px";
+    }
+    const pct = Math.round(this._splitAt * 100);
+    clip.style.width = pct + "%";
+    handle.style.left = pct + "%";
+  }
+
+  /**
+   * The source shown through the same viewport as the render.
+   *
+   * Comparing a zoomed halftone against a fit-to-box original would be
+   * meaningless, so the source is cropped and scaled to match the current plan
+   * exactly. Cached, because it only changes when the layer or the view does.
+   */
   sourceDataURL() {
-    const size = this.previewSize();
-    const key = `${this.engine.sourceId}|${size.width}x${size.height}`;
+    const box = this.outputBox();
+    const plan = this.renderPlan(box);
+    const key = `${this.engine.sourceId}|${plan.width}x${plan.height}|${
+      plan.view ? `${plan.view.x},${plan.view.y},${plan.view.width},${plan.view.height}` : "full"
+    }`;
     if (this._sourceURL && this._sourceURL.key === key) return this._sourceURL.url;
-    const small = downscale(this.engine.source, size.width, size.height);
-    const url = toDataURL(small.data, small.width, small.height);
+
+    const small = downscale(this.engine.source, plan.width, plan.height);
+    let frame = small;
+    if (plan.view) {
+      const v = plan.view;
+      const out = new Uint8ClampedArray(v.width * v.height * 4);
+      for (let y = 0; y < v.height; y++) {
+        const sy = y + v.y;
+        if (sy < 0 || sy >= small.height) continue;
+        const so = (sy * small.width + v.x) * 4;
+        out.set(small.data.subarray(so, so + v.width * 4), y * v.width * 4);
+      }
+      frame = { data: out, width: v.width, height: v.height };
+    }
+    const url = toDataURL(frame.data, frame.width, frame.height);
     this._sourceURL = { key, url };
     return url;
   }
@@ -1115,6 +1500,7 @@ class Panel {
       "btn-reset",
       "btn-batch",
       "btn-svg",
+      "btn-plates",
       // btn-cancel is deliberately absent: it is the one control that must stay
       // usable while an operation is running.
       "btn-save-preset",
@@ -1162,7 +1548,7 @@ const SECTION_SUMMARY = {
   // Not `mode`: the badge in the header already says which engine is running.
   mode: ["lumaMode"],
   scale: ["scaleMode", "density", "dpi", "ditherResolution"],
-  halftone: ["shape", "screenType", "radius", "angle"],
+  halftone: ["shape", "screenType", "waveAmount", "radius", "angle"],
   press: ["jitterPosition", "jitterSize", "misregistration"],
   dither: ["ditherAlgorithm", "ditherStrength"],
   preprocess: ["blur", "sharpen", "noiseReduction"],
@@ -1187,6 +1573,31 @@ for (const a of ALGORITHMS) {
 }
 
 /** Clamp to an integer inside [lo, hi]. */
+/**
+ * A coverage mask as a printable plate: black where the ink lands, white where
+ * it does not, fully opaque. Inverted from the mask's own sense because a mask
+ * is "how much shows through" while a plate is "how much ink".
+ */
+function maskToPlate(mask, width, height) {
+  const out = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0, p = 0; i < mask.length; i++, p += 4) {
+    const v = 255 - mask[i];
+    out[p] = v;
+    out[p + 1] = v;
+    out[p + 2] = v;
+    out[p + 3] = 255;
+  }
+  return out;
+}
+
+function clamp01(v) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function clampNum(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
 function clampInt(v, lo, hi) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return lo;

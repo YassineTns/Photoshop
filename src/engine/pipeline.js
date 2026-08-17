@@ -520,6 +520,8 @@ class HalftoneEngine {
         seed: params.seed,
       },
       dotGain: params.dotGain,
+      waveAmount: params.waveAmount,
+      waveLength: params.waveLength,
       gradeBias: params.gradeBias,
       radiusCurve: params.radiusCurve,
       invert: params.invert,
@@ -550,21 +552,40 @@ class HalftoneEngine {
    *        `maxDitherGrid` caps the dither grid so previews stay fast; when the
    *        requested resolution exceeds it, the result is flagged `exact: false`.
    */
+  /**
+   * @param {object} params
+   * @param {object} [opts]
+   * @param {number} [opts.width]  the *virtual* render width
+   * @param {number} [opts.height] the *virtual* render height
+   * @param {{x:number,y:number,width:number,height:number}} [opts.view]
+   *        a window of that virtual render to actually produce. This is how
+   *        zooming works: the grid is still built for the full virtual size, so
+   *        a dot sits in exactly the same place whether you are looking at the
+   *        whole image or at one corner of it at 1:1 - it is the same render,
+   *        cropped, not a different one derived at a different scale. Cells
+   *        outside the window are skipped, so the cost is the window's rather
+   *        than the document's.
+   */
   render(params, opts = {}) {
     if (!this.source) throw new Error("HalftoneEngine: no source set");
     const width = opts.width || this.source.width;
     const height = opts.height || this.source.height;
+    const view = opts.view || null;
+    const outW = view ? view.width : width;
+    const outH = view ? view.height : height;
 
     if (params.mode === "dither") {
       const d = this._ensureDither(params, opts.maxDitherGrid);
       const palette = this._outputPalette(params);
       const t0 = now();
-      const data = indicesToRGBA(d.indices, d.width, d.height, palette, width, height, opts.out);
+      const data = indicesToRGBA(
+        d.indices, d.width, d.height, palette, width, height, opts.out, view
+      );
       this.stats.rasterMs = now() - t0;
       return {
         data,
-        width,
-        height,
+        width: outW,
+        height: outH,
         palette: paletteToHex(palette),
         ink: paletteToHex(palette),
         background: palette[0] || [0, 0, 0],
@@ -575,18 +596,22 @@ class HalftoneEngine {
     if (params.screenMode === "perInk") {
       const { screens, rp: srp } = this._ensureScreens(params);
       const t0 = now();
+      if (view) {
+        srp.viewX = view.x;
+        srp.viewY = view.y;
+      }
       const data = rasterizeScreens(
         this._scaleScreens(screens, width, height, params),
         srp,
-        width,
-        height,
+        outW,
+        outH,
         opts.out
       );
       this.stats.rasterMs = now() - t0;
       return {
         data,
-        width,
-        height,
+        width: outW,
+        height: outH,
         palette: paletteToHex(srp.fullPalette),
         ink: paletteToHex(srp.palette),
         background: srp.background,
@@ -600,15 +625,19 @@ class HalftoneEngine {
     rp.cellColor = this._ensureCellColors(params, cells, rp);
     const grid = scaleGrid(cells.grid, width, height);
     const outCells = { lum: cells.lum, rgb: cells.rgb, count: cells.count, grid };
+    if (view) {
+      rp.viewX = view.x;
+      rp.viewY = view.y;
+    }
 
     const t0 = now();
-    const data = rasterize(outCells, rp, width, height, opts.out);
+    const data = rasterize(outCells, rp, outW, outH, opts.out);
     this.stats.rasterMs = now() - t0;
 
     return {
       data,
-      width,
-      height,
+      width: outW,
+      height: outH,
       palette: paletteToHex(rp.fullPalette),
       ink: paletteToHex(rp.palette),
       background: rp.background,
