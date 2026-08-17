@@ -4,14 +4,16 @@ A Photoshop UXP plugin for bitmapping artwork, with two rendering engines:
 
 - **Halftone** — a grid of dots whose size follows local tone, either as a single
   screen or as **one independently angled screen per ink**, overprinted into a
-  real CMYK-style rosette.
+  real CMYK-style rosette. Screens can be **AM** (classic: dot size varies) or
+  **FM** (stochastic: dot size is fixed and placement varies).
 - **Dither** — 24 dithering algorithms (Bayer, clustered, blue noise, and ten
   error-diffusion kernels) that pick one palette colour per pixel.
 
 Both are computed by the plugin's own engine, not by a stack of Photoshop
 adjustment layers. Both can output either a flat pixel layer or a
-**colour-separated stack of editable fill layers**, and both can be run across
-many layers at once with **Batch Apply**.
+**colour-separated stack of editable fill layers**, can be confined to the
+**active selection**, and can be run across many layers at once with **Batch
+Apply**. A halftone can also be exported as **vector SVG** rather than pixels.
 
 ![Offset CMYK preset — per-ink screens at 45/15/75/0°](docs/sample-offset.png)
 ![Comic preset — single-screen halftone](docs/sample-comic.png)
@@ -56,6 +58,10 @@ It is the fastest way to judge the render and to try settings. What neither can
 do is the Photoshop side — layers, Smart Objects, colour separation into fill
 layers, batch.
 
+`npm run shoot -- 360 dark panel.png` screenshots the real panel through
+`panel-preview.html`, which is how the styling gets reviewed without a Photoshop
+reload each time.
+
 ## Use
 
 1. Select a pixel or Smart Object layer.
@@ -87,6 +93,20 @@ Halftone ▸ HT-4f2a9c
 **Batch Apply** runs the same settings across every layer in the chosen scope
 (selection, group, or whole document), skipping anything that is already halftone
 output. The whole batch is a single undo step.
+
+**Selections.** With a marquee, lasso or mask active, Apply and Update confine the
+render to it (turn this off with *Output ▸ Respect selection*). The screen is
+still computed across the whole layer and the selection is applied afterwards as
+alpha — so a dot does not move when the selection changes, and a selected region
+lines up exactly with a render of the whole layer. Feathered selections come
+through as soft edges, because the coverage is used as-is rather than thresholded.
+
+**Export SVG** writes the halftone as vector art: one `<circle>`, `<rect>` or
+`<polygon>` per dot, grouped by ink, at the layer's real document size. Per-ink
+screens export as one `mix-blend-mode: multiply` group per ink, so the file
+overprints the same way the raster render does. Dither mode is refused rather
+than exported — one shape per pixel is a file no application will open, and the
+panel says so instead of writing it.
 
 Conventions:
 
@@ -122,17 +142,20 @@ src/
     shapes.js          dot shapes as signed distance functions
     resample.js        area-average downscaling
     halftone.js        grid, cell sampling, antialiased + multi-screen rasterisers
+    jitter.js          deterministic press imperfection: jitter, misregistration
     dither.js          threshold matrices, diffusion kernels, dither pass
+    svg.js             vector export of a screen
     pipeline.js        staged cache, mode dispatch, async chunked rendering
   photoshop/           everything that touches the host
     host.js            module access, executeAsModal, capability probing
     document.js        document + selection queries (read only)
     layers.js          layer ops (DOM first, batchPlay fallback), fill layers
-    imaging.js         getPixels / putPixels / putLayerMask
+    imaging.js         getPixels / putPixels / putLayerMask / getSelection
     metadata.js        parameter persistence
-    render.js          Apply / Update orchestration, output modes
+    render.js          Apply / Update orchestration, output modes, selection
     batch.js           multi-layer batch runner
     swatches.js        .ase and .act import / export
+    files.js           writing generated files through a save dialog
   ui/
     panel.js           panel controller
     controls.js        sliders, segmented pickers, chips, toggles, palette
@@ -144,7 +167,8 @@ playground.html        the engine, bundled to run in a browser (generated)
 panel-preview.html     the real panel, bundled the same way (generated)
 test/                  engine suite + mocked-host integration suite
 tools/make-icons.js
-tools/build-playground.js
+tools/build-playground.js  (crawls the requires; no hand-maintained module list)
+tools/shoot.mjs            screenshot the real panel, for judging the look
 ```
 
 `src/state/params.js` is the spine: the UI builds itself from it (including
@@ -377,7 +401,17 @@ Units are chosen so that nothing depends on document resolution.
 | | Angle | 0–90° | Screen angle (halftone) |
 | Halftone | Radius | 0–200% | Max dot size as a % of the cell half-size; >100% overlaps |
 | | Dot Curve | 0–1 | 0 = area tracks tone (classic), 1 = radius tracks tone |
-| | Shape | circle, square, diamond, cross, line | |
+| | Shape | circle, ellipse, square, diamond, cross, line | |
+| | Dot Gain | 0–20% | Ink spread on paper, added to every dot radius |
+| | Screen | AM / FM | AM varies dot size; FM keeps it fixed and varies placement |
+| | Screens | single / per ink | One screen, or one angled screen per ink |
+| | Spread | 0–90° | Angular separation between per-ink screens |
+| | Edge Aware | on/off | Bias cell sampling towards edges, for cleaner contours |
+| Press Imperfection | Offset | 0–100% | Per-dot position jitter, as a % of half a cell |
+| | Size Vary | 0–100% | Per-dot size jitter, as a % of the radius |
+| | Rotate | 0–180° | Per-dot rotation |
+| | Misregistration | 0–100% | Whole-screen offset per ink, as a % of a cell |
+| | Seed | 1–9999 | Changes the pattern; the same seed always gives the same result |
 | Dither | Algorithm | 24 options | See the table above |
 | | Amount | 0–1 | 0 posterises with no pattern; 1 is the full dither |
 | | Serpentine | on/off | Alternate scan direction; cancels diffusion artefacts |
@@ -398,6 +432,9 @@ Units are chosen so that nothing depends on document resolution.
 | | Luma | luma709, luma601, perceptual | How tone is measured |
 | Adjust | Hue / Saturation / Brightness / Invert | | |
 | Output | Output | flat / separated | One pixel layer, or one fill layer per colour |
+| | Respect selection | on/off | Confine the render to the active selection |
+| Batch | Scope | selection / group / document | Which layers Batch Apply covers |
+| | Shared palette | on/off | Extract one palette and pin it across the batch |
 
 **Presets.** Halftone: Classic B&W, Soft Print, Comic, Newspaper, RGB Pop, Retro
 Poster. Dither: Mac Classic, Newsprint Dither, Handheld Green, Blue Noise, Zone
@@ -408,7 +445,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (310 assertions) + mocked host (155 assertions)
+npm test              # engine (365 assertions) + mocked host (174 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)
@@ -435,16 +472,37 @@ you, so every section below the fold was unreachable. Neither is visible to a
 unit test.
 
 It now drives the *real* panel at 300/360/420px in both modes and both themes,
+It then shipped broken a third time, by the fix for the second: giving `#app` a
+definite height made its flex children shrinkable, so every section was squeezed
+and its rows clipped. Chromium hides that one — CSS gives flex items an automatic
+minimum size, and UXP does not implement it — so the test runs a **second pass
+with that minimum removed**, which is the closest a browser can get to being UXP.
+
+It now drives the *real* panel at 300/360/420px in both modes and both themes,
 and asserts geometry: no sibling overlap, no stacked-row collision, nothing
-overflowing, nothing collapsed to zero, no start-up errors, and that the panel
-scrolls far enough to reach its own last section. 120 assertions. It cannot prove
-UXP agrees with Chromium, but every rule that broke was one Chromium would have
-caught, because the fix in each case was to stop relying on a feature UXP lacks.
+overflowing, nothing collapsed to zero, no control rendering zero options, no
+start-up errors, and that the panel scrolls far enough to reach its own last
+section. 276 assertions. It cannot prove UXP agrees with Chromium, but every rule
+that broke was one Chromium would have caught, because the fix in each case was
+to stop relying on a feature UXP lacks.
+
+Its most recent catch was not a layout bug at all: `panel-preview.html` failed to
+start because the bundler's hand-written module list had gone stale. The bundler
+now crawls the requires instead, and the list cannot disagree with the source.
 
 For separation it asserts the properties that matter rather than pixel values:
 pure inks resolve to themselves and drag nothing else in, secondaries decompose
 into their constituents, neutrals go to the key ink, coverage never leaves [0,1]
 for any input, and no two screens share an angle or sit closer than 15°.
+
+FM screening is asserted on the property that distinguishes it: ink rises with
+tone through *count* rather than area, white stays empty, black fills, and the
+result differs from AM at the same settings. Press imperfection is asserted as
+deterministic (the same cell always jitters the same way, neighbours differ, the
+seed changes it), bounded by its stated budget, and tone-preserving — a roughened
+press prints the same amount of ink to within 20%. SVG export is checked for
+well-formedness, for producing the same shape count at any output size, for every
+dot shape, and for refusing dither mode.
 
 The integration suite runs the Photoshop and UI layers against a mocked host. It
 cannot prove the batchPlay descriptors are accepted by Photoshop — only Photoshop
@@ -452,8 +510,12 @@ can — but it does prove the plugin's own logic: layer structure and ordering, 
 original never being written to, mask writes reaching every fill layer, the
 documented fallback when masks are unavailable, parameters round-tripping through
 XMP *and* the sidecar, batches that skip their own output / isolate a failing
-layer / stop cleanly on cancel, and that every parameter in the schema is
-reachable in some UI state while no control is built for a hidden one.
+layer / stop cleanly on cancel, selections confining the render to their own
+alpha while the frame still covers the layer (with all three "no selection" cases
+— toggle off, nothing selected, host without `getSelection` — rendering the whole
+layer rather than failing), SVG export reaching a real file, and that every
+parameter in the schema is reachable in some UI state while no control is built
+for a hidden one.
 
 ### Measured performance
 
@@ -502,6 +564,12 @@ the longest edge while the render is still written at full resolution.
    Update.
 9. **Renaming the halftone group** breaks the sidecar lookup. The layer XMP still
    works if it took.
+10. **SVG export covers halftone mode only**, and is refused for dither with an
+    explanation. It also has no notion of a selection: the vector file is the
+    whole screen. Very fine grids produce very large files — above roughly
+    200,000 shapes the panel warns that illustration apps will struggle.
+11. **`imaging.getSelection` is probed, not assumed.** On a build without it the
+    selection is silently ignored and the whole layer renders.
 
 ## Roadmap
 
@@ -509,7 +577,8 @@ the longest edge while the render is still written at full resolution.
    subtractive filter. Loading a measured dot-gain curve and ink densities would
    turn it from a plausible model into a predictive one.
 2. **Second-order rosette control**: moiré detection across screen pairs, and
-   irrational or stochastic screening as an alternative to fixed angles.
+   irrational screen angles as an alternative to the fixed set. (Stochastic
+   screening now ships as the FM screen type.)
 3. **Video timeline rendering**, if a route to rasterising a video layer per
    frame becomes available through UXP.
 4. **A C++ or WASM rasteriser.** Only the rasteriser is worth moving — the

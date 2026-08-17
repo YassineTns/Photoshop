@@ -88,11 +88,56 @@ function toDensity(rgb, out) {
 }
 
 /**
+ * Largest eigenvalue of the Gram matrix, by power iteration.
+ *
+ * This is what sets a safe gradient step, and getting it wrong is not a matter
+ * of speed: using the trace as a stand-in (it bounds the eigenvalue, so it looks
+ * safe) diverges the moment the inks are correlated. Four well-spread CMYK inks
+ * were fine; three dark risograph inks all pointing the same way oscillated
+ * between zero and full coverage and settled on nothing, which emptied the
+ * render. n is at most nine, and this runs once per basis, so the exact answer
+ * is affordable.
+ */
+function largestEigenvalue(d, n) {
+  // Gram matrix G = A^T A.
+  const g = new Float64Array(n * n);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      const v =
+        d[i * 3] * d[j * 3] + d[i * 3 + 1] * d[j * 3 + 1] + d[i * 3 + 2] * d[j * 3 + 2];
+      g[i * n + j] = v;
+      g[j * n + i] = v;
+    }
+  }
+  let v = new Float64Array(n).fill(1 / Math.sqrt(n));
+  const w = new Float64Array(n);
+  let lambda = 0;
+  for (let it = 0; it < 40; it++) {
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let j = 0; j < n; j++) sum += g[i * n + j] * v[j];
+      w[i] = sum;
+    }
+    let norm = 0;
+    for (let i = 0; i < n; i++) norm += w[i] * w[i];
+    norm = Math.sqrt(norm);
+    if (norm < 1e-12) return 0;
+    for (let i = 0; i < n; i++) v[i] = w[i] / norm;
+    if (Math.abs(norm - lambda) < 1e-9 * Math.max(1, norm)) {
+      lambda = norm;
+      break;
+    }
+    lambda = norm;
+  }
+  return lambda;
+}
+
+/**
  * Precompute the density each ink adds over the paper, once per render.
  *
  * @param {number[][]} inks rgb triples
  * @param {number[]} paper rgb
- * @returns {{d: Float64Array, gram: Float64Array, count: number}}
+ * @returns {{d: Float64Array, paperD: number[], count: number, L: number}}
  */
 function buildInkBasis(inks, paper) {
   const n = inks.length;
@@ -105,7 +150,7 @@ function buildInkBasis(inks, paper) {
     d[k * 3 + 1] = t[1] - paperD[1];
     d[k * 3 + 2] = t[2] - paperD[2];
   }
-  return { d, paperD, count: n };
+  return { d, paperD, count: n, L: largestEigenvalue(d, n) };
 }
 
 /**
@@ -141,18 +186,11 @@ function unmix(basis, targetRGB, out, lambda = 0.015, maxCoverage = 1) {
 
   for (let k = 0; k < n; k++) out[k] = 0;
 
-  // Step size from the basis magnitude keeps the iteration stable whatever the
-  // palette looks like.
-  let norm = 0;
-  for (let k = 0; k < n; k++) {
-    norm += d[k * 3] * d[k * 3] + d[k * 3 + 1] * d[k * 3 + 1] + d[k * 3 + 2] * d[k * 3 + 2];
-  }
-  const step = norm > 1e-9 ? 1 / norm : 0;
-  if (!step) return out;
-  // The sparsity weight has to scale with the basis, otherwise it is measured in
-  // different units for every palette: a light-ink palette has small densities,
-  // a fixed lambda then dwarfs the data term and drives every coverage to zero.
-  const shrink = (lambda * norm) / n;
+  // The stable step is 1 / largest-eigenvalue, computed exactly when the basis
+  // was built. Anything larger oscillates; see largestEigenvalue().
+  const L = basis.L;
+  if (!(L > 1e-9)) return out;
+  const step = 1 / L;
 
   // FISTA: `y` is the extrapolated point the gradient is taken at, `prev` the
   // previous iterate. Scratch buffers are reused across calls because this is
@@ -182,7 +220,10 @@ function unmix(basis, targetRGB, out, lambda = 0.015, maxCoverage = 1) {
       // Gradient step on the data term, then the L1 proximal step: subtract a
       // constant and clamp at zero, which is what drives unused inks to exactly
       // zero instead of merely small.
-      let c = y[k] - step * g * 2 - step * shrink;
+      // Gradient step, then the L1 proximal step. Expressing the sparsity
+      // weight relative to L makes it scale-free: the same lambda means the
+      // same thing for a pale ink set as for a dense one.
+      let c = y[k] - g * step - lambda;
       if (c < 0) c = 0;
       else if (c > maxCoverage) c = maxCoverage;
       out[k] = c;
@@ -201,7 +242,7 @@ function unmix(basis, targetRGB, out, lambda = 0.015, maxCoverage = 1) {
     // Most cells are flat or near-paper and settle in a handful of iterations;
     // only the awkward ones need the full budget. Bailing early on those is
     // what keeps a per-cell solver affordable.
-    if (it > 3 && delta < 2e-4) break;
+    if (it > 8 && delta < 5e-5) break;
   }
   return out;
 }

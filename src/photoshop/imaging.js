@@ -208,6 +208,65 @@ async function writeLayerMask(opts) {
   }
 }
 
+/**
+ * Read the active selection as an 8-bit mask.
+ *
+ * `imaging.getSelection` is probed rather than assumed, and a document with no
+ * selection is a normal outcome, not an error - both come back as null so the
+ * caller can simply carry on rendering the whole layer.
+ *
+ * @param {number} documentID
+ * @param {{left:number, top:number, right:number, bottom:number}} [bounds]
+ * @returns {Promise<{data: Uint8ClampedArray, width: number, height: number,
+ *                    bounds: object}|null>}
+ */
+async function readSelection(documentID, bounds) {
+  let im;
+  try {
+    im = imaging();
+  } catch (e) {
+    return null;
+  }
+  if (typeof im.getSelection !== "function") return null;
+
+  let result;
+  try {
+    result = await im.getSelection(
+      bounds ? { documentID, sourceBounds: bounds } : { documentID }
+    );
+  } catch (e) {
+    // No selection is the overwhelmingly common case and throws on some builds.
+    return null;
+  }
+  if (!result || !result.imageData) return null;
+
+  const imageData = result.imageData;
+  try {
+    const width = imageData.width;
+    const height = imageData.height;
+    if (!width || !height) return null;
+    const raw = await imageData.getData({ chunky: true });
+    const components = imageData.components || 1;
+    let data;
+    if (components === 1) {
+      data = raw instanceof Uint8ClampedArray ? raw : new Uint8ClampedArray(raw);
+    } else {
+      // Some builds hand back a multi-component buffer; the first channel is
+      // the coverage.
+      data = new Uint8ClampedArray(width * height);
+      for (let i = 0, p = 0; i < data.length; i++, p += components) data[i] = raw[p];
+    }
+    return {
+      data,
+      width,
+      height,
+      bounds: result.sourceBounds || bounds || null,
+    };
+  } finally {
+    if (imageData && typeof imageData.dispose === "function") imageData.dispose();
+  }
+}
+
 /** @returns {boolean} whether the colour-separated output is possible here. */
 function canWriteMasks() {
   try {
@@ -239,6 +298,7 @@ function foregroundRGB() {
 
 module.exports = {
   readLayerPixels,
+  readSelection,
   writeLayerPixels,
   writeLayerMask,
   canWriteMasks,

@@ -446,6 +446,95 @@ async function main() {
   }
 
   /* ================================================================ */
+  group("Selection confines the render");
+  {
+    resetModules();
+    // A selection covering the left half of a 400x300 document.
+    const { ps } = install({
+      width: 400,
+      height: 300,
+      image: F.photo(400, 300),
+      selection: { left: 0, top: 0, right: 200, bottom: 300 },
+    });
+    const RENDER = require("../src/photoshop/render.js");
+    const { HalftoneEngine } = require("../src/engine/pipeline.js");
+    const { sanitizeParams: sane, defaultParams: defs } = require("../src/state/params.js");
+
+    const engine = new HalftoneEngine();
+    engine.setSource((await RENDER.readSource()).image);
+    const params = sane(Object.assign(defs(), { density: 40, useSelection: true }));
+
+    await RENDER.applyNew(engine, params, {});
+    ok(ps.getSelectionCalls.length > 0, "the selection was read");
+
+    const write = ps.putPixelsCalls[ps.putPixelsCalls.length - 1];
+    const data = write.imageData.data;
+    const w = write.imageData.width;
+    const h = write.imageData.height;
+    ok(w === 400 && h === 300, `the render still covers the whole layer (${w}x${h})`);
+
+    // Alpha, not colour, is what the selection controls: inside is opaque,
+    // outside is fully transparent.
+    let insideOpaque = 0;
+    let outsideOpaque = 0;
+    for (let y = 0; y < h; y += 3) {
+      for (let x = 0; x < w; x += 3) {
+        const a = data[(y * w + x) * 4 + 3];
+        if (x < 200) {
+          if (a > 250) insideOpaque++;
+        } else if (a > 4) {
+          outsideOpaque++;
+        }
+      }
+    }
+    ok(insideOpaque > 0, `the selected half is rendered (${insideOpaque} opaque samples)`);
+    ok(outsideOpaque === 0, `nothing is drawn outside the selection (${outsideOpaque} strays)`);
+
+    uninstall();
+  }
+
+  /* ================================================================ */
+  group("Selection is optional, never required");
+  {
+    // Three ways there is no selection to apply, all of which must render the
+    // whole layer rather than fail: the toggle is off, the document has no
+    // selection, and the host has no getSelection at all.
+    const cases = [
+      { name: "the toggle is off", opts: { selection: { left: 0, top: 0, right: 100, bottom: 100 } }, useSelection: false },
+      { name: "nothing is selected", opts: {}, useSelection: true },
+      { name: "the host has no getSelection", opts: { noSelectionAPI: true }, useSelection: true },
+    ];
+
+    for (const c of cases) {
+      resetModules();
+      const { ps } = install(Object.assign({ width: 300, height: 200 }, c.opts));
+      const RENDER = require("../src/photoshop/render.js");
+      const { HalftoneEngine } = require("../src/engine/pipeline.js");
+      const { sanitizeParams: sane, defaultParams: defs } = require("../src/state/params.js");
+
+      const engine = new HalftoneEngine();
+      // eslint-disable-next-line no-await-in-loop
+      engine.setSource((await RENDER.readSource()).image);
+      // eslint-disable-next-line no-await-in-loop
+      const res = await RENDER.applyNew(
+        engine,
+        sane(Object.assign(defs(), { density: 30, useSelection: c.useSelection })),
+        {}
+      );
+      ok(!!res.renderId, `${c.name}: apply still succeeds`);
+
+      const write = ps.putPixelsCalls[ps.putPixelsCalls.length - 1];
+      const data = write.imageData.data;
+      let transparent = 0;
+      for (let i = 3; i < data.length; i += 4 * 37) {
+        if (data[i] < 250) transparent++;
+      }
+      ok(transparent === 0, `${c.name}: the whole layer is rendered (${transparent} transparent samples)`);
+      uninstall();
+    }
+  }
+
+  /* ================================================================ */
   group("Separated output falls back when masks are unavailable");
   {
     resetModules();
@@ -770,6 +859,55 @@ async function main() {
     ok(shown !== rendered, "compare swaps in something other than the render");
     compareBtn.emit("pointerup", {});
     ok(document.getElementById("preview").src === rendered, "releasing compare restores the render");
+
+    // SVG export, end to end: button -> engine -> file picker -> write.
+    const notice = document.getElementById("notice");
+    document.getElementById("btn-svg").emit("click");
+    ok(await waitFor(() => ps.savedFiles.length === 1), "Export SVG asked for a save location");
+    const svgFile = ps.savedFiles[0];
+    ok(/\.svg$/.test(svgFile.name), `the suggested name ends in .svg (${svgFile.name})`);
+    ok(
+      typeof svgFile.contents === "string" && svgFile.contents.indexOf("<svg") > 0,
+      "an SVG document was written to it"
+    );
+    ok(
+      svgFile.contents.indexOf("</svg>") > 0 && svgFile.contents.indexOf("NaN") < 0,
+      "the written document is closed and free of NaN geometry"
+    );
+    ok(await waitFor(() => /Wrote/.test(notice.textContent)), `the panel reports the write ("${notice.textContent.slice(0, 48)}")`);
+
+    // In dither mode the button must refuse rather than build a file with one
+    // rectangle per pixel.
+    const beforeMode = panel.params.mode;
+    panel.setParam("mode", "dither", true);
+    await flush();
+    document.getElementById("btn-svg").emit("click");
+    ok(
+      await waitFor(() => /halftone mode only/i.test(notice.textContent)),
+      "Export SVG refuses dither mode with an explanation"
+    );
+    panel.setParam("mode", beforeMode, true);
+    await flush();
+
+    // Section heads carry a live readout of what is not at its default.
+    panel.setParam("shape", "diamond", true);
+    ok(
+      panel.summaryFor("halftone").indexOf("Diamond") >= 0,
+      `the section summary reports the shape ("${panel.summaryFor("halftone")}")`
+    );
+    for (const key of ["hue", "saturation", "brightness", "invert"]) {
+      panel.setParam(key, require("../src/state/params.js").DEF_BY_KEY[key].def, true);
+    }
+    ok(
+      panel.summaryFor("adjust") === "",
+      `a section at its defaults summarises as nothing ("${panel.summaryFor("adjust")}")`
+    );
+    panel.setParam("hue", 90, true);
+    ok(
+      /hue 90/.test(panel.summaryFor("adjust")),
+      `a moved slider appears in the summary ("${panel.summaryFor("adjust")}")`
+    );
+    panel.setParam("hue", 0, true);
 
     // Locked swatches survive re-extraction.
     panel.params.palette = ["#FF0000", "#00FF00", "#0000FF"];

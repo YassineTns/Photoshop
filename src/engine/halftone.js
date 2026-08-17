@@ -11,6 +11,7 @@
  */
 
 const { getLumaFn, adjustColor } = require("./color.js");
+const { dotJitter, isIdentity: jitterIsIdentity } = require("./jitter.js");
 const { buildToneLUT, sampleLUT, biasCurve, inkToRadius } = require("./grade.js");
 const { getShape } = require("./shapes.js");
 const { paletteToLab, nearestIndex } = require("./palette.js");
@@ -309,6 +310,9 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   const centre = [0, 0];
   const adj = p.colorAdjust || {};
   const adjOut = [0, 0, 0];
+  const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
+  const jOut = [0, 0, 1, 0];
+  const fm = p.screenType === "fm" ? p.fmThreshold : null;
 
   const rowStart = chunk.rowStart || 0;
   const rowEnd = chunk.rowEnd === undefined ? grid.rows : Math.min(grid.rows, chunk.rowEnd);
@@ -324,8 +328,19 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const graded = sampleLUT(p.toneLUT, L);
       let ink = p.invert ? graded : 1 - graded;
       ink = biasCurve(ink, p.gradeBias);
-      let r = inkToRadius(ink, maxRadius, p.radiusCurve);
-      if (r <= 0.008) continue;
+      let r;
+      if (fm) {
+        // Frequency modulation: every dot is the same size and the *number* of
+        // them carries the tone. Comparing the ink against a blue-noise
+        // threshold is what places them - blue noise because it has no
+        // low-frequency energy, so the result reads as an even grain rather
+        // than as a pattern.
+        if (ink <= fm(col, row)) continue;
+        r = maxRadius;
+      } else {
+        r = inkToRadius(ink, maxRadius, p.radiusCurve);
+        if (r <= 0.008) continue;
+      }
       // Dot gain models a press spreading ink by a fixed width around every
       // edge, which is a radius offset - not a tonal curve like Grade Bias.
       r += gain;
@@ -340,7 +355,16 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const col3 = p.palette[pi];
 
       cellCentre(grid, col, row, centre);
-      drawDot(buf, width, height, centre[0], centre[1], r, grid.cell, shape, col3);
+      let rot = 0;
+      if (jit) {
+        dotJitter(col, row, jit, grid.cell, jOut);
+        centre[0] += jOut[0];
+        centre[1] += jOut[1];
+        r *= jOut[2];
+        rot = jOut[3];
+        if (r <= 0.008) continue;
+      }
+      drawDot(buf, width, height, centre[0], centre[1], r, grid.cell, shape, col3, rot);
     }
   }
 
@@ -380,22 +404,47 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
   const first = chunk.screenStart || 0;
   const last = chunk.screenEnd === undefined ? screens.length : Math.min(screens.length, chunk.screenEnd);
 
+  const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
+  const jOut = [0, 0, 1, 0];
+  const fm = p.screenType === "fm" ? p.fmThreshold : null;
+
   for (let s = first; s < last; s++) {
     const screen = screens[s];
     const grid = screen.grid;
     const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
     const gain = (grid.cell * (p.dotGain || 0)) / 100;
     const colour = screen.color;
+    // Misregistration: the whole plate lands a hair off, so it is a constant
+    // offset for the screen rather than per-dot noise.
+    const mx = screen.offsetX || 0;
+    const my = screen.offsetY || 0;
 
     for (let row = 0; row < grid.rows; row++) {
       for (let col = 0; col < grid.cols; col++) {
         const ci = row * grid.cols + col;
         if (screen.count[ci] === 0) continue;
-        let r = inkToRadius(screen.cov[ci], maxRadius, p.radiusCurve);
-        if (r <= 0.008) continue;
+        let r;
+        if (fm) {
+          if (screen.cov[ci] <= fm(col, row + s * 97)) continue;
+          r = maxRadius;
+        } else {
+          r = inkToRadius(screen.cov[ci], maxRadius, p.radiusCurve);
+          if (r <= 0.008) continue;
+        }
         r += gain;
         cellCentre(grid, col, row, centre);
-        drawDotMultiply(buf, width, height, centre[0], centre[1], r, grid.cell, shape, colour);
+        centre[0] += mx;
+        centre[1] += my;
+        let rot = 0;
+        if (jit) {
+          dotJitter(col, row + s * 31, jit, grid.cell, jOut);
+          centre[0] += jOut[0];
+          centre[1] += jOut[1];
+          r *= jOut[2];
+          rot = jOut[3];
+          if (r <= 0.008) continue;
+        }
+        drawDotMultiply(buf, width, height, centre[0], centre[1], r, grid.cell, shape, colour, rot);
       }
     }
   }
@@ -409,7 +458,9 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
  * partial coverage from the antialiasing band behaves exactly like partial ink
  * area, which is what keeps overprints clean at the dot edges.
  */
-function drawDotMultiply(buf, w, h, cx, cy, r, cell, shape, colour) {
+function drawDotMultiply(buf, w, h, cx, cy, r, cell, shape, colour, rot) {
+  const rc = rot ? Math.cos(-rot) : 1;
+  const rs = rot ? Math.sin(-rot) : 0;
   const ir = colour[0] / 255;
   const ig = colour[1] / 255;
   const ib = colour[2] / 255;
@@ -446,9 +497,12 @@ function drawDotMultiply(buf, w, h, cx, cy, r, cell, shape, colour) {
   const y1 = Math.min(h, Math.ceil(cy + ext));
   const sdf = shape.sdf;
   for (let y = y0; y < y1; y++) {
-    const dy = y + 0.5 - cy;
+    const dy0 = y + 0.5 - cy;
     for (let x = x0; x < x1; x++) {
-      const d = sdf(x + 0.5 - cx, dy, r, cell);
+      const dx0 = x + 0.5 - cx;
+      const dx = rot ? dx0 * rc - dy0 * rs : dx0;
+      const dy = rot ? dx0 * rs + dy0 * rc : dy0;
+      const d = sdf(dx, dy, r, cell);
       if (d >= 0.5) continue;
       apply(x, y, d <= -0.5 ? 1 : 0.5 - d);
     }
@@ -662,8 +716,10 @@ function fillBackground(buf, bg) {
  *    highlight end of a gradient would clamp to a fixed half-covered pixel and
  *    the ramp would visibly stop being smooth.
  */
-function drawDot(buf, w, h, cx, cy, r, cell, shape, colour) {
+function drawDot(buf, w, h, cx, cy, r, cell, shape, colour, rot) {
   const cr = colour[0], cg = colour[1], cb = colour[2];
+  const rc = rot ? Math.cos(-rot) : 1;
+  const rs = rot ? Math.sin(-rot) : 0;
 
   if (r < 0.5) {
     const area = Math.min(1, shape.area(r, cell));
@@ -694,10 +750,14 @@ function drawDot(buf, w, h, cx, cy, r, cell, shape, colour) {
 
   const sdf = shape.sdf;
   for (let y = y0; y < y1; y++) {
-    const dy = y + 0.5 - cy;
+    const dy0 = y + 0.5 - cy;
     let i = (y * w + x0) * 4;
     for (let x = x0; x < x1; x++, i += 4) {
-      const dx = x + 0.5 - cx;
+      const dx0 = x + 0.5 - cx;
+      // Rotate the sample point, not the shape: a rotated dot is the same
+      // signed distance field read in a turned frame.
+      const dx = rot ? dx0 * rc - dy0 * rs : dx0;
+      const dy = rot ? dx0 * rs + dy0 * rc : dy0;
       const d = sdf(dx, dy, r, cell);
       if (d >= 0.5) continue;
       const a = d <= -0.5 ? 1 : 0.5 - d;

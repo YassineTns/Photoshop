@@ -12,10 +12,14 @@
     "test:heavy": "node --max-old-space-size=4096 test/run.js --heavy --visual",
     "icons": "node tools/make-icons.js",
     "playground": "node tools/build-playground.js",
-    "test:layout": "node tools/build-playground.js && node test/layout.test.mjs"
+    "test:layout": "node tools/build-playground.js && node test/layout.test.mjs",
+    "shoot": "node tools/shoot.mjs"
   },
   "engines": {
     "node": ">=18"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "optionalDependencies": {
+    "playwright": "^1.62.1"
+  }
 }

@@ -1086,6 +1086,112 @@ group("Ink separation");
   // Darker inks take the least visible angles.
   const order = SEP.inkOrder(cmyk);
   ok(order[0] === 0, "the darkest ink is screened first (45 degrees)");
+
+  // --- convergence -------------------------------------------------
+  //
+  // The solver once diverged silently: its step size used the trace of the
+  // Gram matrix as a stand-in for the largest eigenvalue, which bounds it and
+  // therefore looks safe. With four well-spread CMYK inks it was; with three
+  // dark risograph inks all pointing the same way the iteration oscillated
+  // between zero and full coverage and settled on nothing, emptying the render.
+  // Nothing about the CMYK case could have revealed that, so the guard is a
+  // general one: over many palettes, the answer must never be worse than doing
+  // nothing.
+  const residual = (bas, target, cov) => {
+    const t = SEP.toDensity(target);
+    let e = 0;
+    for (let j = 0; j < 3; j++) {
+      let acc = 0;
+      for (let k = 0; k < bas.count; k++) acc += cov[k] * bas.d[k * 3 + j];
+      const diff = acc - (t[j] - bas.paperD[j]);
+      e += diff * diff;
+    }
+    return Math.sqrt(e);
+  };
+
+  const palettes = [
+    { name: "CMYK", inks: cmyk, paper: [255, 255, 255] },
+    // The case that broke: three dark, strongly correlated inks.
+    { name: "riso", inks: [[14, 26, 107], [255, 90, 95], [61, 61, 61]], paper: [244, 241, 230] },
+    { name: "duotone", inks: [[20, 20, 24], [200, 40, 60]], paper: [245, 240, 228] },
+    { name: "near-identical", inks: [[40, 40, 40], [45, 42, 44], [38, 41, 39]], paper: [255, 255, 255] },
+    { name: "pale", inks: [[210, 200, 190], [200, 210, 200]], paper: [255, 255, 255] },
+    { name: "dark paper", inks: [[240, 240, 240], [220, 90, 90]], paper: [20, 20, 24] },
+  ];
+  const targets = [
+    [255, 255, 255], [0, 0, 0], [128, 128, 128], [235, 205, 180],
+    [70, 60, 55], [200, 150, 120], [30, 120, 220], [250, 200, 40],
+  ];
+
+  let worstExcess = -Infinity;
+  let anyOutOfRange = false;
+  let anyNaN = false;
+  for (const pal of palettes) {
+    const bas = SEP.buildInkBasis(pal.inks, pal.paper);
+    const cov = new Float64Array(pal.inks.length);
+    const zero = new Float64Array(pal.inks.length);
+    let palWorst = -Infinity;
+    for (const t of targets) {
+      SEP.unmix(bas, t, cov);
+      for (let k = 0; k < cov.length; k++) {
+        if (!Number.isFinite(cov[k])) anyNaN = true;
+        if (cov[k] < -1e-9 || cov[k] > 1 + 1e-9) anyOutOfRange = true;
+      }
+      // The solution must beat, or match, doing nothing at all.
+      const excess = residual(bas, t, cov) - residual(bas, t, zero);
+      palWorst = Math.max(palWorst, excess);
+    }
+    worstExcess = Math.max(worstExcess, palWorst);
+    ok(
+      palWorst <= 1e-6,
+      `${pal.name}: the separation never fits worse than no ink at all ` +
+        `(worst excess ${palWorst.toFixed(4)})`
+    );
+    ok(bas.L > 0, `${pal.name}: the basis reports a usable step (L = ${bas.L.toFixed(2)})`);
+  }
+  ok(!anyNaN, "coverage is finite for every palette and target");
+  ok(!anyOutOfRange, "coverage stays within [0,1] for every palette and target");
+
+  // A pure ink must be *reproduced*. Note the distinction: asking that each ink
+  // resolve to itself is only meaningful when the inks are distinguishable. Given
+  // three near-identical greys, any of them reproduces the target and which one
+  // the solver picks is arbitrary - so the property to assert is the fit, not the
+  // identity.
+  for (const pal of palettes) {
+    const bas = SEP.buildInkBasis(pal.inks, pal.paper);
+    const cov = new Float64Array(pal.inks.length);
+    let worstFit = 0;
+    for (let k = 0; k < pal.inks.length; k++) {
+      SEP.unmix(bas, pal.inks[k], cov);
+      worstFit = Math.max(worstFit, residual(bas, pal.inks[k], cov));
+    }
+    ok(worstFit < 0.35, `${pal.name}: every pure ink is reproduced (worst residual ${worstFit.toFixed(3)})`);
+  }
+
+  // Where the inks *are* distinguishable, the solver must pick the right one
+  // rather than an equivalent-looking mixture.
+  for (const pal of palettes.filter((p) => p.name !== "near-identical")) {
+    const bas = SEP.buildInkBasis(pal.inks, pal.paper);
+    const cov = new Float64Array(pal.inks.length);
+    let worst = 1;
+    for (let k = 0; k < pal.inks.length; k++) {
+      SEP.unmix(bas, pal.inks[k], cov);
+      worst = Math.min(worst, cov[k]);
+    }
+    ok(worst > 0.7, `${pal.name}: distinguishable inks resolve to themselves (weakest ${worst.toFixed(2)})`);
+  }
+
+  // Determinism: the solver reuses scratch buffers between calls, so a stale
+  // one would show up as an order-dependent answer.
+  const basA = SEP.buildInkBasis(cmyk, [255, 255, 255]);
+  const basB = SEP.buildInkBasis([[14, 26, 107], [255, 90, 95], [61, 61, 61]], [244, 241, 230]);
+  const c4 = new Float64Array(4);
+  const c3 = new Float64Array(3);
+  SEP.unmix(basA, [128, 128, 128], c4);
+  const first = Array.from(c4).join(",");
+  SEP.unmix(basB, [70, 60, 55], c3);
+  SEP.unmix(basA, [128, 128, 128], c4);
+  ok(Array.from(c4).join(",") === first, "the solver is order independent across palette sizes");
 }
 
 group("Per-ink screens");
@@ -1315,6 +1421,235 @@ group("DPI scale mode");
   const dith = sanitizeParams({ mode: "dither", scaleMode: "dpi", dpi: 100 });
   ok(resolveResolution(dith, 2000, 200) === 1000, `dither DPI resolves against ditherResolution (${resolveResolution(dith, 2000, 200)})`);
   ok(resolveResolution(rel, 3000, 0) === 123, "a missing document resolution does not break relative mode");
+}
+
+group("Stochastic (FM) screening");
+{
+  // FM keeps the dot size fixed and varies how many dots are placed, so its
+  // tone response comes from dot *count*, not dot area. The properties worth
+  // pinning are that tone still tracks the source and that the result is not a
+  // grid: an FM screen that lands on a regular lattice is just a bad AM screen.
+  const grey = (v) => F.solid(320, 320, v, v, v);
+  const p = sanitizeParams({
+    mode: "halftone",
+    screenType: "fm",
+    density: 60,
+    radius: 100,
+    palette: ["#FFFFFF", "#000000"],
+    paletteLocked: true,
+    colorCount: 2,
+  });
+
+  const densities = [0.15, 0.35, 0.6, 0.85].map((v) => {
+    const e = new HalftoneEngine();
+    e.setSource(grey(Math.round((1 - v) * 255)));
+    return inkDensity(e.render(p, { width: 320, height: 320 }), [255, 255, 255]);
+  });
+  let rising = true;
+  for (let i = 1; i < densities.length; i++) {
+    if (densities[i] <= densities[i - 1] + 0.02) rising = false;
+  }
+  ok(rising, `FM ink rises with tone (${densities.map((d) => d.toFixed(2)).join(" < ")})`);
+
+  const white = new HalftoneEngine();
+  white.setSource(F.white(320, 320));
+  ok(
+    inkDensity(white.render(p, { width: 320, height: 320 }), [255, 255, 255]) < 0.005,
+    "FM leaves paper white empty"
+  );
+
+  const black = new HalftoneEngine();
+  black.setSource(F.black(320, 320));
+  ok(
+    inkDensity(black.render(p, { width: 320, height: 320 }), [255, 255, 255]) > 0.6,
+    "FM fills solid black"
+  );
+
+  // Determinism: the threshold field is a hash, not an RNG, so two engines must
+  // agree byte for byte. If they did not, the preview would not match the render.
+  const a = new HalftoneEngine();
+  const b = new HalftoneEngine();
+  a.setSource(grey(128));
+  b.setSource(grey(128));
+  const ra = a.render(p, { width: 200, height: 200 });
+  const rb = b.render(p, { width: 200, height: 200 });
+  let identical = true;
+  for (let i = 0; i < ra.data.length; i++) {
+    if (ra.data[i] !== rb.data[i]) {
+      identical = false;
+      break;
+    }
+  }
+  ok(identical, "FM is deterministic across engine instances");
+
+  // And it must not look like AM: at a mid tone the two differ substantially.
+  const am = new HalftoneEngine();
+  am.setSource(grey(128));
+  const amOut = am.render(sanitizeParams(Object.assign({}, p, { screenType: "am" })), {
+    width: 200,
+    height: 200,
+  });
+  let diff = 0;
+  for (let i = 0; i < amOut.data.length; i += 4) {
+    if (Math.abs(amOut.data[i] - ra.data[i]) > 32) diff++;
+  }
+  ok(diff / (200 * 200) > 0.05, `FM and AM produce different screens (${((diff / 40000) * 100).toFixed(1)}% of pixels)`);
+}
+
+group("Press imperfection");
+{
+  const J = require("../src/engine/jitter.js");
+
+  const off0 = { jitterPosition: 0, jitterSize: 0, jitterAngle: 0, seed: 1 };
+  ok(J.isIdentity(off0), "no jitter is recognised as identity");
+  ok(
+    !J.isIdentity(Object.assign({}, off0, { jitterPosition: 5 })) &&
+      !J.isIdentity(Object.assign({}, off0, { jitterSize: 5 })) &&
+      !J.isIdentity(Object.assign({}, off0, { jitterAngle: 5 })),
+    "any one non-zero amount is not identity"
+  );
+
+  // Deterministic: same cell, same seed, same offset. This is the whole reason
+  // it is a hash and not Math.random - preview, render and re-render must agree.
+  const jit = { jitterPosition: 20, jitterSize: 30, jitterAngle: 45, seed: 7 };
+  const o1 = [0, 0, 1, 0];
+  const o2 = [0, 0, 1, 0];
+  J.dotJitter(12, 9, jit, 8, o1);
+  J.dotJitter(12, 9, jit, 8, o2);
+  ok(o1.every((v, i) => v === o2[i]), "the same cell always jitters the same way");
+
+  const o3 = [0, 0, 1, 0];
+  J.dotJitter(13, 9, jit, 8, o3);
+  ok(o1[0] !== o3[0] || o1[1] !== o3[1], "neighbouring cells jitter differently");
+
+  const o4 = [0, 0, 1, 0];
+  J.dotJitter(12, 9, Object.assign({}, jit, { seed: 8 }), 8, o4);
+  ok(o1[0] !== o4[0] || o1[1] !== o4[1], "the seed changes the pattern");
+
+  // Bounded: offsets stay within the requested fraction of a cell, so a jittered
+  // dot cannot wander into the cell after next and tear the screen apart.
+  let maxOff = 0;
+  let minScale = Infinity;
+  let maxScale = 0;
+  for (let y = 0; y < 40; y++) {
+    for (let x = 0; x < 40; x++) {
+      const o = [0, 0, 1, 0];
+      J.dotJitter(x, y, { jitterPosition: 50, jitterSize: 40, jitterAngle: 90, seed: 3 }, 10, o);
+      maxOff = Math.max(maxOff, Math.abs(o[0]), Math.abs(o[1]));
+      minScale = Math.min(minScale, o[2]);
+      maxScale = Math.max(maxScale, o[2]);
+    }
+  }
+  // The budget is the stated one: position is a percentage of half a cell, size
+  // a percentage of the radius. 50% of a 10px cell is 2.5px, 40% is +/-0.4x.
+  ok(maxOff <= 2.5 + 1e-6, `position jitter stays within its stated budget (${maxOff.toFixed(2)}px of 2.5)`);
+  ok(
+    minScale >= 0.6 - 1e-6 && maxScale <= 1.4 + 1e-6,
+    `size jitter stays inside +/-40% and never inverts (${minScale.toFixed(2)}..${maxScale.toFixed(2)})`
+  );
+
+  // Misregistration shifts whole screens against each other; with one ink there
+  // is nothing to misregister, so it must be a no-op there.
+  const src = F.photo(300, 300);
+  const base = sanitizeParams({
+    mode: "halftone",
+    screenMode: "perInk",
+    density: 50,
+    palette: ["#FFFFFF", "#00AEEF", "#EC008C", "#FFF200"],
+    paletteLocked: true,
+    colorCount: 4,
+  });
+  const e1 = new HalftoneEngine();
+  e1.setSource(src);
+  const clean = e1.render(base, { width: 300, height: 300 });
+  const e2 = new HalftoneEngine();
+  e2.setSource(src);
+  const off = e2.render(sanitizeParams(Object.assign({}, base, { misregistration: 60 })), {
+    width: 300,
+    height: 300,
+  });
+  let moved = 0;
+  for (let i = 0; i < clean.data.length; i += 4) {
+    if (Math.abs(clean.data[i] - off.data[i]) > 20) moved++;
+  }
+  ok(moved > 0, `misregistration displaces the ink screens (${((moved / 90000) * 100).toFixed(1)}% of pixels)`);
+
+  // Jitter must not destroy tone: a roughened press still prints the same amount
+  // of ink, give or take. This is the check that would catch dots being dropped.
+  const e3 = new HalftoneEngine();
+  e3.setSource(src);
+  const rough = e3.render(
+    sanitizeParams(Object.assign({}, base, { jitterPosition: 25, jitterSize: 20, jitterAngle: 30 })),
+    { width: 300, height: 300 }
+  );
+  const dClean = inkDensity(clean, [255, 255, 255]);
+  const dRough = inkDensity(rough, [255, 255, 255]);
+  ok(
+    Math.abs(dClean - dRough) < dClean * 0.2,
+    `jitter preserves overall ink density (${dClean.toFixed(3)} vs ${dRough.toFixed(3)})`
+  );
+}
+
+group("SVG export");
+{
+  const src = F.gradient(400, 200);
+  const e = new HalftoneEngine();
+  e.setSource(src);
+  const p = sanitizeParams({
+    mode: "halftone",
+    density: 40,
+    palette: ["#FFFFFF", "#000000"],
+    paletteLocked: true,
+    colorCount: 2,
+  });
+
+  const out = e.renderSVG(p, { width: 800, height: 400 });
+  ok(out.shapes > 100, `a gradient produces shapes (${out.shapes})`);
+  ok(out.svg.indexOf("<?xml") === 0, "the file starts with an XML declaration");
+  ok(/<svg[^>]+width="800"[^>]+height="400"/.test(out.svg), "the requested output size is honoured");
+  ok(out.svg.trim().endsWith("</svg>"), "the document is closed");
+
+  // Well-formedness, checked by counting tags rather than by pulling in a parser.
+  const opens = (out.svg.match(/<g[ >]/g) || []).length;
+  const closes = (out.svg.match(/<\/g>/g) || []).length;
+  ok(opens === closes, `every group is closed (${opens} open, ${closes} close)`);
+  ok(out.svg.indexOf("NaN") < 0 && out.svg.indexOf("undefined") < 0, "no NaN or undefined leaked into the geometry");
+
+  // Vector output is resolution independent by construction: asking for twice
+  // the size must give the same shapes, not twice as many.
+  const big = e.renderSVG(p, { width: 1600, height: 800 });
+  ok(big.shapes === out.shapes, `output size does not change the shape count (${big.shapes})`);
+
+  // Every shape the rasteriser can draw must also be expressible as vector.
+  for (const shape of SHAPE_IDS) {
+    const s = e.renderSVG(sanitizeParams(Object.assign({}, p, { shape })), { width: 400, height: 200 });
+    ok(s.shapes > 0 && s.svg.indexOf("NaN") < 0, `shape "${shape}" exports as vector (${s.shapes} shapes)`);
+  }
+
+  // Per-ink screens export as one multiply group per ink, mirroring the raster
+  // compositing, so the file reproduces the render rather than approximating it.
+  const perInk = e.renderSVG(
+    sanitizeParams(
+      Object.assign({}, p, {
+        screenMode: "perInk",
+        palette: ["#FFFFFF", "#00AEEF", "#EC008C", "#FFF200", "#000000"],
+        colorCount: 5,
+      })
+    ),
+    { width: 400, height: 200 }
+  );
+  const multiply = (perInk.svg.match(/mix-blend-mode: multiply/g) || []).length;
+  ok(multiply >= 3, `per-ink export writes one multiply group per ink (${multiply})`);
+
+  // Dither is refused rather than exported: one shape per pixel is a file no
+  // application will open, and saying so beats writing it.
+  let refused = null;
+  try {
+    e.renderSVG(sanitizeParams({ mode: "dither" }), { width: 400, height: 200 });
+  } catch (err) {
+    refused = err;
+  }
+  ok(refused !== null && /dither/i.test(refused.message), "dither mode is refused with an explanation");
 }
 
 /* ================================================================== *

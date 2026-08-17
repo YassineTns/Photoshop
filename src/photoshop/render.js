@@ -211,6 +211,10 @@ async function writeRender(engine, params, ctx, opts) {
   // --- separated -----------------------------------------------------
   report(0.25);
   const sep = engine.renderSeparated(params, { width, height });
+  if (opts.selection) {
+    // Multiply every mask by the selection, so the whole stack is confined to it.
+    maskSelection(sep.masks, width, height, bounds, opts.selection);
+  }
   report(0.55);
 
   const layerIds = [];
@@ -268,6 +272,13 @@ async function writeFlat(engine, params, opts) {
   });
   if (!out) throw new Error("Render was cancelled.");
 
+  if (opts.selection) {
+    const kept = applySelectionMask(out.data, width, height, bounds, opts.selection);
+    if (kept <= 0) {
+      throw new Error("The active selection does not overlap this layer, so there is nothing to render.");
+    }
+  }
+
   let layerId = existingLayerId;
   if (!layerId) {
     await L.selectLayers([anchorLayerId]);
@@ -285,6 +296,76 @@ async function writeFlat(engine, params, opts) {
     targetBounds: bounds,
   });
   return { layerIds: [layerId] };
+}
+
+/**
+ * Confine a rendered frame to the active selection.
+ *
+ * The render still covers the layer, and the selection is applied as alpha
+ * afterwards. Doing it this way rather than rendering only the selected
+ * rectangle keeps the halftone grid anchored to the layer, so a dot does not
+ * move when the selection changes - which is what would make a selection-limited
+ * render fail to line up with the rest of the artwork.
+ *
+ * @param {Uint8ClampedArray} data RGBA, modified in place
+ * @param {number} width
+ * @param {number} height
+ * @param {object} bounds render bounds in document space
+ * @param {object} sel from IM.readSelection
+ * @returns {number} the fraction of the frame that survived
+ */
+function applySelectionMask(data, width, height, bounds, sel) {
+  const sb = sel.bounds || { left: 0, top: 0, right: sel.width, bottom: sel.height };
+  const sw = sel.width;
+  const sh = sel.height;
+  // The selection may have been read at a different scale than the render.
+  const sx = sw / Math.max(1, sb.right - sb.left);
+  const sy = sh / Math.max(1, sb.bottom - sb.top);
+  let kept = 0;
+
+  for (let y = 0; y < height; y++) {
+    const docY = bounds.top + y;
+    const my = Math.floor((docY - sb.top) * sy);
+    const rowInside = my >= 0 && my < sh;
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (!rowInside) {
+        data[i + 3] = 0;
+        continue;
+      }
+      const docX = bounds.left + x;
+      const mx = Math.floor((docX - sb.left) * sx);
+      if (mx < 0 || mx >= sw) {
+        data[i + 3] = 0;
+        continue;
+      }
+      const a = sel.data[my * sw + mx];
+      data[i + 3] = a;
+      if (a > 0) kept++;
+    }
+  }
+  return kept / Math.max(1, width * height);
+}
+
+/** Multiply a set of coverage masks by the selection. */
+function maskSelection(masks, width, height, bounds, sel) {
+  const sb = sel.bounds || { left: 0, top: 0, right: sel.width, bottom: sel.height };
+  const sx = sel.width / Math.max(1, sb.right - sb.left);
+  const sy = sel.height / Math.max(1, sb.bottom - sb.top);
+  for (let y = 0; y < height; y++) {
+    const my = Math.floor((bounds.top + y - sb.top) * sy);
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      let a = 0;
+      if (my >= 0 && my < sel.height) {
+        const mx = Math.floor((bounds.left + x - sb.left) * sx);
+        if (mx >= 0 && mx < sel.width) a = sel.data[my * sel.width + mx];
+      }
+      if (a === 255) continue;
+      const f = a / 255;
+      for (const m of masks) m[i] = m[i] * f;
+    }
+  }
 }
 
 function hexToRgbTriplet(hex) {
@@ -323,6 +404,13 @@ async function buildRenderFor(engine, params, targetLayer, d, report) {
     engine.setSource(image);
     engine.sourceLayerId = targetLayer.id;
   }
+  // The active selection, if the user wants it respected and the host can
+  // report it. Read before the layer is touched, since converting to a Smart
+  // Object is the kind of operation that can clear it.
+  let selection = null;
+  if (params.useSelection) {
+    selection = await IM.readSelection(d.id, bounds);
+  }
   report(0.05);
 
   // 1. Seal the original inside a Smart Object. Nothing destructive happens to
@@ -346,6 +434,7 @@ async function buildRenderFor(engine, params, targetLayer, d, report) {
     height,
     group,
     anchorLayerId: so.id,
+    selection,
     report,
   });
 
@@ -354,6 +443,7 @@ async function buildRenderFor(engine, params, targetLayer, d, report) {
     docName: d.name,
     bounds,
     outputMode: written.mode,
+    selectionApplied: !!selection,
     sourceLayerName: META.SOURCE_LAYER_NAME,
   });
   const persistence = await META.saveRecord([group.id].concat(written.layerIds), record);
@@ -432,6 +522,7 @@ async function updateExisting(engine, params, hooks = {}) {
     }
     engine.setSource(image);
     engine.sourceLayerId = ctx.sourceLayer.id;
+    const selection = params.useSelection ? await IM.readSelection(d.id, bounds) : null;
     report(0.15);
 
     // Everything in the group except the source is previous output.
@@ -460,6 +551,7 @@ async function updateExisting(engine, params, hooks = {}) {
       group: ctx.group,
       anchorLayerId: ctx.sourceLayer.id,
       existingLayerId: canReuse ? stale[0].id : null,
+      selection,
       report,
     });
 

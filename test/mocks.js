@@ -210,6 +210,44 @@ class FakePhotoshop {
       putPixels: async (req) => this.putPixels(req),
       createImageDataFromBuffer: (buffer, options) => this.createImageData(buffer, options),
     };
+    // Selection reading is probed rather than assumed, so all three real cases
+    // are reproducible here: no API at all (opts.noSelectionAPI), an API that
+    // throws because nothing is selected (the default), and a live selection
+    // (opts.selection, a document-space rectangle).
+    this.selectionRect = opts.selection || null;
+    this.getSelectionCalls = [];
+    if (!opts.noSelectionAPI) {
+      this.imaging.getSelection = async (req) => {
+        this.getSelectionCalls.push(req);
+        if (!this.selectionRect) throw new Error("No selection");
+        const b = req.sourceBounds || { left: 0, top: 0, right: doc.width, bottom: doc.height };
+        const width = b.right - b.left;
+        const height = b.bottom - b.top;
+        const data = new Uint8Array(width * height);
+        const s = this.selectionRect;
+        for (let y = 0; y < height; y++) {
+          const dy = b.top + y;
+          for (let x = 0; x < width; x++) {
+            const dx = b.left + x;
+            data[y * width + x] =
+              dx >= s.left && dx < s.right && dy >= s.top && dy < s.bottom ? 255 : 0;
+          }
+        }
+        return {
+          imageData: {
+            width,
+            height,
+            components: 1,
+            componentSize: 8,
+            getData: async () => data,
+            dispose: () => {
+              this.disposed++;
+            },
+          },
+          sourceBounds: b,
+        };
+      };
+    }
     // Mask support is optional in the real host, so it is optional here too:
     // opts.noMasks exercises the documented fallback to flat output.
     if (!opts.noMasks) {
@@ -423,6 +461,10 @@ class FakePhotoshop {
       height: options.height,
       components: options.components,
       byteLength: buffer.length,
+      // The real ImageData does not expose its bytes back to the plugin, but a
+      // test has to be able to see what was actually written - otherwise the
+      // only thing assertable about a render is that it happened.
+      data: buffer,
       dispose: () => {
         self.disposed++;
       },
@@ -463,9 +505,32 @@ function install(opts) {
       };
     },
   };
+  // Files chosen through a save/open dialog, kept so a test can read back what
+  // the plugin actually wrote. `opts.cancelSave` reproduces the user pressing
+  // Cancel, which every caller has to handle without throwing.
+  const savedFiles = [];
   const uxpMock = {
-    storage: { localFileSystem: { getDataFolder: async () => fakeFolder } },
+    storage: {
+      formats: { binary: "binary", utf8: "utf8" },
+      localFileSystem: {
+        getDataFolder: async () => fakeFolder,
+        getFileForOpening: async () => null,
+        getFileForSaving: async (name) => {
+          if (opts.cancelSave) return null;
+          const entry = {
+            name,
+            contents: null,
+            write: async (data) => {
+              entry.contents = data;
+            },
+          };
+          savedFiles.push(entry);
+          return entry;
+        },
+      },
+    },
   };
+  ps.savedFiles = savedFiles;
 
   if (!originalLoad) originalLoad = Module._load;
   Module._load = function (request, parent, isMain) {

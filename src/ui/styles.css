@@ -1,9 +1,10 @@
 /*
  * Halftone Studio panel styling.
  *
- * Kept deliberately plain: flat surfaces, one accent, no shadows or gradients,
- * so the panel reads as part of Photoshop rather than as a web page embedded in
- * it. Colours are tokens so the light theme is a token swap, not a rewrite.
+ * The look is Photoshop's own: flat surfaces, one accent, tight vertical rhythm,
+ * so the panel reads as part of the application rather than as a web page
+ * embedded in it. Colours are tokens, so the light theme is a token swap and not
+ * a second stylesheet.
  *
  * WRITTEN FOR UXP, NOT FOR A BROWSER
  * ----------------------------------
@@ -24,43 +25,64 @@
  *     across the panel.
  *
  *  4. NO `::before` / `::after`. Pseudo-elements do not render, so anything they
- *     would have drawn (the disclosure caret, the user-preset marker) is a real
- *     element with real text in it.
+ *     would have drawn (the disclosure caret, the brand mark, the accent rail on
+ *     an open section) is a real element with real content in it.
  *
  * Flex longhand is used throughout rather than the shorthand, for the same
  * reason: it is the form UXP handles predictably.
+ *
+ * DECORATION THAT IS ALLOWED TO FAIL
+ * ----------------------------------
+ * `box-shadow`, `linear-gradient` and `transition` are used only where being
+ * ignored costs nothing: a shadow that does not paint leaves a flat box, a
+ * transition that does not run snaps instead of sliding. Gradients are always
+ * declared as `background-image` on top of a solid `background-color`, never as
+ * the `background` shorthand - if UXP drops the gradient the solid colour is
+ * still there, whereas a dropped shorthand would leave the element transparent.
  */
 
 :root {
-  --bg: #1e1e1e;
-  --bg-raised: #262626;
-  --bg-sunken: #171717;
-  --border: #383838;
-  --border-strong: #4a4a4a;
-  --text: #d8d8d8;
-  --text-dim: #8f8f8f;
-  --text-faint: #6b6b6b;
-  --accent: #4a90d9;
+  --bg: #1a1a1c;
+  --bg-raised: #232327;
+  --bg-raised-hi: #2c2c32;
+  --bg-sunken: #121214;
+  --border: #303036;
+  --border-strong: #44444d;
+  --text: #e8e8ec;
+  --text-dim: #9d9da8;
+  --text-faint: #70707b;
+  --accent: #5b8cff;
+  --accent-hi: #7ba4ff;
+  --accent-soft: #2b3a5e;
   --accent-text: #ffffff;
-  --track: #3a3a3a;
-  --fill: #6d7076;
-  --danger: #d9534f;
-  --ok: #57a55a;
-  --radius: 3px;
+  --track: #35353c;
+  --fill: #7b7f88;
+  --danger: #e0605c;
+  --warn: #d9a441;
+  --ok: #5cb264;
+  --radius: 4px;
+  --radius-sm: 3px;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f0f0f0;
+    --bg: #eeeef1;
     --bg-raised: #ffffff;
-    --bg-sunken: #e2e2e2;
-    --border: #cccccc;
-    --border-strong: #b0b0b0;
-    --text: #1f1f1f;
-    --text-dim: #5f5f5f;
-    --text-faint: #8a8a8a;
-    --track: #cdcdcd;
-    --fill: #8b8f95;
+    --bg-raised-hi: #f6f6f9;
+    --bg-sunken: #e1e1e6;
+    --border: #d5d5dd;
+    --border-strong: #b6b6c1;
+    --text: #1b1b1f;
+    --text-dim: #5c5c66;
+    --text-faint: #8b8b95;
+    --accent: #3a6ff0;
+    --accent-hi: #2a5ad6;
+    --accent-soft: #d3e0ff;
+    --track: #cfcfd7;
+    --fill: #8a8e97;
+    --danger: #c8433f;
+    --warn: #a97b16;
+    --ok: #3f8a46;
   }
 }
 
@@ -108,7 +130,7 @@ body {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  padding: 8px;
+  padding: 9px;
 }
 
 /*
@@ -130,6 +152,69 @@ body {
   flex-shrink: 0;
 }
 
+/* ------------------------------------------------------------ brand */
+
+.brand {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 22px;
+  margin-bottom: 9px;
+}
+
+/* The mark is a four-dot halftone ramp: the plugin's whole idea in 18 pixels. */
+.brand-mark {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  margin-right: 7px;
+  border-radius: var(--radius-sm);
+  background-color: var(--accent-soft);
+}
+
+.brand-dot {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.brand-dot-1 { width: 7px; height: 7px; left: 2px; top: 2px; }
+.brand-dot-2 { width: 5px; height: 5px; left: 11px; top: 3px; }
+.brand-dot-3 { width: 5px; height: 5px; left: 3px; top: 11px; }
+.brand-dot-4 { width: 3px; height: 3px; left: 12px; top: 12px; }
+
+.brand-name {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Says which engine is running without opening the Mode section. */
+.brand-mode {
+  flex-grow: 0;
+  flex-shrink: 0;
+  min-height: 16px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background-color: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 /* ----------------------------------------------------------- status */
 
 .status {
@@ -139,6 +224,7 @@ body {
   color: var(--text-dim);
   font-size: 10px;
   min-height: 14px;
+  margin-bottom: 6px;
 }
 
 .status-dot {
@@ -170,15 +256,16 @@ body {
 .preview-wrap {
   position: relative;
   flex-shrink: 0;
-  background: var(--bg-sunken);
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  min-height: 130px;
+  min-height: 150px;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  margin-bottom: 6px;
 }
 
 .preview {
@@ -193,24 +280,43 @@ body {
   color: var(--text-faint);
   font-size: 10px;
   text-align: center;
-  padding: 24px 12px;
-  line-height: 1.6;
+  padding: 28px 14px;
+  line-height: 1.7;
 }
+
+.preview-empty b { color: var(--text-dim); }
 
 .preview-empty.hidden { display: none; }
 
-.preview-badge {
+/*
+ * Hidden until it has something to say. `:empty` would do this in a browser but
+ * is not worth relying on here, so the panel toggles the class.
+ */
+.preview-badge { display: none; }
+
+.preview-badge.show {
+  display: block;
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  background: #000000;
-  color: #d0d0d0;
+  right: 5px;
+  bottom: 5px;
+  background-color: rgba(0, 0, 0, 0.72);
+  color: #e6e6e6;
   font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 2px;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 7px;
 }
 
 /* --------------------------------------------------------- controls */
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--bg-raised);
+}
 
 .toolbar {
   display: flex;
@@ -219,19 +325,24 @@ body {
 }
 
 .toolbar > * {
-  margin-right: 4px;
+  margin-right: 5px;
 }
+
+.toolbar > *:last-child { margin-right: 0; }
+
+.toolbar-tail { margin-top: 5px; }
 
 .btn {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  min-height: 24px;
-  padding: 0 6px;
-  background: var(--bg-raised);
+  min-height: 25px;
+  padding: 0 7px;
+  background-color: var(--bg-raised-hi);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.05));
   color: var(--text);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
@@ -240,11 +351,18 @@ body {
   text-overflow: ellipsis;
 }
 
-.btn:hover { border-color: var(--accent); }
-.btn:active { background: var(--bg-sunken); }
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.btn:active {
+  background-color: var(--bg-sunken);
+  background-image: none;
+}
 
 .btn[disabled] {
-  opacity: 0.4;
+  opacity: 0.38;
   cursor: default;
   border-color: var(--border);
 }
@@ -252,26 +370,38 @@ body {
 .btn[disabled]:hover { border-color: var(--border); }
 
 .btn-primary {
-  background: var(--accent);
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.1));
   border-color: var(--accent);
   color: var(--accent-text);
+  font-weight: 600;
 }
 
-.btn-small { min-height: 20px; font-size: 10px; }
+.btn-primary:hover {
+  background-color: var(--accent-hi);
+  border-color: var(--accent-hi);
+}
+
+.btn-small {
+  min-height: 21px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
 
 .progress {
-  min-height: 2px;
-  height: 2px;
+  min-height: 3px;
+  height: 3px;
   background: var(--track);
-  border-radius: 1px;
+  border-radius: 2px;
   overflow: hidden;
   opacity: 0;
+  margin-bottom: 6px;
 }
 
 .progress.active { opacity: 1; }
 
 .progress-bar {
-  height: 2px;
+  height: 3px;
   width: 0%;
   background: var(--accent);
 }
@@ -287,26 +417,24 @@ body {
 .section {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-raised);
-  margin-bottom: 3px;
+  background-color: var(--bg-raised);
+  margin-bottom: 4px;
   flex-shrink: 0;
+  overflow: hidden;
 }
+
+.section.open { border-color: var(--border-strong); }
 
 .section-head {
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 5px 7px;
+  padding: 6px 8px;
   cursor: pointer;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  min-height: 20px;
+  min-height: 22px;
 }
 
-.section-head:hover { color: var(--text); }
+.section-head:hover { background-color: var(--bg-raised-hi); }
 
 /* A real glyph, because pseudo-elements and CSS triangles both fail in UXP. */
 .section-caret {
@@ -314,15 +442,55 @@ body {
   min-width: 10px;
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 4px;
-  font-size: 8px;
+  margin-right: 6px;
+  font-size: 7px;
   line-height: 1;
   color: var(--text-faint);
 }
 
+.section.open .section-caret { color: var(--accent); }
+
+.section-title {
+  flex-grow: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section.open .section-title { color: var(--text); }
+.section-head:hover .section-title { color: var(--text); }
+
+/*
+ * The collapsed section's readout. Right-aligned, dim, and allowed to be cut
+ * off: it is a reminder, never the only way to see a value.
+ */
+.section-summary {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  margin-left: 8px;
+  text-align: right;
+  font-size: 9px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An open section shows the real controls; repeating them in the head is noise. */
+.section.open .section-summary { display: none; }
+
 .section-body {
   display: none;
-  padding: 4px 7px 7px;
+  padding: 2px 8px 8px;
+  border-top: 1px solid var(--border);
 }
 
 .section.open .section-body { display: block; }
@@ -333,17 +501,19 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  min-height: 26px;
+  min-height: 27px;
   flex-shrink: 0;
 }
 
 .ctl > * {
-  margin-right: 6px;
+  margin-right: 7px;
 }
 
+.ctl > *:last-child { margin-right: 0; }
+
 .ctl-label {
-  width: 62px;
-  min-width: 62px;
+  width: 64px;
+  min-width: 64px;
   flex-grow: 0;
   flex-shrink: 0;
   color: var(--text-dim);
@@ -369,8 +539,8 @@ body {
 .slider-track {
   position: relative;
   width: 100%;
-  height: 3px;
-  min-height: 3px;
+  height: 4px;
+  min-height: 4px;
   background: var(--track);
   border-radius: 2px;
 }
@@ -379,22 +549,26 @@ body {
   position: absolute;
   left: 0;
   top: 0;
-  height: 3px;
+  height: 4px;
   background: var(--fill);
   border-radius: 2px;
 }
 
+.ctl.modified .slider-fill { background: var(--accent); }
+
 .slider-thumb {
   position: absolute;
   top: -3px;
-  width: 9px;
-  height: 9px;
-  margin-left: -4px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
   border-radius: 50%;
   background: var(--text);
   border: 1px solid var(--bg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
+.slider:hover .slider-thumb { background: var(--accent-hi); }
 .slider.dragging .slider-thumb { background: var(--accent); }
 
 /* Explicit width: a UXP input asserts its own and would eat the slider. */
@@ -403,19 +577,20 @@ body {
   min-width: 52px;
   flex-grow: 0;
   flex-shrink: 0;
-  min-height: 20px;
-  background: var(--bg-sunken);
+  min-height: 21px;
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-size: 10px;
   text-align: right;
-  padding: 0 4px;
+  padding: 0 5px;
   font-family: inherit;
   -webkit-user-select: text;
   user-select: text;
 }
 
+.ctl-value:hover { border-color: var(--border-strong); }
 .ctl-value:focus { border-color: var(--accent); }
 
 .ctl-reset {
@@ -436,7 +611,7 @@ body {
 }
 
 .ctl.modified .ctl-reset { visibility: visible; }
-.ctl-reset:hover { color: var(--text); }
+.ctl-reset:hover { color: var(--accent); }
 
 /* ----------------------------------------------------- segmented set */
 
@@ -447,23 +622,24 @@ body {
   flex-shrink: 1;
   min-width: 0;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   overflow: hidden;
+  background-color: var(--bg-sunken);
 }
 
 .seg-item {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  min-height: 20px;
+  min-height: 21px;
   text-align: center;
-  background: var(--bg-raised);
+  background-color: var(--bg-raised-hi);
   color: var(--text-dim);
   border: 0;
   border-right: 1px solid var(--border);
   font-size: 10px;
   cursor: pointer;
-  padding: 0 2px;
+  padding: 0 3px;
   font-family: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -471,9 +647,14 @@ body {
 }
 
 .seg-item:last-child { border-right: 0; }
-.seg-item.active { background: var(--accent); color: var(--accent-text); }
-.seg-item:hover { color: var(--text); }
-.seg-item.active:hover { color: var(--accent-text); }
+.seg-item.active {
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.seg-item:hover { color: var(--text); background-color: var(--bg-raised); }
+.seg-item.active:hover { color: var(--accent-text); background-color: var(--accent-hi); }
 
 /* ------------------------------------------------------------ chips */
 
@@ -485,25 +666,25 @@ body {
 }
 
 .chip-row > * {
-  margin-right: 3px;
-  margin-bottom: 3px;
+  margin-right: 4px;
+  margin-bottom: 4px;
 }
 
 .chip-group-label {
   color: var(--text-faint);
   font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-top: 3px;
-  margin-bottom: 2px;
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+  margin-bottom: 3px;
 }
 
 .algo-chip {
-  min-height: 19px;
-  padding: 0 6px;
-  background: var(--bg-sunken);
+  min-height: 20px;
+  padding: 0 8px;
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: 10px;
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
@@ -513,40 +694,47 @@ body {
 
 .algo-chip:hover { color: var(--text); border-color: var(--border-strong); }
 .algo-chip.active {
-  background: var(--accent);
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
   color: var(--accent-text);
   border-color: var(--accent);
+  font-weight: 600;
 }
 
 /* --------------------------------------------------------- toggle */
 
 .toggle {
-  width: 30px;
-  min-width: 30px;
-  height: 16px;
-  min-height: 16px;
+  width: 32px;
+  min-width: 32px;
+  height: 17px;
+  min-height: 17px;
   flex-grow: 0;
   flex-shrink: 0;
-  border-radius: 8px;
-  background: var(--track);
+  border-radius: 9px;
+  background-color: var(--track);
   border: 1px solid var(--border-strong);
   position: relative;
   cursor: pointer;
   padding: 0;
 }
 
+.toggle:hover { border-color: var(--accent); }
+
 .toggle-knob {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 10px;
-  height: 10px;
-  border-radius: 5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 6px;
   background: var(--text-dim);
 }
 
-.toggle.on { background: var(--accent); border-color: var(--accent); }
-.toggle.on .toggle-knob { left: 16px; background: #ffffff; }
+.toggle.on {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+.toggle.on .toggle-knob { left: 17px; background: #ffffff; }
 
 /* -------------------------------------------------------- palette */
 
@@ -554,40 +742,42 @@ body {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  padding: 4px 0;
+  padding: 5px 0 2px;
 }
 
 .palette > * {
-  margin-right: 4px;
-  margin-bottom: 4px;
+  margin-right: 5px;
+  margin-bottom: 5px;
 }
 
 .swatch-wrap {
   position: relative;
-  width: 28px;
-  height: 22px;
+  width: 30px;
+  height: 24px;
 }
 
 /* A div, not a button: UXP gives buttons a native look that fights back. */
 .swatch {
-  width: 28px;
-  height: 22px;
+  width: 30px;
+  height: 24px;
   border: 1px solid var(--border-strong);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   padding: 0;
 }
 
+.swatch:hover { border-color: var(--accent); }
+
 .swatch-input {
-  width: 66px;
-  min-width: 66px;
-  min-height: 20px;
-  background: var(--bg-sunken);
+  width: 68px;
+  min-width: 68px;
+  min-height: 21px;
+  background-color: var(--bg-sunken);
   border: 1px solid var(--accent);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-size: 10px;
-  padding: 0 3px;
+  padding: 0 4px;
   font-family: inherit;
   -webkit-user-select: text;
   user-select: text;
@@ -596,10 +786,10 @@ body {
 .swatch-lock {
   position: absolute;
   right: 2px;
-  bottom: 1px;
-  width: 6px;
-  height: 6px;
-  border-radius: 3px;
+  bottom: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
   background: #ffffff;
   border: 1px solid #000000;
 }
@@ -619,20 +809,31 @@ body {
 .hint {
   color: var(--text-faint);
   font-size: 9px;
-  line-height: 1.4;
-  padding: 2px 0 4px;
+  line-height: 1.5;
+  padding: 4px 0 2px;
 }
 
 /* --------------------------------------------------------- presets */
 
 .preset-bar {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--bg-raised);
+  padding: 7px;
   display: flex;
   flex-direction: column;
 }
 
-.preset-row { margin-bottom: 5px; }
+.bar-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 5px;
+}
+
+.preset-row { margin-bottom: 4px; }
 
 .preset-list {
   display: flex;
@@ -641,16 +842,16 @@ body {
 }
 
 .preset-list > * {
-  margin-right: 3px;
-  margin-bottom: 3px;
+  margin-right: 4px;
+  margin-bottom: 4px;
 }
 
 .preset-chip {
-  min-height: 20px;
-  padding: 0 8px;
-  background: var(--bg-raised);
+  min-height: 21px;
+  padding: 0 9px;
+  background-color: var(--bg-raised-hi);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: 11px;
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
@@ -660,9 +861,11 @@ body {
 
 .preset-chip:hover { color: var(--text); border-color: var(--accent); }
 .preset-chip.active {
-  background: var(--accent);
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
   color: var(--accent-text);
   border-color: var(--accent);
+  font-weight: 600;
 }
 .preset-chip.user { border-style: dashed; }
 
@@ -670,17 +873,25 @@ body {
 
 .notice {
   display: none;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border-radius: var(--radius);
   font-size: 10px;
-  line-height: 1.5;
+  line-height: 1.55;
   border: 1px solid var(--border);
-  background: var(--bg-raised);
+  border-left-width: 3px;
+  border-left-color: var(--border-strong);
+  background-color: var(--bg-raised);
   color: var(--text-dim);
   -webkit-user-select: text;
   user-select: text;
 }
 
 .notice.show { display: block; }
-.notice.error { border-color: var(--danger); color: var(--text); }
-.notice.warn { border-color: #b8860b; }
+.notice.error {
+  border-left-color: var(--danger);
+  color: var(--text);
+}
+.notice.warn {
+  border-left-color: var(--warn);
+  color: var(--text);
+}

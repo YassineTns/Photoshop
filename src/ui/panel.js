@@ -19,6 +19,7 @@ const C = require("./controls.js");
 const {
   PARAM_DEFS,
   SECTIONS,
+  DEF_BY_KEY,
   defaultParams,
   sanitizeParams,
   isVisible,
@@ -35,6 +36,7 @@ const META = require("../photoshop/metadata.js");
 const IM = require("../photoshop/imaging.js");
 const BATCH = require("../photoshop/batch.js");
 const SWATCH = require("../photoshop/swatches.js");
+const FILES = require("../photoshop/files.js");
 
 const PREVIEW_MAX = 460;
 /** Cap on the dither grid used for previews; above this the preview approximates. */
@@ -110,11 +112,13 @@ class Panel {
     const host = this.$("sections");
     host.textContent = "";
     this.controls = {};
+    this.sections = {};
 
     for (const sec of SECTIONS) {
       if (!sectionVisible(sec, this.params)) continue;
       const open = this.sectionOpen[sec.id] !== false;
       const s = C.createSection(sec.id, sec.label, open);
+      this.sections[sec.id] = s;
       s.onToggle = (isOpen) => {
         this.sectionOpen[sec.id] = isOpen;
       };
@@ -137,6 +141,52 @@ class Panel {
       }
       host.appendChild(s.el);
     }
+    this.refreshSummaries();
+  }
+
+  /**
+   * Update the readout on every section head.
+   *
+   * The rule is "say what is not the default": a choice always shows its value,
+   * a toggle shows its name only when it is on, and a slider appears only once
+   * it has been moved. A panel of defaults therefore stays quiet, and anything
+   * you have touched is visible without opening the section it lives in.
+   */
+  refreshSummaries() {
+    if (!this.sections) return;
+    for (const sec of SECTIONS) {
+      const s = this.sections[sec.id];
+      if (!s) continue;
+      s.setSummary(this.summaryFor(sec.id));
+    }
+    const modeBadge = this.$("brand-mode");
+    if (modeBadge) modeBadge.textContent = this.params.mode === "dither" ? "Dither" : "Halftone";
+  }
+
+  summaryFor(sectionId) {
+    const keys = SECTION_SUMMARY[sectionId];
+    if (!keys) return "";
+    const parts = [];
+    for (const key of keys) {
+      const def = DEF_BY_KEY[key];
+      if (!def || !isVisible(def, this.params)) continue;
+      const v = this.params[key];
+      if (def.type === "choice" || def.type === "chips") {
+        parts.push(C.optionLabel(def, v, key === "ditherAlgorithm" ? ALGORITHM_LABELS : null));
+      } else if (def.type === "toggle") {
+        // Only when it deviates, and phrased so an off-by-default-on toggle
+        // still reads correctly rather than silently vanishing.
+        if (v !== def.def) parts.push((v ? "" : "no ") + def.label.toLowerCase());
+      } else if (def.type === "slider") {
+        if (Math.abs(v - def.def) > (def.step || 1) / 1000) {
+          parts.push(shortLabel(def) + " " + v.toFixed(def.decimals || 0) + (def.unit || ""));
+        }
+      } else if (def.type === "palette") {
+        parts.push(`${(v || []).length} colours`);
+      }
+      if (parts.length >= 3) break;
+    }
+    return parts.join(" · ");
   }
 
   /** Does changing `key` alter which controls should be on screen? */
@@ -217,6 +267,7 @@ class Panel {
     this.$("btn-update").addEventListener("click", () => this.update());
     this.$("btn-reset").addEventListener("click", () => this.resetAll());
     this.$("btn-batch").addEventListener("click", () => this.batchApply());
+    this.$("btn-svg").addEventListener("click", () => this.exportSVG());
     this.bindCompare();
     this.$("btn-save-preset").addEventListener("click", () => this.savePreset());
     this.$("btn-load-preset").addEventListener("click", () => this.promptLoadPreset());
@@ -245,6 +296,7 @@ class Panel {
 
   onParamsChanged(committed) {
     this.renderPresetChips();
+    this.refreshSummaries();
     this.schedulePreview();
     if (committed) this.persistSession();
   }
@@ -405,7 +457,7 @@ class Panel {
       this._lastBadge =
         `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
         (out.exact ? "" : " · approx");
-      this.$("preview-badge").textContent = this._lastBadge;
+      this.badge(this._lastBadge);
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
       this.notice(`Preview failed: ${e.message}`, "error");
@@ -518,6 +570,56 @@ class Panel {
     });
   }
 
+  /* ------------------------------------------------------ SVG export */
+
+  /**
+   * Write the current halftone out as vector art.
+   *
+   * The size used is the *document* size of the loaded layer, not the analysis
+   * image the preview draws from: the analysis read is capped at 2600px, but the
+   * SVG carries no pixels, so exporting at the layer's real dimensions costs
+   * nothing and gives the printer a file at the right physical scale.
+   */
+  async exportSVG() {
+    if (!this.engine.hasSource()) {
+      this.notice("Load a layer first — there is nothing to export yet.", "warn");
+      return;
+    }
+    if (this.params.mode === "dither") {
+      this.notice(
+        "SVG export covers halftone mode only. A dither is one shape per pixel, " +
+          "so even a small image becomes hundreds of thousands of rectangles that " +
+          "no vector application will open. Switch to Halftone mode to export.",
+        "warn"
+      );
+      return;
+    }
+
+    await this.guard("Building SVG…", async () => {
+      const b = this.sourceInfo && this.sourceInfo.bounds;
+      const size = b
+        ? { width: Math.round(b.right - b.left), height: Math.round(b.bottom - b.top) }
+        : { width: this.engine.source.width, height: this.engine.source.height };
+
+      const out = this.engine.renderSVG(this.params, size);
+      const base = (this.sourceInfo && this.sourceInfo.layerName) || "halftone";
+      const name = await FILES.saveText(FILES.safeName(base + " halftone", "svg"), out.svg, "svg");
+      if (!name) {
+        this.notice("SVG export cancelled.");
+        return;
+      }
+      const kb = Math.round(out.svg.length / 1024);
+      this.notice(
+        `Wrote ${name}: ${out.shapes} shapes at ${size.width}x${size.height}, ${kb} KB.` +
+          (out.busy
+            ? " That is a lot of objects — expect illustration apps to be slow opening it; " +
+              "a larger Radius or a coarser grid will thin it out."
+            : ""),
+        out.busy ? "warn" : ""
+      );
+    });
+  }
+
   /* --------------------------------------------------------- compare */
 
   /**
@@ -532,7 +634,7 @@ class Panel {
       const img = this.$("preview");
       this._renderedSrc = img.src;
       img.src = this.sourceDataURL();
-      this.$("preview-badge").textContent = "original";
+      this.badge("original");
     };
     const hide = () => {
       if (!this._renderedSrc) return;
@@ -540,7 +642,7 @@ class Panel {
       // button was held, and a re-render would race a pending preview tick.
       this.$("preview").src = this._renderedSrc;
       this._renderedSrc = null;
-      this.$("preview-badge").textContent = this._lastBadge || "";
+      this.badge(this._lastBadge);
     };
     btn.addEventListener("pointerdown", show);
     btn.addEventListener("pointerup", hide);
@@ -773,6 +875,7 @@ class Panel {
       "btn-update",
       "btn-reset",
       "btn-batch",
+      "btn-svg",
       "btn-save-preset",
       "btn-load-preset",
     ]) {
@@ -781,6 +884,13 @@ class Panel {
       if (enabled) b.removeAttribute("disabled");
       else b.setAttribute("disabled", "true");
     }
+  }
+
+  /** The overlay in the preview's corner; hidden when there is nothing to say. */
+  badge(text) {
+    const b = this.$("preview-badge");
+    b.textContent = text || "";
+    b.className = "preview-badge" + (text ? " show" : "");
   }
 
   status(text, kind) {
@@ -800,6 +910,32 @@ class Panel {
     n.textContent = text;
     n.className = "notice show" + (kind ? " " + kind : "");
   }
+}
+
+/**
+ * Which parameters each section head reports, in order. Kept short on purpose:
+ * a summary that lists everything is a second copy of the section, not a
+ * summary, and a 300px panel has room for about three items.
+ */
+const SECTION_SUMMARY = {
+  // Not `mode`: the badge in the header already says which engine is running.
+  mode: ["lumaMode"],
+  scale: ["scaleMode", "density", "dpi", "ditherResolution"],
+  halftone: ["shape", "screenType", "radius", "angle"],
+  press: ["jitterPosition", "jitterSize", "misregistration"],
+  dither: ["ditherAlgorithm", "ditherStrength"],
+  preprocess: ["blur", "sharpen", "noiseReduction"],
+  colors: ["colorCount", "quantMethod", "spread"],
+  tonal: ["tonalMapping"],
+  grade: ["contrast", "gamma", "exposure", "gradeBias"],
+  adjust: ["invert", "hue", "saturation", "brightness"],
+  output: ["output", "useSelection"],
+  batch: ["batchScope", "batchSharedPalette"],
+};
+
+/** "Sharpen Radius" -> "sharpen": enough to tell two sliders apart, no more. */
+function shortLabel(def) {
+  return String(def.label).split(" ")[0].toLowerCase();
 }
 
 const ALGORITHM_LABELS = {};

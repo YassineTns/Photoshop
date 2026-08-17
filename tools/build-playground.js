@@ -29,31 +29,54 @@ const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
 
-/** Modules to inline, in no particular order - the shim resolves between them. */
-const MODULES = [
-  "src/engine/color.js",
-  "src/engine/blur.js",
-  "src/engine/preprocess.js",
-  "src/engine/grade.js",
-  "src/engine/quantization.js",
-  "src/engine/palette.js",
-  "src/engine/tonemap.js",
-  "src/engine/separation.js",
-  "src/engine/shapes.js",
-  "src/engine/resample.js",
-  "src/engine/halftone.js",
-  "src/engine/dither.js",
+function read(rel) {
+  return fs.readFileSync(path.join(ROOT, rel), "utf8");
+}
+
+/**
+ * Follow the relative requires out from a set of entry points.
+ *
+ * This used to be two hand-written lists, and they went stale exactly as you
+ * would expect: src/engine/jitter.js was added, nobody remembered to register
+ * it, and the preview page threw "Module not found" on load - so every layout
+ * assertion ran against a panel that had never built. Crawling the requires
+ * means the bundle cannot disagree with the source about what the source needs.
+ *
+ * Bare requires ("photoshop", "uxp") are left alone; those are the host modules
+ * the stubs below stand in for.
+ */
+function collect(entries, exclude = []) {
+  const seen = new Set(exclude);
+  const order = [];
+
+  const visit = (rel) => {
+    if (seen.has(rel)) return;
+    seen.add(rel);
+    const dir = path.posix.dirname(rel);
+    const src = read(rel);
+    // Deliberately a regex and not a parser: every require in this codebase is
+    // a top-level string literal, and a parser would be more to keep working.
+    for (const m of src.matchAll(/require\(\s*"(\.[^"]+)"\s*\)/g)) {
+      visit(path.posix.normalize(path.posix.join(dir, m[1])));
+    }
+    // Post-order, so a module is defined after everything it depends on. The
+    // shim is lazy so the order is cosmetic, but a readable bundle is worth it.
+    order.push(rel);
+  };
+
+  entries.forEach(visit);
+  return order;
+}
+
+/** Everything the engine-only playground needs. */
+const MODULES = collect([
   "src/engine/pipeline.js",
+  "src/engine/dither.js",
   "src/state/params.js",
   "src/presets/presets.js",
   "src/ui/controls.js",
   "src/util/png.js",
-  "src/util/base64.js",
-];
-
-function read(rel) {
-  return fs.readFileSync(path.join(ROOT, rel), "utf8");
-}
+]);
 
 /** Minimal CommonJS loader: enough to resolve the relative requires we use. */
 const SHIM = `
@@ -107,18 +130,8 @@ function wrapModule(rel) {
   );
 }
 
-/** Modules the panel needs on top of the engine. */
-const PANEL_MODULES = [
-  "src/photoshop/host.js",
-  "src/photoshop/document.js",
-  "src/photoshop/layers.js",
-  "src/photoshop/imaging.js",
-  "src/photoshop/metadata.js",
-  "src/photoshop/render.js",
-  "src/photoshop/batch.js",
-  "src/photoshop/swatches.js",
-  "src/ui/panel.js",
-];
+/** What the real panel needs on top of that - the Photoshop layer, mostly. */
+const PANEL_MODULES = collect(["src/ui/panel.js"], MODULES);
 
 /**
  * Stand-ins for the two modules only Photoshop provides. Deliberately minimal:

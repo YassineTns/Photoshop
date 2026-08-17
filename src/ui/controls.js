@@ -183,10 +183,11 @@ function createChoice(def, value, onChange, labels) {
   if (def.hint) label.title = def.hint;
   const seg = el("div", "seg");
   const buttons = {};
+  const nameOf = (opt) => optionLabel(def, opt, labels);
 
   for (const opt of def.options) {
-    const b = el("button", "seg-item", (labels && labels[opt]) || titleCase(opt));
-    b.title = (labels && labels[opt]) || titleCase(opt);
+    const b = el("button", "seg-item", nameOf(opt));
+    b.title = nameOf(opt);
     b.addEventListener("click", () => {
       set(opt);
       onChange(opt, true);
@@ -214,6 +215,19 @@ function titleCase(s) {
 }
 
 /**
+ * The display name for one option of a choice.
+ *
+ * Title-casing the id is right for `circle` and `perInk`, and wrong for every
+ * acronym and compound we have: it produces "Dpi", "Am", "Kmeans", "Luma709".
+ * A def may therefore carry an `optionLabels` map, which wins.
+ */
+function optionLabel(def, opt, labels) {
+  if (labels && labels[opt]) return labels[opt];
+  if (def && def.optionLabels && def.optionLabels[opt]) return def.optionLabels[opt];
+  return titleCase(opt);
+}
+
+/**
  * A wrapping list of chips, for choices with too many options to fit a
  * segmented bar (the dither algorithm list has two dozen).
  *
@@ -234,7 +248,7 @@ function createChipChoice(def, value, onChange, meta = {}) {
   const groups = meta.groups && meta.groupOf ? meta.groups : null;
 
   const addChip = (opt, host) => {
-    const text = (meta.labels && meta.labels[opt]) || titleCase(opt);
+    const text = optionLabel(def, opt, meta.labels);
     const b = el("button", "algo-chip", text);
     b.title = text;
     b.addEventListener("click", () => {
@@ -507,17 +521,34 @@ function createColorField(def, value, onChange, getForeground) {
   return { el: row, set };
 }
 
-/** A collapsible section. */
+/**
+ * A collapsible section.
+ *
+ * The head carries a summary of the section's key values on the right, so a
+ * collapsed section still says what it is set to. With a dozen sections and only
+ * a couple of them open at a time, that is the difference between a panel you
+ * can scan and one where every setting has to be hunted for.
+ */
 function createSection(id, label, open) {
   const section = el("div", "section" + (open ? " open" : ""));
   const head = el("div", "section-head");
   // A text glyph rather than a CSS triangle or a pseudo-element: UXP renders
   // neither, and a border-triangle came out as a solid square.
   const caret = el("div", "section-caret", open ? "\u25BC" : "\u25B6");
+  const title = el("div", "section-title", label);
+  const summary = el("div", "section-summary", "");
   head.appendChild(caret);
-  head.appendChild(el("div", null, label));
+  head.appendChild(title);
+  head.appendChild(summary);
   const body = el("div", "section-body");
-  const api = { el: section, body, onToggle: null };
+  const api = {
+    el: section,
+    body,
+    onToggle: null,
+    setSummary: (text) => {
+      summary.textContent = text || "";
+    },
+  };
   head.addEventListener("click", () => {
     const isOpen = section.className.indexOf("open") >= 0;
     section.className = "section" + (isOpen ? "" : " open");
@@ -541,4 +572,5 @@ module.exports = {
   createSection,
   normalizeHex,
   titleCase,
+  optionLabel,
 };

@@ -36,6 +36,9 @@ const {
   rasterizeScreensSeparated,
 } = require("./halftone.js");
 const { screenAngles, buildInkBasis, unmix, inkOrder } = require("./separation.js");
+const { blueNoiseMatrix } = require("./dither.js");
+const { inkOffset } = require("./jitter.js");
+const { halftoneSVG, screensSVG, BUSY_SHAPE_COUNT } = require("./svg.js");
 const { buildToneLUT, applyToneToImage, biasCurve } = require("./grade.js");
 const { ditherToIndices, indicesToRGBA, indicesToMasks } = require("./dither.js");
 const { makeZoneRange } = require("./tonemap.js");
@@ -447,9 +450,25 @@ class HalftoneEngine {
   _rasterParams(params) {
     const st = this._paletteStructure(params);
     const ink = st.inkIndices.map((i) => st.out[i]);
+    // Blue noise drives FM screening: no low-frequency energy, so the dots read
+    // as an even grain instead of a pattern. Built once and cached.
+    let fmThreshold = null;
+    if (params.screenType === "fm") {
+      const m = blueNoiseMatrix(64);
+      fmThreshold = (col, row) => m.data[(row % m.size) * m.size + (col % m.size)];
+    }
+
     return {
       radius: params.radius,
       shape: params.shape,
+      screenType: params.screenType,
+      fmThreshold,
+      jitter: {
+        jitterPosition: params.jitterPosition,
+        jitterSize: params.jitterSize,
+        jitterAngle: params.jitterAngle,
+        seed: params.seed,
+      },
       dotGain: params.dotGain,
       gradeBias: params.gradeBias,
       radiusCurve: params.radiusCurve,
@@ -507,7 +526,7 @@ class HalftoneEngine {
       const { screens, rp: srp } = this._ensureScreens(params);
       const t0 = now();
       const data = rasterizeScreens(
-        this._scaleScreens(screens, width, height),
+        this._scaleScreens(screens, width, height, params),
         srp,
         width,
         height,
@@ -546,16 +565,32 @@ class HalftoneEngine {
     };
   }
 
-  /** Re-express every screen's grid at the output resolution. */
-  _scaleScreens(screens, width, height) {
-    return screens.map((sc) => ({
-      grid: scaleGrid(sc.grid, width, height),
-      cov: sc.cov,
-      count: sc.count,
-      color: sc.color,
-      paletteIndex: sc.paletteIndex,
-      angle: sc.angle,
-    }));
+  /**
+   * Re-express every screen's grid at the output resolution.
+   *
+   * Misregistration is applied here rather than at measurement time because it
+   * is a rendering offset in output pixels: derived from the scaled cell size,
+   * it looks identical on a preview and on a full render.
+   */
+  _scaleScreens(screens, width, height, params) {
+    const amount = params ? params.misregistration : 0;
+    const seed = params ? params.seed : 0;
+    const off = [0, 0];
+    return screens.map((sc, i) => {
+      const grid = scaleGrid(sc.grid, width, height);
+      inkOffset(i, amount, grid.cell, seed, off);
+      return {
+        grid,
+        cov: sc.cov,
+        count: sc.count,
+        color: sc.color,
+        inkSlot: sc.inkSlot,
+        paletteIndex: sc.paletteIndex,
+        angle: sc.angle,
+        offsetX: off[0],
+        offsetY: off[1],
+      };
+    });
   }
 
   /**
@@ -588,7 +623,7 @@ class HalftoneEngine {
 
     if (params.screenMode === "perInk") {
       const { screens, rp: srp } = this._ensureScreens(params);
-      const scaled = this._scaleScreens(screens, width, height);
+      const scaled = this._scaleScreens(screens, width, height, params);
       const inkMasks = rasterizeScreensSeparated(scaled, srp, width, height);
       // Transparent inks overlap by design, so the masks are NOT exclusive and
       // the fill layers must be set to Multiply over an opaque paper.
@@ -629,6 +664,44 @@ class HalftoneEngine {
   }
 
   /**
+   * Export the render as SVG.
+   *
+   * Halftone only: dithering is one shape per pixel, so even a modest grid runs
+   * to hundreds of thousands of rectangles and no viewer would open the result.
+   * The caller is told that rather than handed a useless file.
+   *
+   * @returns {{svg: string, shapes: number, busy: boolean}}
+   */
+  renderSVG(params, opts = {}) {
+    if (!this.source) throw new Error("HalftoneEngine: no source set");
+    if (params.mode === "dither") {
+      throw new Error(
+        "SVG export covers halftone mode only. A dither is one shape per pixel, " +
+          "which no vector application can usefully open."
+      );
+    }
+    const width = opts.width || this.source.width;
+    const height = opts.height || this.source.height;
+
+    let res;
+    if (params.screenMode === "perInk") {
+      const { screens, rp } = this._ensureScreens(params);
+      res = screensSVG(this._scaleScreens(screens, width, height, params), rp, width, height);
+    } else {
+      const cells = this._ensureCells(params);
+      const rp = this._rasterParams(params);
+      const grid = scaleGrid(cells.grid, width, height);
+      res = halftoneSVG(
+        { lum: cells.lum, rgb: cells.rgb, count: cells.count, grid },
+        rp,
+        width,
+        height
+      );
+    }
+    return { svg: res.svg, shapes: res.shapes, busy: res.shapes > BUSY_SHAPE_COUNT };
+  }
+
+  /**
    * Chunked render that yields to the event loop between bands so Photoshop's
    * UI keeps breathing on very large documents.
    */
@@ -665,7 +738,7 @@ class HalftoneEngine {
       const { screens, rp: srp } = this._ensureScreens(params);
       if (shouldCancel()) return null;
       onProgress(0.2);
-      const scaled = this._scaleScreens(screens, width, height);
+      const scaled = this._scaleScreens(screens, width, height, params);
       const data = opts.out || new Uint8ClampedArray(width * height * 4);
       for (let i = 0; i < scaled.length; i++) {
         rasterizeScreens(scaled, srp, width, height, data, {

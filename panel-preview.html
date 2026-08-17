@@ -8,9 +8,10 @@
 /*
  * Halftone Studio panel styling.
  *
- * Kept deliberately plain: flat surfaces, one accent, no shadows or gradients,
- * so the panel reads as part of Photoshop rather than as a web page embedded in
- * it. Colours are tokens so the light theme is a token swap, not a rewrite.
+ * The look is Photoshop's own: flat surfaces, one accent, tight vertical rhythm,
+ * so the panel reads as part of the application rather than as a web page
+ * embedded in it. Colours are tokens, so the light theme is a token swap and not
+ * a second stylesheet.
  *
  * WRITTEN FOR UXP, NOT FOR A BROWSER
  * ----------------------------------
@@ -31,43 +32,64 @@
  *     across the panel.
  *
  *  4. NO `::before` / `::after`. Pseudo-elements do not render, so anything they
- *     would have drawn (the disclosure caret, the user-preset marker) is a real
- *     element with real text in it.
+ *     would have drawn (the disclosure caret, the brand mark, the accent rail on
+ *     an open section) is a real element with real content in it.
  *
  * Flex longhand is used throughout rather than the shorthand, for the same
  * reason: it is the form UXP handles predictably.
+ *
+ * DECORATION THAT IS ALLOWED TO FAIL
+ * ----------------------------------
+ * `box-shadow`, `linear-gradient` and `transition` are used only where being
+ * ignored costs nothing: a shadow that does not paint leaves a flat box, a
+ * transition that does not run snaps instead of sliding. Gradients are always
+ * declared as `background-image` on top of a solid `background-color`, never as
+ * the `background` shorthand - if UXP drops the gradient the solid colour is
+ * still there, whereas a dropped shorthand would leave the element transparent.
  */
 
 :root {
-  --bg: #1e1e1e;
-  --bg-raised: #262626;
-  --bg-sunken: #171717;
-  --border: #383838;
-  --border-strong: #4a4a4a;
-  --text: #d8d8d8;
-  --text-dim: #8f8f8f;
-  --text-faint: #6b6b6b;
-  --accent: #4a90d9;
+  --bg: #1a1a1c;
+  --bg-raised: #232327;
+  --bg-raised-hi: #2c2c32;
+  --bg-sunken: #121214;
+  --border: #303036;
+  --border-strong: #44444d;
+  --text: #e8e8ec;
+  --text-dim: #9d9da8;
+  --text-faint: #70707b;
+  --accent: #5b8cff;
+  --accent-hi: #7ba4ff;
+  --accent-soft: #2b3a5e;
   --accent-text: #ffffff;
-  --track: #3a3a3a;
-  --fill: #6d7076;
-  --danger: #d9534f;
-  --ok: #57a55a;
-  --radius: 3px;
+  --track: #35353c;
+  --fill: #7b7f88;
+  --danger: #e0605c;
+  --warn: #d9a441;
+  --ok: #5cb264;
+  --radius: 4px;
+  --radius-sm: 3px;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f0f0f0;
+    --bg: #eeeef1;
     --bg-raised: #ffffff;
-    --bg-sunken: #e2e2e2;
-    --border: #cccccc;
-    --border-strong: #b0b0b0;
-    --text: #1f1f1f;
-    --text-dim: #5f5f5f;
-    --text-faint: #8a8a8a;
-    --track: #cdcdcd;
-    --fill: #8b8f95;
+    --bg-raised-hi: #f6f6f9;
+    --bg-sunken: #e1e1e6;
+    --border: #d5d5dd;
+    --border-strong: #b6b6c1;
+    --text: #1b1b1f;
+    --text-dim: #5c5c66;
+    --text-faint: #8b8b95;
+    --accent: #3a6ff0;
+    --accent-hi: #2a5ad6;
+    --accent-soft: #d3e0ff;
+    --track: #cfcfd7;
+    --fill: #8a8e97;
+    --danger: #c8433f;
+    --warn: #a97b16;
+    --ok: #3f8a46;
   }
 }
 
@@ -115,7 +137,7 @@ body {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  padding: 8px;
+  padding: 9px;
 }
 
 /*
@@ -137,6 +159,69 @@ body {
   flex-shrink: 0;
 }
 
+/* ------------------------------------------------------------ brand */
+
+.brand {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 22px;
+  margin-bottom: 9px;
+}
+
+/* The mark is a four-dot halftone ramp: the plugin's whole idea in 18 pixels. */
+.brand-mark {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  margin-right: 7px;
+  border-radius: var(--radius-sm);
+  background-color: var(--accent-soft);
+}
+
+.brand-dot {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.brand-dot-1 { width: 7px; height: 7px; left: 2px; top: 2px; }
+.brand-dot-2 { width: 5px; height: 5px; left: 11px; top: 3px; }
+.brand-dot-3 { width: 5px; height: 5px; left: 3px; top: 11px; }
+.brand-dot-4 { width: 3px; height: 3px; left: 12px; top: 12px; }
+
+.brand-name {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Says which engine is running without opening the Mode section. */
+.brand-mode {
+  flex-grow: 0;
+  flex-shrink: 0;
+  min-height: 16px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background-color: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 /* ----------------------------------------------------------- status */
 
 .status {
@@ -146,6 +231,7 @@ body {
   color: var(--text-dim);
   font-size: 10px;
   min-height: 14px;
+  margin-bottom: 6px;
 }
 
 .status-dot {
@@ -177,15 +263,16 @@ body {
 .preview-wrap {
   position: relative;
   flex-shrink: 0;
-  background: var(--bg-sunken);
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  min-height: 130px;
+  min-height: 150px;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  margin-bottom: 6px;
 }
 
 .preview {
@@ -200,24 +287,43 @@ body {
   color: var(--text-faint);
   font-size: 10px;
   text-align: center;
-  padding: 24px 12px;
-  line-height: 1.6;
+  padding: 28px 14px;
+  line-height: 1.7;
 }
+
+.preview-empty b { color: var(--text-dim); }
 
 .preview-empty.hidden { display: none; }
 
-.preview-badge {
+/*
+ * Hidden until it has something to say. `:empty` would do this in a browser but
+ * is not worth relying on here, so the panel toggles the class.
+ */
+.preview-badge { display: none; }
+
+.preview-badge.show {
+  display: block;
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  background: #000000;
-  color: #d0d0d0;
+  right: 5px;
+  bottom: 5px;
+  background-color: rgba(0, 0, 0, 0.72);
+  color: #e6e6e6;
   font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 2px;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 7px;
 }
 
 /* --------------------------------------------------------- controls */
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--bg-raised);
+}
 
 .toolbar {
   display: flex;
@@ -226,19 +332,24 @@ body {
 }
 
 .toolbar > * {
-  margin-right: 4px;
+  margin-right: 5px;
 }
+
+.toolbar > *:last-child { margin-right: 0; }
+
+.toolbar-tail { margin-top: 5px; }
 
 .btn {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  min-height: 24px;
-  padding: 0 6px;
-  background: var(--bg-raised);
+  min-height: 25px;
+  padding: 0 7px;
+  background-color: var(--bg-raised-hi);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.05));
   color: var(--text);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
@@ -247,11 +358,18 @@ body {
   text-overflow: ellipsis;
 }
 
-.btn:hover { border-color: var(--accent); }
-.btn:active { background: var(--bg-sunken); }
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.btn:active {
+  background-color: var(--bg-sunken);
+  background-image: none;
+}
 
 .btn[disabled] {
-  opacity: 0.4;
+  opacity: 0.38;
   cursor: default;
   border-color: var(--border);
 }
@@ -259,26 +377,38 @@ body {
 .btn[disabled]:hover { border-color: var(--border); }
 
 .btn-primary {
-  background: var(--accent);
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.1));
   border-color: var(--accent);
   color: var(--accent-text);
+  font-weight: 600;
 }
 
-.btn-small { min-height: 20px; font-size: 10px; }
+.btn-primary:hover {
+  background-color: var(--accent-hi);
+  border-color: var(--accent-hi);
+}
+
+.btn-small {
+  min-height: 21px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
 
 .progress {
-  min-height: 2px;
-  height: 2px;
+  min-height: 3px;
+  height: 3px;
   background: var(--track);
-  border-radius: 1px;
+  border-radius: 2px;
   overflow: hidden;
   opacity: 0;
+  margin-bottom: 6px;
 }
 
 .progress.active { opacity: 1; }
 
 .progress-bar {
-  height: 2px;
+  height: 3px;
   width: 0%;
   background: var(--accent);
 }
@@ -294,26 +424,24 @@ body {
 .section {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-raised);
-  margin-bottom: 3px;
+  background-color: var(--bg-raised);
+  margin-bottom: 4px;
   flex-shrink: 0;
+  overflow: hidden;
 }
+
+.section.open { border-color: var(--border-strong); }
 
 .section-head {
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 5px 7px;
+  padding: 6px 8px;
   cursor: pointer;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  min-height: 20px;
+  min-height: 22px;
 }
 
-.section-head:hover { color: var(--text); }
+.section-head:hover { background-color: var(--bg-raised-hi); }
 
 /* A real glyph, because pseudo-elements and CSS triangles both fail in UXP. */
 .section-caret {
@@ -321,15 +449,55 @@ body {
   min-width: 10px;
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 4px;
-  font-size: 8px;
+  margin-right: 6px;
+  font-size: 7px;
   line-height: 1;
   color: var(--text-faint);
 }
 
+.section.open .section-caret { color: var(--accent); }
+
+.section-title {
+  flex-grow: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section.open .section-title { color: var(--text); }
+.section-head:hover .section-title { color: var(--text); }
+
+/*
+ * The collapsed section's readout. Right-aligned, dim, and allowed to be cut
+ * off: it is a reminder, never the only way to see a value.
+ */
+.section-summary {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  margin-left: 8px;
+  text-align: right;
+  font-size: 9px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An open section shows the real controls; repeating them in the head is noise. */
+.section.open .section-summary { display: none; }
+
 .section-body {
   display: none;
-  padding: 4px 7px 7px;
+  padding: 2px 8px 8px;
+  border-top: 1px solid var(--border);
 }
 
 .section.open .section-body { display: block; }
@@ -340,17 +508,19 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  min-height: 26px;
+  min-height: 27px;
   flex-shrink: 0;
 }
 
 .ctl > * {
-  margin-right: 6px;
+  margin-right: 7px;
 }
 
+.ctl > *:last-child { margin-right: 0; }
+
 .ctl-label {
-  width: 62px;
-  min-width: 62px;
+  width: 64px;
+  min-width: 64px;
   flex-grow: 0;
   flex-shrink: 0;
   color: var(--text-dim);
@@ -376,8 +546,8 @@ body {
 .slider-track {
   position: relative;
   width: 100%;
-  height: 3px;
-  min-height: 3px;
+  height: 4px;
+  min-height: 4px;
   background: var(--track);
   border-radius: 2px;
 }
@@ -386,22 +556,26 @@ body {
   position: absolute;
   left: 0;
   top: 0;
-  height: 3px;
+  height: 4px;
   background: var(--fill);
   border-radius: 2px;
 }
 
+.ctl.modified .slider-fill { background: var(--accent); }
+
 .slider-thumb {
   position: absolute;
   top: -3px;
-  width: 9px;
-  height: 9px;
-  margin-left: -4px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
   border-radius: 50%;
   background: var(--text);
   border: 1px solid var(--bg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
+.slider:hover .slider-thumb { background: var(--accent-hi); }
 .slider.dragging .slider-thumb { background: var(--accent); }
 
 /* Explicit width: a UXP input asserts its own and would eat the slider. */
@@ -410,19 +584,20 @@ body {
   min-width: 52px;
   flex-grow: 0;
   flex-shrink: 0;
-  min-height: 20px;
-  background: var(--bg-sunken);
+  min-height: 21px;
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-size: 10px;
   text-align: right;
-  padding: 0 4px;
+  padding: 0 5px;
   font-family: inherit;
   -webkit-user-select: text;
   user-select: text;
 }
 
+.ctl-value:hover { border-color: var(--border-strong); }
 .ctl-value:focus { border-color: var(--accent); }
 
 .ctl-reset {
@@ -443,7 +618,7 @@ body {
 }
 
 .ctl.modified .ctl-reset { visibility: visible; }
-.ctl-reset:hover { color: var(--text); }
+.ctl-reset:hover { color: var(--accent); }
 
 /* ----------------------------------------------------- segmented set */
 
@@ -454,23 +629,24 @@ body {
   flex-shrink: 1;
   min-width: 0;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   overflow: hidden;
+  background-color: var(--bg-sunken);
 }
 
 .seg-item {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  min-height: 20px;
+  min-height: 21px;
   text-align: center;
-  background: var(--bg-raised);
+  background-color: var(--bg-raised-hi);
   color: var(--text-dim);
   border: 0;
   border-right: 1px solid var(--border);
   font-size: 10px;
   cursor: pointer;
-  padding: 0 2px;
+  padding: 0 3px;
   font-family: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -478,9 +654,14 @@ body {
 }
 
 .seg-item:last-child { border-right: 0; }
-.seg-item.active { background: var(--accent); color: var(--accent-text); }
-.seg-item:hover { color: var(--text); }
-.seg-item.active:hover { color: var(--accent-text); }
+.seg-item.active {
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.seg-item:hover { color: var(--text); background-color: var(--bg-raised); }
+.seg-item.active:hover { color: var(--accent-text); background-color: var(--accent-hi); }
 
 /* ------------------------------------------------------------ chips */
 
@@ -492,25 +673,25 @@ body {
 }
 
 .chip-row > * {
-  margin-right: 3px;
-  margin-bottom: 3px;
+  margin-right: 4px;
+  margin-bottom: 4px;
 }
 
 .chip-group-label {
   color: var(--text-faint);
   font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-top: 3px;
-  margin-bottom: 2px;
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+  margin-bottom: 3px;
 }
 
 .algo-chip {
-  min-height: 19px;
-  padding: 0 6px;
-  background: var(--bg-sunken);
+  min-height: 20px;
+  padding: 0 8px;
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: 10px;
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
@@ -520,40 +701,47 @@ body {
 
 .algo-chip:hover { color: var(--text); border-color: var(--border-strong); }
 .algo-chip.active {
-  background: var(--accent);
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
   color: var(--accent-text);
   border-color: var(--accent);
+  font-weight: 600;
 }
 
 /* --------------------------------------------------------- toggle */
 
 .toggle {
-  width: 30px;
-  min-width: 30px;
-  height: 16px;
-  min-height: 16px;
+  width: 32px;
+  min-width: 32px;
+  height: 17px;
+  min-height: 17px;
   flex-grow: 0;
   flex-shrink: 0;
-  border-radius: 8px;
-  background: var(--track);
+  border-radius: 9px;
+  background-color: var(--track);
   border: 1px solid var(--border-strong);
   position: relative;
   cursor: pointer;
   padding: 0;
 }
 
+.toggle:hover { border-color: var(--accent); }
+
 .toggle-knob {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 10px;
-  height: 10px;
-  border-radius: 5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 6px;
   background: var(--text-dim);
 }
 
-.toggle.on { background: var(--accent); border-color: var(--accent); }
-.toggle.on .toggle-knob { left: 16px; background: #ffffff; }
+.toggle.on {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+.toggle.on .toggle-knob { left: 17px; background: #ffffff; }
 
 /* -------------------------------------------------------- palette */
 
@@ -561,40 +749,42 @@ body {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  padding: 4px 0;
+  padding: 5px 0 2px;
 }
 
 .palette > * {
-  margin-right: 4px;
-  margin-bottom: 4px;
+  margin-right: 5px;
+  margin-bottom: 5px;
 }
 
 .swatch-wrap {
   position: relative;
-  width: 28px;
-  height: 22px;
+  width: 30px;
+  height: 24px;
 }
 
 /* A div, not a button: UXP gives buttons a native look that fights back. */
 .swatch {
-  width: 28px;
-  height: 22px;
+  width: 30px;
+  height: 24px;
   border: 1px solid var(--border-strong);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   padding: 0;
 }
 
+.swatch:hover { border-color: var(--accent); }
+
 .swatch-input {
-  width: 66px;
-  min-width: 66px;
-  min-height: 20px;
-  background: var(--bg-sunken);
+  width: 68px;
+  min-width: 68px;
+  min-height: 21px;
+  background-color: var(--bg-sunken);
   border: 1px solid var(--accent);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-size: 10px;
-  padding: 0 3px;
+  padding: 0 4px;
   font-family: inherit;
   -webkit-user-select: text;
   user-select: text;
@@ -603,10 +793,10 @@ body {
 .swatch-lock {
   position: absolute;
   right: 2px;
-  bottom: 1px;
-  width: 6px;
-  height: 6px;
-  border-radius: 3px;
+  bottom: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
   background: #ffffff;
   border: 1px solid #000000;
 }
@@ -626,20 +816,31 @@ body {
 .hint {
   color: var(--text-faint);
   font-size: 9px;
-  line-height: 1.4;
-  padding: 2px 0 4px;
+  line-height: 1.5;
+  padding: 4px 0 2px;
 }
 
 /* --------------------------------------------------------- presets */
 
 .preset-bar {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--bg-raised);
+  padding: 7px;
   display: flex;
   flex-direction: column;
 }
 
-.preset-row { margin-bottom: 5px; }
+.bar-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 5px;
+}
+
+.preset-row { margin-bottom: 4px; }
 
 .preset-list {
   display: flex;
@@ -648,16 +849,16 @@ body {
 }
 
 .preset-list > * {
-  margin-right: 3px;
-  margin-bottom: 3px;
+  margin-right: 4px;
+  margin-bottom: 4px;
 }
 
 .preset-chip {
-  min-height: 20px;
-  padding: 0 8px;
-  background: var(--bg-raised);
+  min-height: 21px;
+  padding: 0 9px;
+  background-color: var(--bg-raised-hi);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: 11px;
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
@@ -667,9 +868,11 @@ body {
 
 .preset-chip:hover { color: var(--text); border-color: var(--accent); }
 .preset-chip.active {
-  background: var(--accent);
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
   color: var(--accent-text);
   border-color: var(--accent);
+  font-weight: 600;
 }
 .preset-chip.user { border-style: dashed; }
 
@@ -677,29 +880,43 @@ body {
 
 .notice {
   display: none;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border-radius: var(--radius);
   font-size: 10px;
-  line-height: 1.5;
+  line-height: 1.55;
   border: 1px solid var(--border);
-  background: var(--bg-raised);
+  border-left-width: 3px;
+  border-left-color: var(--border-strong);
+  background-color: var(--bg-raised);
   color: var(--text-dim);
   -webkit-user-select: text;
   user-select: text;
 }
 
 .notice.show { display: block; }
-.notice.error { border-color: var(--danger); color: var(--text); }
-.notice.warn { border-color: #b8860b; }
+.notice.error {
+  border-left-color: var(--danger);
+  color: var(--text);
+}
+.notice.warn {
+  border-left-color: var(--warn);
+  color: var(--text);
+}
 
 </style>
 </head>
 <body>
 
     <div id="app">
-      <div id="status" class="status">
-        <span id="status-dot" class="status-dot"></span>
-        <span id="status-text">Starting…</span>
+      <div class="brand">
+        <div class="brand-mark">
+          <div class="brand-dot brand-dot-1"></div>
+          <div class="brand-dot brand-dot-2"></div>
+          <div class="brand-dot brand-dot-3"></div>
+          <div class="brand-dot brand-dot-4"></div>
+        </div>
+        <div class="brand-name">Halftone Studio</div>
+        <div id="brand-mode" class="brand-mode">Halftone</div>
       </div>
 
       <div id="preview-wrap" class="preview-wrap">
@@ -710,28 +927,36 @@ body {
         <div id="preview-badge" class="preview-badge"></div>
       </div>
 
-      <div class="toolbar">
-        <button id="btn-load" class="btn">Load Layer</button>
-        <button id="btn-apply" class="btn btn-primary">Apply</button>
-        <button id="btn-update" class="btn">Update</button>
-      </div>
-
-      <div class="toolbar">
-        <button id="btn-batch" class="btn btn-small">Batch Apply</button>
-        <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
+      <div id="status" class="status">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-text">Starting…</span>
       </div>
 
       <div id="progress" class="progress"><div id="progress-bar" class="progress-bar"></div></div>
 
+      <div class="actions">
+        <div class="toolbar">
+          <button id="btn-load" class="btn">Load Layer</button>
+          <button id="btn-apply" class="btn btn-primary">Apply</button>
+          <button id="btn-update" class="btn">Update</button>
+        </div>
+        <div class="toolbar toolbar-tail">
+          <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
+          <button id="btn-batch" class="btn btn-small">Batch Apply</button>
+          <button id="btn-svg" class="btn btn-small">Export SVG</button>
+        </div>
+      </div>
+
       <div id="sections" class="sections"></div>
 
       <div class="preset-bar">
+        <div class="bar-label">Presets</div>
         <div class="preset-row">
           <div id="preset-list" class="preset-list"></div>
         </div>
         <div class="toolbar">
-          <button id="btn-save-preset" class="btn btn-small">Save Preset</button>
-          <button id="btn-load-preset" class="btn btn-small">Load Preset</button>
+          <button id="btn-save-preset" class="btn btn-small">Save</button>
+          <button id="btn-load-preset" class="btn btn-small">Load</button>
           <button id="btn-reset" class="btn btn-small">Reset All</button>
         </div>
       </div>
@@ -834,263 +1059,88 @@ window.__define("uxp", function (module) {
 
 </script>
 <script>
-window.__define("src/engine/color.js", function (module, exports, require) {
+window.__define("src/engine/resample.js", function (module, exports, require) {
 "use strict";
 
 /**
- * Colour space helpers.
+ * Area-average (box) downscaling.
  *
- * Everything here is plain JS with no UXP dependency so the engine can be unit
- * tested in Node. Values marked `0..255` are gamma encoded sRGB bytes, values
- * marked `0..1` are normalised.
+ * Used to build the low resolution "analysis" image the halftone cells are
+ * measured from. Area averaging is the right filter here: it is exactly the
+ * same operation the cell sampler performs, so downscaling first changes the
+ * measured cell tone by a negligible amount while cutting the cost of the only
+ * O(width*height) stage by one to two orders of magnitude.
  */
-
-/* ------------------------------------------------------------------ *
- * sRGB <-> linear
- * ------------------------------------------------------------------ */
-
-const SRGB_TO_LINEAR = new Float32Array(256);
-for (let i = 0; i < 256; i++) {
-  const c = i / 255;
-  SRGB_TO_LINEAR[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-}
-
-function srgbToLinear(c) {
-  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-}
-
-function linearToSrgb(c) {
-  if (c <= 0) return 0;
-  if (c >= 1) return 1;
-  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
-}
-
-/* ------------------------------------------------------------------ *
- * Luminance
- * ------------------------------------------------------------------ */
 
 /**
- * Rec.709 luma computed directly on gamma encoded bytes. This is what most
- * halftone / screen-printing tools use: it tracks perceived ink coverage
- * closely and produces a visually even ramp on a black -> white gradient.
- * @returns {number} 0..1
+ * @param {{data: Uint8ClampedArray, width: number, height: number}} img
+ * @param {number} tw target width
+ * @param {number} th target height
+ * @returns {{data: Uint8ClampedArray, width: number, height: number}}
  */
-function luma709(r, g, b) {
-  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-}
-
-/** Rec.601 luma, slightly warmer weighting. @returns {number} 0..1 */
-function luma601(r, g, b) {
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-}
-
-/**
- * CIE L* (perceptual lightness) derived from linear relative luminance.
- * Costlier but perceptually uniform. @returns {number} 0..1
- */
-function perceptualL(r, g, b) {
-  const y =
-    0.2126 * SRGB_TO_LINEAR[r | 0] +
-    0.7152 * SRGB_TO_LINEAR[g | 0] +
-    0.0722 * SRGB_TO_LINEAR[b | 0];
-  const l = y > 0.008856451679 ? 116 * Math.cbrt(y) - 16 : 903.2962962 * y;
-  return l / 100;
-}
-
-const LUMA_MODES = {
-  luma709,
-  luma601,
-  perceptual: perceptualL,
-};
-
-function getLumaFn(mode) {
-  return LUMA_MODES[mode] || luma709;
-}
-
-/* ------------------------------------------------------------------ *
- * OKLab - used for quantisation, palette spread and nearest-colour
- * matching. Perceptually uniform, so palettes stay clean instead of muddy.
- * ------------------------------------------------------------------ */
-
-/** @param {number} r 0..255 @param {number} g 0..255 @param {number} b 0..255 */
-function rgbToOklab(r, g, b, out) {
-  const lr = SRGB_TO_LINEAR[r & 255];
-  const lg = SRGB_TO_LINEAR[g & 255];
-  const lb = SRGB_TO_LINEAR[b & 255];
-
-  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
-  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
-  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
-
-  const res = out || [0, 0, 0];
-  res[0] = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
-  res[1] = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
-  res[2] = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
-  return res;
-}
-
-/** @returns {number[]} rgb 0..255 (rounded, clamped) */
-function oklabToRgb(L, a, bb, out) {
-  const l_ = L + 0.3963377774 * a + 0.2158037573 * bb;
-  const m_ = L - 0.1055613458 * a - 0.0638541728 * bb;
-  const s_ = L - 0.0894841775 * a - 1.291485548 * bb;
-
-  const l = l_ * l_ * l_;
-  const m = m_ * m_ * m_;
-  const s = s_ * s_ * s_;
-
-  const lr = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
-  const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-  const lb = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
-
-  const res = out || [0, 0, 0];
-  res[0] = clamp255(Math.round(linearToSrgb(lr) * 255));
-  res[1] = clamp255(Math.round(linearToSrgb(lg) * 255));
-  res[2] = clamp255(Math.round(linearToSrgb(lb) * 255));
-  return res;
-}
-
-function clamp255(v) {
-  return v < 0 ? 0 : v > 255 ? 255 : v;
-}
-
-/* ------------------------------------------------------------------ *
- * HSL - used for the Hue / Saturation / Brightness controls so the
- * behaviour matches what users expect from Photoshop's own adjustment.
- * ------------------------------------------------------------------ */
-
-/** @returns {number[]} [h 0..1, s 0..1, l 0..1] */
-function rgbToHsl(r, g, b, out) {
-  const rr = r / 255;
-  const gg = g / 255;
-  const bb = b / 255;
-  const max = rr > gg ? (rr > bb ? rr : bb) : gg > bb ? gg : bb;
-  const min = rr < gg ? (rr < bb ? rr : bb) : gg < bb ? gg : bb;
-  const l = (max + min) / 2;
-  let h = 0;
-  let s = 0;
-  const d = max - min;
-  if (d > 1e-9) {
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    if (max === rr) h = (gg - bb) / d + (gg < bb ? 6 : 0);
-    else if (max === gg) h = (bb - rr) / d + 2;
-    else h = (rr - gg) / d + 4;
-    h /= 6;
+function downscaleBox(img, tw, th) {
+  const { data: src, width: sw, height: sh } = img;
+  tw = Math.max(1, Math.round(tw));
+  th = Math.max(1, Math.round(th));
+  if (tw >= sw && th >= sh) {
+    return { data: new Uint8ClampedArray(src), width: sw, height: sh };
   }
-  const res = out || [0, 0, 0];
-  res[0] = h;
-  res[1] = s;
-  res[2] = l;
-  return res;
-}
 
-function hue2rgb(p, q, t) {
-  if (t < 0) t += 1;
-  if (t > 1) t -= 1;
-  if (t < 1 / 6) return p + (q - p) * 6 * t;
-  if (t < 1 / 2) return q;
-  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-  return p;
-}
+  const out = new Uint8ClampedArray(tw * th * 4);
+  const xRatio = sw / tw;
+  const yRatio = sh / th;
 
-/** @returns {number[]} rgb 0..255 */
-function hslToRgb(h, s, l, out) {
-  const res = out || [0, 0, 0];
-  if (s <= 1e-9) {
-    const v = clamp255(Math.round(l * 255));
-    res[0] = res[1] = res[2] = v;
-    return res;
+  // Precompute the source column span for each target column.
+  const xStarts = new Int32Array(tw + 1);
+  for (let x = 0; x <= tw; x++) xStarts[x] = Math.min(sw, Math.round(x * xRatio));
+
+  for (let y = 0; y < th; y++) {
+    const sy0 = Math.min(sh - 1, Math.round(y * yRatio));
+    const sy1 = Math.max(sy0 + 1, Math.min(sh, Math.round((y + 1) * yRatio)));
+    for (let x = 0; x < tw; x++) {
+      const sx0 = Math.min(sw - 1, xStarts[x]);
+      const sx1 = Math.max(sx0 + 1, xStarts[x + 1]);
+      let r = 0, g = 0, b = 0, a = 0, n = 0;
+      for (let sy = sy0; sy < sy1; sy++) {
+        let p = (sy * sw + sx0) * 4;
+        for (let sx = sx0; sx < sx1; sx++, p += 4) {
+          const al = src[p + 3];
+          // Weight colour by alpha so transparent pixels do not pull the
+          // average towards whatever garbage sits in their colour channels.
+          const wgt = al / 255;
+          r += src[p] * wgt;
+          g += src[p + 1] * wgt;
+          b += src[p + 2] * wgt;
+          a += al;
+          n += wgt;
+        }
+      }
+      const cnt = (sy1 - sy0) * (sx1 - sx0);
+      const o = (y * tw + x) * 4;
+      if (n > 1e-6) {
+        out[o] = r / n;
+        out[o + 1] = g / n;
+        out[o + 2] = b / n;
+      }
+      out[o + 3] = a / cnt;
+    }
   }
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  res[0] = clamp255(Math.round(hue2rgb(p, q, h + 1 / 3) * 255));
-  res[1] = clamp255(Math.round(hue2rgb(p, q, h) * 255));
-  res[2] = clamp255(Math.round(hue2rgb(p, q, h - 1 / 3) * 255));
-  return res;
+
+  return { data: out, width: tw, height: th };
 }
 
 /**
- * Apply hue rotation / saturation scaling / brightness offset to one colour.
- *
- * Deliberately does NOT touch HSL lightness for hue+saturation, so changing
- * Hue never changes the halftone geometry (see engine/pipeline.js).
- *
- * @param {number[]} rgb    [r,g,b] 0..255
- * @param {object} adj      {hue: degrees, saturation: multiplier, brightness: -100..100}
- * @param {number[]} [out]
+ * Downscale so the longest edge is at most `maxLongest`, preserving aspect.
+ * Returns the source untouched when it is already small enough.
  */
-const _hsl = [0, 0, 0];
-function adjustColor(r, g, b, adj, out) {
-  const res = out || [0, 0, 0];
-  const hueShift = (adj.hue || 0) / 360;
-  const sat = adj.saturation === undefined ? 1 : adj.saturation;
-  const bright = (adj.brightness || 0) / 100;
-
-  if (hueShift === 0 && sat === 1 && bright === 0) {
-    res[0] = r;
-    res[1] = g;
-    res[2] = b;
-    return res;
-  }
-
-  rgbToHsl(r, g, b, _hsl);
-  let h = _hsl[0] + hueShift;
-  h -= Math.floor(h);
-  const s = Math.min(1, Math.max(0, _hsl[1] * sat));
-  let l = _hsl[2];
-  if (bright !== 0) {
-    // Positive brightness lifts towards white, negative pulls towards black.
-    l = bright > 0 ? l + (1 - l) * bright : l * (1 + bright);
-    l = Math.min(1, Math.max(0, l));
-  }
-  return hslToRgb(h, s, l, res);
+function fitWithin(img, maxLongest) {
+  const longest = Math.max(img.width, img.height);
+  if (longest <= maxLongest) return img;
+  const s = maxLongest / longest;
+  return downscaleBox(img, Math.round(img.width * s), Math.round(img.height * s));
 }
 
-function isIdentityAdjust(adj) {
-  return (
-    (adj.hue || 0) === 0 &&
-    (adj.saturation === undefined ? 1 : adj.saturation) === 1 &&
-    (adj.brightness || 0) === 0
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * Hex helpers
- * ------------------------------------------------------------------ */
-
-function hexToRgb(hex) {
-  if (typeof hex !== "string") return null;
-  let h = hex.trim().replace(/^#/, "");
-  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-  const n = parseInt(h, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function rgbToHex(r, g, b) {
-  const v = (clamp255(Math.round(r)) << 16) | (clamp255(Math.round(g)) << 8) | clamp255(Math.round(b));
-  return "#" + v.toString(16).padStart(6, "0").toUpperCase();
-}
-
-module.exports = {
-  SRGB_TO_LINEAR,
-  srgbToLinear,
-  linearToSrgb,
-  luma709,
-  luma601,
-  perceptualL,
-  getLumaFn,
-  LUMA_MODES,
-  rgbToOklab,
-  oklabToRgb,
-  rgbToHsl,
-  hslToRgb,
-  adjustColor,
-  isIdentityAdjust,
-  hexToRgb,
-  rgbToHex,
-  clamp255,
-};
+module.exports = { downscaleBox, fitWithin };
 
 });
 
@@ -1356,6 +1406,393 @@ module.exports = { unsharpMask, reduceNoise, preprocess };
 
 });
 
+window.__define("src/engine/color.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Colour space helpers.
+ *
+ * Everything here is plain JS with no UXP dependency so the engine can be unit
+ * tested in Node. Values marked `0..255` are gamma encoded sRGB bytes, values
+ * marked `0..1` are normalised.
+ */
+
+/* ------------------------------------------------------------------ *
+ * sRGB <-> linear
+ * ------------------------------------------------------------------ */
+
+const SRGB_TO_LINEAR = new Float32Array(256);
+for (let i = 0; i < 256; i++) {
+  const c = i / 255;
+  SRGB_TO_LINEAR[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function srgbToLinear(c) {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function linearToSrgb(c) {
+  if (c <= 0) return 0;
+  if (c >= 1) return 1;
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+}
+
+/* ------------------------------------------------------------------ *
+ * Luminance
+ * ------------------------------------------------------------------ */
+
+/**
+ * Rec.709 luma computed directly on gamma encoded bytes. This is what most
+ * halftone / screen-printing tools use: it tracks perceived ink coverage
+ * closely and produces a visually even ramp on a black -> white gradient.
+ * @returns {number} 0..1
+ */
+function luma709(r, g, b) {
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+/** Rec.601 luma, slightly warmer weighting. @returns {number} 0..1 */
+function luma601(r, g, b) {
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+/**
+ * CIE L* (perceptual lightness) derived from linear relative luminance.
+ * Costlier but perceptually uniform. @returns {number} 0..1
+ */
+function perceptualL(r, g, b) {
+  const y =
+    0.2126 * SRGB_TO_LINEAR[r | 0] +
+    0.7152 * SRGB_TO_LINEAR[g | 0] +
+    0.0722 * SRGB_TO_LINEAR[b | 0];
+  const l = y > 0.008856451679 ? 116 * Math.cbrt(y) - 16 : 903.2962962 * y;
+  return l / 100;
+}
+
+const LUMA_MODES = {
+  luma709,
+  luma601,
+  perceptual: perceptualL,
+};
+
+function getLumaFn(mode) {
+  return LUMA_MODES[mode] || luma709;
+}
+
+/* ------------------------------------------------------------------ *
+ * OKLab - used for quantisation, palette spread and nearest-colour
+ * matching. Perceptually uniform, so palettes stay clean instead of muddy.
+ * ------------------------------------------------------------------ */
+
+/** @param {number} r 0..255 @param {number} g 0..255 @param {number} b 0..255 */
+function rgbToOklab(r, g, b, out) {
+  const lr = SRGB_TO_LINEAR[r & 255];
+  const lg = SRGB_TO_LINEAR[g & 255];
+  const lb = SRGB_TO_LINEAR[b & 255];
+
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+
+  const res = out || [0, 0, 0];
+  res[0] = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+  res[1] = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  res[2] = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return res;
+}
+
+/** @returns {number[]} rgb 0..255 (rounded, clamped) */
+function oklabToRgb(L, a, bb, out) {
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * bb;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * bb;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * bb;
+
+  const l = l_ * l_ * l_;
+  const m = m_ * m_ * m_;
+  const s = s_ * s_ * s_;
+
+  const lr = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const lb = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
+
+  const res = out || [0, 0, 0];
+  res[0] = clamp255(Math.round(linearToSrgb(lr) * 255));
+  res[1] = clamp255(Math.round(linearToSrgb(lg) * 255));
+  res[2] = clamp255(Math.round(linearToSrgb(lb) * 255));
+  return res;
+}
+
+function clamp255(v) {
+  return v < 0 ? 0 : v > 255 ? 255 : v;
+}
+
+/* ------------------------------------------------------------------ *
+ * HSL - used for the Hue / Saturation / Brightness controls so the
+ * behaviour matches what users expect from Photoshop's own adjustment.
+ * ------------------------------------------------------------------ */
+
+/** @returns {number[]} [h 0..1, s 0..1, l 0..1] */
+function rgbToHsl(r, g, b, out) {
+  const rr = r / 255;
+  const gg = g / 255;
+  const bb = b / 255;
+  const max = rr > gg ? (rr > bb ? rr : bb) : gg > bb ? gg : bb;
+  const min = rr < gg ? (rr < bb ? rr : bb) : gg < bb ? gg : bb;
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  const d = max - min;
+  if (d > 1e-9) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === rr) h = (gg - bb) / d + (gg < bb ? 6 : 0);
+    else if (max === gg) h = (bb - rr) / d + 2;
+    else h = (rr - gg) / d + 4;
+    h /= 6;
+  }
+  const res = out || [0, 0, 0];
+  res[0] = h;
+  res[1] = s;
+  res[2] = l;
+  return res;
+}
+
+function hue2rgb(p, q, t) {
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+}
+
+/** @returns {number[]} rgb 0..255 */
+function hslToRgb(h, s, l, out) {
+  const res = out || [0, 0, 0];
+  if (s <= 1e-9) {
+    const v = clamp255(Math.round(l * 255));
+    res[0] = res[1] = res[2] = v;
+    return res;
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  res[0] = clamp255(Math.round(hue2rgb(p, q, h + 1 / 3) * 255));
+  res[1] = clamp255(Math.round(hue2rgb(p, q, h) * 255));
+  res[2] = clamp255(Math.round(hue2rgb(p, q, h - 1 / 3) * 255));
+  return res;
+}
+
+/**
+ * Apply hue rotation / saturation scaling / brightness offset to one colour.
+ *
+ * Deliberately does NOT touch HSL lightness for hue+saturation, so changing
+ * Hue never changes the halftone geometry (see engine/pipeline.js).
+ *
+ * @param {number[]} rgb    [r,g,b] 0..255
+ * @param {object} adj      {hue: degrees, saturation: multiplier, brightness: -100..100}
+ * @param {number[]} [out]
+ */
+const _hsl = [0, 0, 0];
+function adjustColor(r, g, b, adj, out) {
+  const res = out || [0, 0, 0];
+  const hueShift = (adj.hue || 0) / 360;
+  const sat = adj.saturation === undefined ? 1 : adj.saturation;
+  const bright = (adj.brightness || 0) / 100;
+
+  if (hueShift === 0 && sat === 1 && bright === 0) {
+    res[0] = r;
+    res[1] = g;
+    res[2] = b;
+    return res;
+  }
+
+  rgbToHsl(r, g, b, _hsl);
+  let h = _hsl[0] + hueShift;
+  h -= Math.floor(h);
+  const s = Math.min(1, Math.max(0, _hsl[1] * sat));
+  let l = _hsl[2];
+  if (bright !== 0) {
+    // Positive brightness lifts towards white, negative pulls towards black.
+    l = bright > 0 ? l + (1 - l) * bright : l * (1 + bright);
+    l = Math.min(1, Math.max(0, l));
+  }
+  return hslToRgb(h, s, l, res);
+}
+
+function isIdentityAdjust(adj) {
+  return (
+    (adj.hue || 0) === 0 &&
+    (adj.saturation === undefined ? 1 : adj.saturation) === 1 &&
+    (adj.brightness || 0) === 0
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Hex helpers
+ * ------------------------------------------------------------------ */
+
+function hexToRgb(hex) {
+  if (typeof hex !== "string") return null;
+  let h = hex.trim().replace(/^#/, "");
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgbToHex(r, g, b) {
+  const v = (clamp255(Math.round(r)) << 16) | (clamp255(Math.round(g)) << 8) | clamp255(Math.round(b));
+  return "#" + v.toString(16).padStart(6, "0").toUpperCase();
+}
+
+module.exports = {
+  SRGB_TO_LINEAR,
+  srgbToLinear,
+  linearToSrgb,
+  luma709,
+  luma601,
+  perceptualL,
+  getLumaFn,
+  LUMA_MODES,
+  rgbToOklab,
+  oklabToRgb,
+  rgbToHsl,
+  hslToRgb,
+  adjustColor,
+  isIdentityAdjust,
+  hexToRgb,
+  rgbToHex,
+  clamp255,
+};
+
+});
+
+window.__define("src/engine/jitter.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Controlled imperfection.
+ *
+ * A mathematically perfect screen looks like a computer made it. Real printing
+ * has slop: the paper shifts, the plate is not quite square, ink spreads
+ * unevenly, and each colour lands a hair off the last. That misregistration is
+ * most of what makes a risograph or a screen print read as *printed* rather than
+ * rendered, and it is the one thing a perfect renderer cannot fake by accident.
+ *
+ * Two rules make this usable rather than just noisy:
+ *
+ *  1. IT IS DETERMINISTIC. Every offset comes from a hash of the cell's own
+ *     coordinates and a seed, never from a random number generator. Re-rendering
+ *     the same document gives the identical picture, the preview matches the
+ *     full-resolution output, and an Update six months later reproduces what the
+ *     user approved. A live RNG would break all three.
+ *
+ *  2. IT IS IN CELL UNITS. Offsets scale with the grid, so the imperfection
+ *     looks the same on a 1000px preview and a 6000px render instead of
+ *     vanishing on one and swamping the other.
+ */
+
+/**
+ * Integer hash (a variant of Wang/xxhash mixing) -> [0, 1).
+ *
+ * Cheap, well distributed, and crucially *positional*: the same cell always
+ * gets the same value, which is what makes the whole effect reproducible.
+ */
+function hash01(x, y, seed, salt) {
+  let h = (x | 0) * 374761393 + (y | 0) * 668265263 + (seed | 0) * 2246822519 + (salt | 0) * 3266489917;
+  h = (h ^ (h >>> 13)) >>> 0;
+  h = Math.imul(h, 1274126177) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h / 4294967296;
+}
+
+/** Signed variant, in [-1, 1). */
+function hashSigned(x, y, seed, salt) {
+  return hash01(x, y, seed, salt) * 2 - 1;
+}
+
+/**
+ * @typedef {object} JitterParams
+ * @property {number} jitterPosition 0..100, percent of a cell
+ * @property {number} jitterSize     0..100, percent of the radius
+ * @property {number} jitterAngle    0..180, degrees of per-dot rotation
+ * @property {number} seed
+ */
+
+/** True when every jitter control is off, so the renderer can skip the work. */
+function isIdentity(p) {
+  return !(p.jitterPosition > 0) && !(p.jitterSize > 0) && !(p.jitterAngle > 0);
+}
+
+/**
+ * Per-dot offset, size multiplier and rotation.
+ *
+ * @param {number} col
+ * @param {number} row
+ * @param {JitterParams} p
+ * @param {number} cell cell size in output pixels
+ * @param {number[]} out [dx, dy, sizeMul, rotationRadians]
+ */
+function dotJitter(col, row, p, cell, out) {
+  const res = out || [0, 0, 1, 0];
+  const seed = p.seed | 0;
+
+  if (p.jitterPosition > 0) {
+    const amp = (p.jitterPosition / 100) * cell * 0.5;
+    res[0] = hashSigned(col, row, seed, 1) * amp;
+    res[1] = hashSigned(col, row, seed, 2) * amp;
+  } else {
+    res[0] = 0;
+    res[1] = 0;
+  }
+
+  if (p.jitterSize > 0) {
+    // Bounded below at 0.05 so a dot never inverts or disappears entirely.
+    res[2] = Math.max(0.05, 1 + hashSigned(col, row, seed, 3) * (p.jitterSize / 100));
+  } else {
+    res[2] = 1;
+  }
+
+  res[3] = p.jitterAngle > 0
+    ? hashSigned(col, row, seed, 4) * (p.jitterAngle * Math.PI) / 180
+    : 0;
+
+  return res;
+}
+
+/**
+ * Whole-screen offset for one ink: misregistration.
+ *
+ * Each plate lands slightly off the others. The offset is per ink and constant
+ * across the sheet, which is what distinguishes it from per-dot jitter: the
+ * whole colour shifts together, exactly as a misaligned plate does.
+ *
+ * @param {number} inkIndex
+ * @param {number} amount 0..100, percent of a cell
+ * @param {number} cell
+ * @param {number} seed
+ * @param {number[]} [out] [dx, dy]
+ */
+function inkOffset(inkIndex, amount, cell, seed, out) {
+  const res = out || [0, 0];
+  if (!(amount > 0)) {
+    res[0] = 0;
+    res[1] = 0;
+    return res;
+  }
+  const amp = (amount / 100) * cell;
+  // A random direction at a random distance, rather than independent x and y,
+  // so the offsets look like a plate that slipped rather than axis-aligned drift.
+  const angle = hash01(inkIndex, 0, seed, 11) * Math.PI * 2;
+  const dist = (0.35 + 0.65 * hash01(inkIndex, 0, seed, 12)) * amp;
+  res[0] = Math.cos(angle) * dist;
+  res[1] = Math.sin(angle) * dist;
+  return res;
+}
+
+module.exports = { hash01, hashSigned, dotJitter, inkOffset, isIdentity };
+
+});
+
 window.__define("src/engine/grade.js", function (module, exports, require) {
 "use strict";
 
@@ -1509,6 +1946,160 @@ module.exports = {
   isIdentityLUT,
   clamp,
 };
+
+});
+
+window.__define("src/engine/shapes.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Dot shapes, described as signed distance functions in pixel units.
+ *
+ * Rasterisation converts the SDF into a coverage value, which gives clean
+ * analytic antialiasing at a fraction of the cost of supersampling:
+ *
+ *     coverage = clamp(0.5 - sdf, 0, 1)
+ *
+ * (sdf is a signed distance in pixels, so the 1px transition band straddles the
+ * true edge.) For dots smaller than half a pixel the SDF is abandoned in favour
+ * of splatting the exact analytic area, which is what makes the highlight end of
+ * a gradient fade out smoothly instead of popping.
+ *
+ * Adding a shape only means adding an entry here; the renderer is generic.
+ */
+
+/**
+ * @typedef {object} Shape
+ * @property {string} id
+ * @property {string} label
+ * @property {(dx:number, dy:number, r:number, cell:number)=>number} sdf
+ * @property {(r:number, cell:number)=>number} area   exact area in px^2
+ * @property {(r:number, cell:number)=>number} extent half bounding box size
+ */
+
+const SQRT2 = Math.SQRT2;
+
+/** Ellipse semi-axes as multiples of the radius; a*b = 1 keeps the area equal. */
+const ELLIPSE_RATIO = 1.3;
+const ELLIPSE_A = Math.sqrt(ELLIPSE_RATIO);
+const ELLIPSE_B = 1 / Math.sqrt(ELLIPSE_RATIO);
+
+/** @type {Object<string, Shape>} */
+const SHAPES = {
+  circle: {
+    id: "circle",
+    label: "Circle",
+    sdf: (dx, dy, r) => Math.sqrt(dx * dx + dy * dy) - r,
+    area: (r) => Math.PI * r * r,
+    extent: (r) => r,
+  },
+
+  square: {
+    id: "square",
+    label: "Square",
+    // Square of half-side r, area matched to a circle of radius r so switching
+    // shape does not change the apparent ink density.
+    sdf: (dx, dy, r) => {
+      const s = r * 0.8862269254527580; // sqrt(pi)/2 -> equal area
+      const ax = Math.abs(dx) - s;
+      const ay = Math.abs(dy) - s;
+      const outside = Math.hypot(Math.max(ax, 0), Math.max(ay, 0));
+      return outside + Math.min(Math.max(ax, ay), 0);
+    },
+    area: (r) => Math.PI * r * r,
+    extent: (r) => r * 0.8862269254527580 + 1,
+  },
+
+  diamond: {
+    id: "diamond",
+    label: "Diamond",
+    sdf: (dx, dy, r) => {
+      const s = r * 1.2533141373155003; // sqrt(pi/2) -> equal area
+      return (Math.abs(dx) + Math.abs(dy) - s) / SQRT2;
+    },
+    area: (r) => Math.PI * r * r,
+    extent: (r) => r * 1.2533141373155003 + 1,
+  },
+
+  ellipse: {
+    id: "ellipse",
+    label: "Ellipse",
+    // Elongated along the 45 degree diagonal, area matched to a circle.
+    //
+    // The ratio is 1.3:1, not 2:1. Elliptical dots exist to soften the tone jump
+    // at 50%, where circles all touch their neighbours at once: an ellipse
+    // touches along its long axis first and its short axis later, spreading the
+    // join over a range of tones. Push the ratio too far and the long axes chain
+    // into unbroken diagonal lines through the shadows instead - which is what
+    // 2:1 did here.
+    sdf: (dx, dy, r) => {
+      const c = Math.SQRT1_2;
+      const px = Math.abs(dx * c + dy * c);
+      const py = Math.abs(-dx * c + dy * c);
+      const a = r * ELLIPSE_A;
+      const b = r * ELLIPSE_B;
+      // Quilez's ellipse distance approximation: exact at the boundary and
+      // well behaved for the 1px antialiasing band, without an iterative solve.
+      const k1 = Math.hypot(px / a, py / b);
+      if (k1 < 1e-6) return -Math.min(a, b);
+      const k2 = Math.hypot(px / (a * a), py / (b * b));
+      return (k1 * (k1 - 1)) / k2;
+    },
+    area: (r) => Math.PI * r * r,
+    extent: (r) => r * ELLIPSE_A + 1,
+  },
+
+  cross: {
+    id: "cross",
+    label: "Cross",
+    sdf: (dx, dy, r) => {
+      const arm = r * 1.35;
+      const t = r * 0.42;
+      const ax = Math.abs(dx);
+      const ay = Math.abs(dy);
+      const a = boxSdf(ax, ay, arm, t);
+      const b = boxSdf(ax, ay, t, arm);
+      return Math.min(a, b);
+    },
+    area: (r) => {
+      const arm = r * 1.35;
+      const t = r * 0.42;
+      return 2 * (2 * arm) * (2 * t) - (2 * t) * (2 * t);
+    },
+    extent: (r) => r * 1.35 + 1,
+  },
+
+  line: {
+    id: "line",
+    label: "Line",
+    // A horizontal bar spanning the cell; the "radius" drives its thickness.
+    sdf: (dx, dy, r, cell) => {
+      const halfW = cell * 0.5 + 0.5;
+      const halfH = (r * r * Math.PI) / (4 * halfW); // equal area to a circle
+      return boxSdf(Math.abs(dx), Math.abs(dy), halfW, halfH);
+    },
+    area: (r) => Math.PI * r * r,
+    extent: (r, cell) => {
+      const halfW = cell * 0.5 + 0.5;
+      const halfH = (r * r * Math.PI) / (4 * halfW);
+      return Math.max(halfW, halfH) + 1;
+    },
+  },
+};
+
+function boxSdf(ax, ay, hx, hy) {
+  const px = ax - hx;
+  const py = ay - hy;
+  return Math.hypot(Math.max(px, 0), Math.max(py, 0)) + Math.min(Math.max(px, py), 0);
+}
+
+const SHAPE_IDS = Object.keys(SHAPES);
+
+function getShape(id) {
+  return SHAPES[id] || SHAPES.circle;
+}
+
+module.exports = { SHAPES, SHAPE_IDS, getShape, boxSdf };
 
 });
 
@@ -2112,579 +2703,6 @@ module.exports = {
 
 });
 
-window.__define("src/engine/tonemap.js", function (module, exports, require) {
-"use strict";
-
-/**
- * Tonal zone colour mapping.
- *
- * By default a pixel or cell takes whichever palette colour is nearest to it.
- * That is faithful, but it means a dark red and a dark blue both collapse onto
- * whatever single dark entry exists, and the palette's lighter colours never
- * appear in shadow areas even when they would read better.
- *
- * Tonal mapping instead splits the palette into shadow / midtone / highlight
- * bands and restricts matching to the band the pixel's luminance falls in. The
- * palette is already sorted dark to light, so each band owns a contiguous slice
- * of indices - which is what makes this a cheap index range rather than a
- * per-pixel search over a subset.
- *
- * Bands overlap by one entry when the palette is big enough. Without the
- * overlap, error diffusion cannot carry error across a band boundary and the
- * boundary shows up as a hard contour.
- */
-
-/**
- * @param {number} paletteCount
- * @param {number} shadowSplit    luminance 0..1 where shadows end
- * @param {number} highlightSplit luminance 0..1 where highlights begin
- * @returns {{bands: number[][], i1: number, i2: number}|null}
- *          null when the palette is too small to split meaningfully
- */
-function zoneBands(paletteCount, shadowSplit, highlightSplit) {
-  const n = paletteCount;
-  if (n < 3) return null;
-
-  let s = clamp01(shadowSplit);
-  let h = clamp01(highlightSplit);
-  if (h < s) {
-    const t = s;
-    s = h;
-    h = t;
-  }
-
-  // Index boundaries, keeping at least one colour per band.
-  let i1 = Math.round(n * s);
-  let i2 = Math.round(n * h);
-  i1 = Math.min(Math.max(i1, 1), n - 2);
-  i2 = Math.min(Math.max(i2, i1 + 1), n - 1);
-
-  const overlap = n >= 4 ? 1 : 0;
-  const bands = [
-    [0, Math.min(n, i1 + overlap)],
-    [Math.max(0, i1 - overlap), Math.min(n, i2 + overlap)],
-    [Math.max(0, i2 - overlap), n],
-  ];
-  return { bands, i1, i2 };
-}
-
-/**
- * Build the `zoneRange` callback the renderers take.
- *
- * @param {number} paletteCount
- * @param {object} params {tonalMapping, shadowSplit, highlightSplit}
- * @returns {((L:number)=>number[])|null} null when mapping is off or impossible
- */
-function makeZoneRange(paletteCount, params) {
-  if (!params || !params.tonalMapping) return null;
-  const z = zoneBands(paletteCount, params.shadowSplit, params.highlightSplit);
-  if (!z) return null;
-
-  let s = clamp01(params.shadowSplit);
-  let h = clamp01(params.highlightSplit);
-  if (h < s) {
-    const t = s;
-    s = h;
-    h = t;
-  }
-  const [shadow, mid, high] = z.bands;
-  return (L) => (L < s ? shadow : L < h ? mid : high);
-}
-
-function clamp01(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 0;
-  return n < 0 ? 0 : n > 1 ? 1 : n;
-}
-
-module.exports = { zoneBands, makeZoneRange };
-
-});
-
-window.__define("src/engine/separation.js", function (module, exports, require) {
-"use strict";
-
-/**
- * Ink separation and multi-screen halftoning.
- *
- * WHY THIS EXISTS
- * ---------------
- * The single-screen renderer puts one opaque dot per cell, coloured by whichever
- * palette entry is nearest. That is a poster, not a print. A real press lays each
- * ink down on its own screen at its own angle, and the inks are transparent, so
- * they overprint: cyan over magenta gives blue, and the four screens interleave
- * into a rosette instead of a moiré.
- *
- * Reproducing that needs two things this file provides:
- *
- *  1. SEPARATION - how much of each ink is needed to reach a given colour. Inks
- *     are subtractive, so this is solved in optical density space
- *     (D = -log10 reflectance), where overprinting is addition. With more than
- *     three inks the system is underdetermined and needs regularising, and the
- *     choice of penalty matters more than it looks: an L2 (ridge) penalty
- *     minimises the norm by SPREADING coverage across every ink, so pure black
- *     came out as 0.59 key plus a third of everything else. An L1 penalty
- *     promotes sparsity instead, which is both the correct prior for ink - a
- *     press uses as few plates as it can - and what makes a pure ink resolve to
- *     itself. This is non-negative lasso by proximal gradient.
- *
- *  2. ANGLES - the classic screen angles exist because 30 degrees apart is the
- *     maximum separation three screens can have, and yellow goes at 0 because it
- *     is the least visible. Anything closer than about 15 degrees beats into a
- *     moiré, which is exactly what a naive "same angle for every ink" render
- *     produces.
- */
-
-const { SRGB_TO_LINEAR, luma709 } = require("./color.js");
-
-/**
- * Classic screen angles, in the order inks are assigned (darkest first, which
- * for a typical palette puts the key ink at 45 degrees where the eye is least
- * sensitive to the pattern).
- */
-const CLASSIC_ANGLES = [45, 15, 75, 0, 30, 60, 22.5, 67.5, 52.5];
-
-/**
- * @param {number} count number of inks
- * @param {number} baseAngle global rotation applied to all screens
- * @param {number} spread 0..1 scales how far apart the screens sit; 0 collapses
- *        them onto one angle (useful for a deliberately flat, graphic look)
- * @returns {number[]} angle per ink, in degrees
- */
-function screenAngles(count, baseAngle, spread) {
-  const s = spread === undefined ? 1 : Math.max(0, Math.min(1, spread));
-  const out = [];
-  for (let i = 0; i < count; i++) {
-    const a = CLASSIC_ANGLES[i % CLASSIC_ANGLES.length];
-    // Interpolate towards the first angle as spread goes to zero.
-    const collapsed = CLASSIC_ANGLES[0] + (a - CLASSIC_ANGLES[0]) * s;
-    out.push(((baseAngle || 0) + collapsed) % 180);
-  }
-  return out;
-}
-
-/* ------------------------------------------------------------------ *
- * Density space
- * ------------------------------------------------------------------ */
-
-/**
- * Minimum reflectance, so pure black does not blow the logarithm up.
- *
- * Deliberately low. Raising it towards a "realistic" ink reflectance (1-2%)
- * collapses the basis: a saturated cyan reflects essentially no red, so its red
- * density and the key ink's red density become equal and the columns stop being
- * distinguishable, at which point the solver cannot tell black from cyan.
- */
-const MIN_REFLECTANCE = 0.004;
-
-/**
- * sRGB byte triple -> optical density triple.
- * Linearising first matters: density is about light, not about the gamma
- * encoded number.
- */
-function toDensity(rgb, out) {
-  const res = out || [0, 0, 0];
-  for (let c = 0; c < 3; c++) {
-    const lin = SRGB_TO_LINEAR[Math.max(0, Math.min(255, Math.round(rgb[c])))];
-    res[c] = -Math.log10(Math.max(MIN_REFLECTANCE, lin));
-  }
-  return res;
-}
-
-/**
- * Precompute the density each ink adds over the paper, once per render.
- *
- * @param {number[][]} inks rgb triples
- * @param {number[]} paper rgb
- * @returns {{d: Float64Array, gram: Float64Array, count: number}}
- */
-function buildInkBasis(inks, paper) {
-  const n = inks.length;
-  const paperD = toDensity(paper);
-  const d = new Float64Array(n * 3);
-  const t = [0, 0, 0];
-  for (let k = 0; k < n; k++) {
-    toDensity(inks[k], t);
-    d[k * 3] = t[0] - paperD[0];
-    d[k * 3 + 1] = t[1] - paperD[1];
-    d[k * 3 + 2] = t[2] - paperD[2];
-  }
-  return { d, paperD, count: n };
-}
-
-/**
- * Non-negative lasso by proximal gradient descent.
- *
- * Solves  min ||A c - b||^2 + lambda ||c||_1   subject to  0 <= c <= maxCoverage,
- * where A is the ink density basis and b the target density above paper. Since c
- * is constrained non-negative, the L1 subgradient is just a constant lambda, so
- * the proximal step collapses to "push every coverage down a little, then clamp
- * at zero" - soft thresholding, for free.
- *
- * Accelerated with FISTA momentum. Plain proximal gradient is far too slow here:
- * the ink basis is badly conditioned (every ink is dark in some channel, so the
- * columns are strongly correlated) and 40 unaccelerated iterations left pure
- * black sitting at 0.6 key plus a third of everything else instead of converging
- * to the exact 1.0 key that fits it perfectly. Momentum gets there in a fraction
- * of the steps, and this still runs per *cell* - a few thousand solves - not per
- * pixel.
- *
- * @param {object} basis from buildInkBasis
- * @param {number[]} targetRGB
- * @param {Float64Array} out coverage per ink, 0..maxCoverage
- * @param {number} [lambda] sparsity weight
- * @param {number} [maxCoverage]
- */
-function unmix(basis, targetRGB, out, lambda = 0.015, maxCoverage = 1) {
-  const n = basis.count;
-  const d = basis.d;
-  const target = toDensity(targetRGB);
-  const b0 = target[0] - basis.paperD[0];
-  const b1 = target[1] - basis.paperD[1];
-  const b2 = target[2] - basis.paperD[2];
-
-  for (let k = 0; k < n; k++) out[k] = 0;
-
-  // Step size from the basis magnitude keeps the iteration stable whatever the
-  // palette looks like.
-  let norm = 0;
-  for (let k = 0; k < n; k++) {
-    norm += d[k * 3] * d[k * 3] + d[k * 3 + 1] * d[k * 3 + 1] + d[k * 3 + 2] * d[k * 3 + 2];
-  }
-  const step = norm > 1e-9 ? 1 / norm : 0;
-  if (!step) return out;
-  // The sparsity weight has to scale with the basis, otherwise it is measured in
-  // different units for every palette: a light-ink palette has small densities,
-  // a fixed lambda then dwarfs the data term and drives every coverage to zero.
-  const shrink = (lambda * norm) / n;
-
-  // FISTA: `y` is the extrapolated point the gradient is taken at, `prev` the
-  // previous iterate. Scratch buffers are reused across calls because this is
-  // invoked once per cell.
-  const y = scratchY(n);
-  const prev = scratchPrev(n);
-  for (let k = 0; k < n; k++) {
-    y[k] = 0;
-    prev[k] = 0;
-  }
-  let t = 1;
-
-  for (let it = 0; it < 60; it++) {
-    // residual = A y - b
-    let r0 = -b0;
-    let r1 = -b1;
-    let r2 = -b2;
-    for (let k = 0; k < n; k++) {
-      const c = y[k];
-      if (c === 0) continue;
-      r0 += c * d[k * 3];
-      r1 += c * d[k * 3 + 1];
-      r2 += c * d[k * 3 + 2];
-    }
-    for (let k = 0; k < n; k++) {
-      const g = r0 * d[k * 3] + r1 * d[k * 3 + 1] + r2 * d[k * 3 + 2];
-      // Gradient step on the data term, then the L1 proximal step: subtract a
-      // constant and clamp at zero, which is what drives unused inks to exactly
-      // zero instead of merely small.
-      let c = y[k] - step * g * 2 - step * shrink;
-      if (c < 0) c = 0;
-      else if (c > maxCoverage) c = maxCoverage;
-      out[k] = c;
-    }
-    const tNext = (1 + Math.sqrt(1 + 4 * t * t)) / 2;
-    const mom = (t - 1) / tNext;
-    let delta = 0;
-    for (let k = 0; k < n; k++) {
-      const d2 = out[k] - prev[k];
-      if (d2 > delta) delta = d2;
-      else if (-d2 > delta) delta = -d2;
-      y[k] = out[k] + mom * d2;
-      prev[k] = out[k];
-    }
-    t = tNext;
-    // Most cells are flat or near-paper and settle in a handful of iterations;
-    // only the awkward ones need the full budget. Bailing early on those is
-    // what keeps a per-cell solver affordable.
-    if (it > 3 && delta < 2e-4) break;
-  }
-  return out;
-}
-
-let _y = null;
-let _prev = null;
-function scratchY(n) {
-  if (!_y || _y.length < n) _y = new Float64Array(n);
-  return _y;
-}
-function scratchPrev(n) {
-  if (!_prev || _prev.length < n) _prev = new Float64Array(n);
-  return _prev;
-}
-
-/**
- * Order inks the way a press would: darkest (the key) first, then by how much
- * each contributes, so the most visible screen lands on the least visible angle.
- * @param {number[][]} inks
- * @returns {number[]} indices into `inks`
- */
-function inkOrder(inks) {
-  return inks
-    .map((c, i) => ({ i, l: luma709(c[0], c[1], c[2]) }))
-    .sort((a, b) => a.l - b.l)
-    .map((e) => e.i);
-}
-
-module.exports = {
-  CLASSIC_ANGLES,
-  screenAngles,
-  toDensity,
-  buildInkBasis,
-  unmix,
-  inkOrder,
-  MIN_REFLECTANCE,
-};
-
-});
-
-window.__define("src/engine/shapes.js", function (module, exports, require) {
-"use strict";
-
-/**
- * Dot shapes, described as signed distance functions in pixel units.
- *
- * Rasterisation converts the SDF into a coverage value, which gives clean
- * analytic antialiasing at a fraction of the cost of supersampling:
- *
- *     coverage = clamp(0.5 - sdf, 0, 1)
- *
- * (sdf is a signed distance in pixels, so the 1px transition band straddles the
- * true edge.) For dots smaller than half a pixel the SDF is abandoned in favour
- * of splatting the exact analytic area, which is what makes the highlight end of
- * a gradient fade out smoothly instead of popping.
- *
- * Adding a shape only means adding an entry here; the renderer is generic.
- */
-
-/**
- * @typedef {object} Shape
- * @property {string} id
- * @property {string} label
- * @property {(dx:number, dy:number, r:number, cell:number)=>number} sdf
- * @property {(r:number, cell:number)=>number} area   exact area in px^2
- * @property {(r:number, cell:number)=>number} extent half bounding box size
- */
-
-const SQRT2 = Math.SQRT2;
-
-/** Ellipse semi-axes as multiples of the radius; a*b = 1 keeps the area equal. */
-const ELLIPSE_RATIO = 1.3;
-const ELLIPSE_A = Math.sqrt(ELLIPSE_RATIO);
-const ELLIPSE_B = 1 / Math.sqrt(ELLIPSE_RATIO);
-
-/** @type {Object<string, Shape>} */
-const SHAPES = {
-  circle: {
-    id: "circle",
-    label: "Circle",
-    sdf: (dx, dy, r) => Math.sqrt(dx * dx + dy * dy) - r,
-    area: (r) => Math.PI * r * r,
-    extent: (r) => r,
-  },
-
-  square: {
-    id: "square",
-    label: "Square",
-    // Square of half-side r, area matched to a circle of radius r so switching
-    // shape does not change the apparent ink density.
-    sdf: (dx, dy, r) => {
-      const s = r * 0.8862269254527580; // sqrt(pi)/2 -> equal area
-      const ax = Math.abs(dx) - s;
-      const ay = Math.abs(dy) - s;
-      const outside = Math.hypot(Math.max(ax, 0), Math.max(ay, 0));
-      return outside + Math.min(Math.max(ax, ay), 0);
-    },
-    area: (r) => Math.PI * r * r,
-    extent: (r) => r * 0.8862269254527580 + 1,
-  },
-
-  diamond: {
-    id: "diamond",
-    label: "Diamond",
-    sdf: (dx, dy, r) => {
-      const s = r * 1.2533141373155003; // sqrt(pi/2) -> equal area
-      return (Math.abs(dx) + Math.abs(dy) - s) / SQRT2;
-    },
-    area: (r) => Math.PI * r * r,
-    extent: (r) => r * 1.2533141373155003 + 1,
-  },
-
-  ellipse: {
-    id: "ellipse",
-    label: "Ellipse",
-    // Elongated along the 45 degree diagonal, area matched to a circle.
-    //
-    // The ratio is 1.3:1, not 2:1. Elliptical dots exist to soften the tone jump
-    // at 50%, where circles all touch their neighbours at once: an ellipse
-    // touches along its long axis first and its short axis later, spreading the
-    // join over a range of tones. Push the ratio too far and the long axes chain
-    // into unbroken diagonal lines through the shadows instead - which is what
-    // 2:1 did here.
-    sdf: (dx, dy, r) => {
-      const c = Math.SQRT1_2;
-      const px = Math.abs(dx * c + dy * c);
-      const py = Math.abs(-dx * c + dy * c);
-      const a = r * ELLIPSE_A;
-      const b = r * ELLIPSE_B;
-      // Quilez's ellipse distance approximation: exact at the boundary and
-      // well behaved for the 1px antialiasing band, without an iterative solve.
-      const k1 = Math.hypot(px / a, py / b);
-      if (k1 < 1e-6) return -Math.min(a, b);
-      const k2 = Math.hypot(px / (a * a), py / (b * b));
-      return (k1 * (k1 - 1)) / k2;
-    },
-    area: (r) => Math.PI * r * r,
-    extent: (r) => r * ELLIPSE_A + 1,
-  },
-
-  cross: {
-    id: "cross",
-    label: "Cross",
-    sdf: (dx, dy, r) => {
-      const arm = r * 1.35;
-      const t = r * 0.42;
-      const ax = Math.abs(dx);
-      const ay = Math.abs(dy);
-      const a = boxSdf(ax, ay, arm, t);
-      const b = boxSdf(ax, ay, t, arm);
-      return Math.min(a, b);
-    },
-    area: (r) => {
-      const arm = r * 1.35;
-      const t = r * 0.42;
-      return 2 * (2 * arm) * (2 * t) - (2 * t) * (2 * t);
-    },
-    extent: (r) => r * 1.35 + 1,
-  },
-
-  line: {
-    id: "line",
-    label: "Line",
-    // A horizontal bar spanning the cell; the "radius" drives its thickness.
-    sdf: (dx, dy, r, cell) => {
-      const halfW = cell * 0.5 + 0.5;
-      const halfH = (r * r * Math.PI) / (4 * halfW); // equal area to a circle
-      return boxSdf(Math.abs(dx), Math.abs(dy), halfW, halfH);
-    },
-    area: (r) => Math.PI * r * r,
-    extent: (r, cell) => {
-      const halfW = cell * 0.5 + 0.5;
-      const halfH = (r * r * Math.PI) / (4 * halfW);
-      return Math.max(halfW, halfH) + 1;
-    },
-  },
-};
-
-function boxSdf(ax, ay, hx, hy) {
-  const px = ax - hx;
-  const py = ay - hy;
-  return Math.hypot(Math.max(px, 0), Math.max(py, 0)) + Math.min(Math.max(px, py), 0);
-}
-
-const SHAPE_IDS = Object.keys(SHAPES);
-
-function getShape(id) {
-  return SHAPES[id] || SHAPES.circle;
-}
-
-module.exports = { SHAPES, SHAPE_IDS, getShape, boxSdf };
-
-});
-
-window.__define("src/engine/resample.js", function (module, exports, require) {
-"use strict";
-
-/**
- * Area-average (box) downscaling.
- *
- * Used to build the low resolution "analysis" image the halftone cells are
- * measured from. Area averaging is the right filter here: it is exactly the
- * same operation the cell sampler performs, so downscaling first changes the
- * measured cell tone by a negligible amount while cutting the cost of the only
- * O(width*height) stage by one to two orders of magnitude.
- */
-
-/**
- * @param {{data: Uint8ClampedArray, width: number, height: number}} img
- * @param {number} tw target width
- * @param {number} th target height
- * @returns {{data: Uint8ClampedArray, width: number, height: number}}
- */
-function downscaleBox(img, tw, th) {
-  const { data: src, width: sw, height: sh } = img;
-  tw = Math.max(1, Math.round(tw));
-  th = Math.max(1, Math.round(th));
-  if (tw >= sw && th >= sh) {
-    return { data: new Uint8ClampedArray(src), width: sw, height: sh };
-  }
-
-  const out = new Uint8ClampedArray(tw * th * 4);
-  const xRatio = sw / tw;
-  const yRatio = sh / th;
-
-  // Precompute the source column span for each target column.
-  const xStarts = new Int32Array(tw + 1);
-  for (let x = 0; x <= tw; x++) xStarts[x] = Math.min(sw, Math.round(x * xRatio));
-
-  for (let y = 0; y < th; y++) {
-    const sy0 = Math.min(sh - 1, Math.round(y * yRatio));
-    const sy1 = Math.max(sy0 + 1, Math.min(sh, Math.round((y + 1) * yRatio)));
-    for (let x = 0; x < tw; x++) {
-      const sx0 = Math.min(sw - 1, xStarts[x]);
-      const sx1 = Math.max(sx0 + 1, xStarts[x + 1]);
-      let r = 0, g = 0, b = 0, a = 0, n = 0;
-      for (let sy = sy0; sy < sy1; sy++) {
-        let p = (sy * sw + sx0) * 4;
-        for (let sx = sx0; sx < sx1; sx++, p += 4) {
-          const al = src[p + 3];
-          // Weight colour by alpha so transparent pixels do not pull the
-          // average towards whatever garbage sits in their colour channels.
-          const wgt = al / 255;
-          r += src[p] * wgt;
-          g += src[p + 1] * wgt;
-          b += src[p + 2] * wgt;
-          a += al;
-          n += wgt;
-        }
-      }
-      const cnt = (sy1 - sy0) * (sx1 - sx0);
-      const o = (y * tw + x) * 4;
-      if (n > 1e-6) {
-        out[o] = r / n;
-        out[o + 1] = g / n;
-        out[o + 2] = b / n;
-      }
-      out[o + 3] = a / cnt;
-    }
-  }
-
-  return { data: out, width: tw, height: th };
-}
-
-/**
- * Downscale so the longest edge is at most `maxLongest`, preserving aspect.
- * Returns the source untouched when it is already small enough.
- */
-function fitWithin(img, maxLongest) {
-  const longest = Math.max(img.width, img.height);
-  if (longest <= maxLongest) return img;
-  const s = maxLongest / longest;
-  return downscaleBox(img, Math.round(img.width * s), Math.round(img.height * s));
-}
-
-module.exports = { downscaleBox, fitWithin };
-
-});
-
 window.__define("src/engine/halftone.js", function (module, exports, require) {
 "use strict";
 
@@ -2699,6 +2717,7 @@ window.__define("src/engine/halftone.js", function (module, exports, require) {
  */
 
 const { getLumaFn, adjustColor } = require("./color.js");
+const { dotJitter, isIdentity: jitterIsIdentity } = require("./jitter.js");
 const { buildToneLUT, sampleLUT, biasCurve, inkToRadius } = require("./grade.js");
 const { getShape } = require("./shapes.js");
 const { paletteToLab, nearestIndex } = require("./palette.js");
@@ -2997,6 +3016,9 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   const centre = [0, 0];
   const adj = p.colorAdjust || {};
   const adjOut = [0, 0, 0];
+  const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
+  const jOut = [0, 0, 1, 0];
+  const fm = p.screenType === "fm" ? p.fmThreshold : null;
 
   const rowStart = chunk.rowStart || 0;
   const rowEnd = chunk.rowEnd === undefined ? grid.rows : Math.min(grid.rows, chunk.rowEnd);
@@ -3012,8 +3034,19 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const graded = sampleLUT(p.toneLUT, L);
       let ink = p.invert ? graded : 1 - graded;
       ink = biasCurve(ink, p.gradeBias);
-      let r = inkToRadius(ink, maxRadius, p.radiusCurve);
-      if (r <= 0.008) continue;
+      let r;
+      if (fm) {
+        // Frequency modulation: every dot is the same size and the *number* of
+        // them carries the tone. Comparing the ink against a blue-noise
+        // threshold is what places them - blue noise because it has no
+        // low-frequency energy, so the result reads as an even grain rather
+        // than as a pattern.
+        if (ink <= fm(col, row)) continue;
+        r = maxRadius;
+      } else {
+        r = inkToRadius(ink, maxRadius, p.radiusCurve);
+        if (r <= 0.008) continue;
+      }
       // Dot gain models a press spreading ink by a fixed width around every
       // edge, which is a radius offset - not a tonal curve like Grade Bias.
       r += gain;
@@ -3028,7 +3061,16 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const col3 = p.palette[pi];
 
       cellCentre(grid, col, row, centre);
-      drawDot(buf, width, height, centre[0], centre[1], r, grid.cell, shape, col3);
+      let rot = 0;
+      if (jit) {
+        dotJitter(col, row, jit, grid.cell, jOut);
+        centre[0] += jOut[0];
+        centre[1] += jOut[1];
+        r *= jOut[2];
+        rot = jOut[3];
+        if (r <= 0.008) continue;
+      }
+      drawDot(buf, width, height, centre[0], centre[1], r, grid.cell, shape, col3, rot);
     }
   }
 
@@ -3068,22 +3110,47 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
   const first = chunk.screenStart || 0;
   const last = chunk.screenEnd === undefined ? screens.length : Math.min(screens.length, chunk.screenEnd);
 
+  const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
+  const jOut = [0, 0, 1, 0];
+  const fm = p.screenType === "fm" ? p.fmThreshold : null;
+
   for (let s = first; s < last; s++) {
     const screen = screens[s];
     const grid = screen.grid;
     const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
     const gain = (grid.cell * (p.dotGain || 0)) / 100;
     const colour = screen.color;
+    // Misregistration: the whole plate lands a hair off, so it is a constant
+    // offset for the screen rather than per-dot noise.
+    const mx = screen.offsetX || 0;
+    const my = screen.offsetY || 0;
 
     for (let row = 0; row < grid.rows; row++) {
       for (let col = 0; col < grid.cols; col++) {
         const ci = row * grid.cols + col;
         if (screen.count[ci] === 0) continue;
-        let r = inkToRadius(screen.cov[ci], maxRadius, p.radiusCurve);
-        if (r <= 0.008) continue;
+        let r;
+        if (fm) {
+          if (screen.cov[ci] <= fm(col, row + s * 97)) continue;
+          r = maxRadius;
+        } else {
+          r = inkToRadius(screen.cov[ci], maxRadius, p.radiusCurve);
+          if (r <= 0.008) continue;
+        }
         r += gain;
         cellCentre(grid, col, row, centre);
-        drawDotMultiply(buf, width, height, centre[0], centre[1], r, grid.cell, shape, colour);
+        centre[0] += mx;
+        centre[1] += my;
+        let rot = 0;
+        if (jit) {
+          dotJitter(col, row + s * 31, jit, grid.cell, jOut);
+          centre[0] += jOut[0];
+          centre[1] += jOut[1];
+          r *= jOut[2];
+          rot = jOut[3];
+          if (r <= 0.008) continue;
+        }
+        drawDotMultiply(buf, width, height, centre[0], centre[1], r, grid.cell, shape, colour, rot);
       }
     }
   }
@@ -3097,7 +3164,9 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
  * partial coverage from the antialiasing band behaves exactly like partial ink
  * area, which is what keeps overprints clean at the dot edges.
  */
-function drawDotMultiply(buf, w, h, cx, cy, r, cell, shape, colour) {
+function drawDotMultiply(buf, w, h, cx, cy, r, cell, shape, colour, rot) {
+  const rc = rot ? Math.cos(-rot) : 1;
+  const rs = rot ? Math.sin(-rot) : 0;
   const ir = colour[0] / 255;
   const ig = colour[1] / 255;
   const ib = colour[2] / 255;
@@ -3134,9 +3203,12 @@ function drawDotMultiply(buf, w, h, cx, cy, r, cell, shape, colour) {
   const y1 = Math.min(h, Math.ceil(cy + ext));
   const sdf = shape.sdf;
   for (let y = y0; y < y1; y++) {
-    const dy = y + 0.5 - cy;
+    const dy0 = y + 0.5 - cy;
     for (let x = x0; x < x1; x++) {
-      const d = sdf(x + 0.5 - cx, dy, r, cell);
+      const dx0 = x + 0.5 - cx;
+      const dx = rot ? dx0 * rc - dy0 * rs : dx0;
+      const dy = rot ? dx0 * rs + dy0 * rc : dy0;
+      const d = sdf(dx, dy, r, cell);
       if (d >= 0.5) continue;
       apply(x, y, d <= -0.5 ? 1 : 0.5 - d);
     }
@@ -3350,8 +3422,10 @@ function fillBackground(buf, bg) {
  *    highlight end of a gradient would clamp to a fixed half-covered pixel and
  *    the ramp would visibly stop being smooth.
  */
-function drawDot(buf, w, h, cx, cy, r, cell, shape, colour) {
+function drawDot(buf, w, h, cx, cy, r, cell, shape, colour, rot) {
   const cr = colour[0], cg = colour[1], cb = colour[2];
+  const rc = rot ? Math.cos(-rot) : 1;
+  const rs = rot ? Math.sin(-rot) : 0;
 
   if (r < 0.5) {
     const area = Math.min(1, shape.area(r, cell));
@@ -3382,10 +3456,14 @@ function drawDot(buf, w, h, cx, cy, r, cell, shape, colour) {
 
   const sdf = shape.sdf;
   for (let y = y0; y < y1; y++) {
-    const dy = y + 0.5 - cy;
+    const dy0 = y + 0.5 - cy;
     let i = (y * w + x0) * 4;
     for (let x = x0; x < x1; x++, i += 4) {
-      const dx = x + 0.5 - cx;
+      const dx0 = x + 0.5 - cx;
+      // Rotate the sample point, not the shape: a rotated dot is the same
+      // signed distance field read in a turned frame.
+      const dx = rot ? dx0 * rc - dy0 * rs : dx0;
+      const dy = rot ? dx0 * rs + dy0 * rc : dy0;
       const d = sdf(dx, dy, r, cell);
       if (d >= 0.5) continue;
       const a = d <= -0.5 ? 1 : 0.5 - d;
@@ -3429,6 +3507,292 @@ module.exports = {
   drawDot,
   fillBackground,
   buildToneLUT,
+};
+
+});
+
+window.__define("src/engine/separation.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Ink separation and multi-screen halftoning.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * The single-screen renderer puts one opaque dot per cell, coloured by whichever
+ * palette entry is nearest. That is a poster, not a print. A real press lays each
+ * ink down on its own screen at its own angle, and the inks are transparent, so
+ * they overprint: cyan over magenta gives blue, and the four screens interleave
+ * into a rosette instead of a moiré.
+ *
+ * Reproducing that needs two things this file provides:
+ *
+ *  1. SEPARATION - how much of each ink is needed to reach a given colour. Inks
+ *     are subtractive, so this is solved in optical density space
+ *     (D = -log10 reflectance), where overprinting is addition. With more than
+ *     three inks the system is underdetermined and needs regularising, and the
+ *     choice of penalty matters more than it looks: an L2 (ridge) penalty
+ *     minimises the norm by SPREADING coverage across every ink, so pure black
+ *     came out as 0.59 key plus a third of everything else. An L1 penalty
+ *     promotes sparsity instead, which is both the correct prior for ink - a
+ *     press uses as few plates as it can - and what makes a pure ink resolve to
+ *     itself. This is non-negative lasso by proximal gradient.
+ *
+ *  2. ANGLES - the classic screen angles exist because 30 degrees apart is the
+ *     maximum separation three screens can have, and yellow goes at 0 because it
+ *     is the least visible. Anything closer than about 15 degrees beats into a
+ *     moiré, which is exactly what a naive "same angle for every ink" render
+ *     produces.
+ */
+
+const { SRGB_TO_LINEAR, luma709 } = require("./color.js");
+
+/**
+ * Classic screen angles, in the order inks are assigned (darkest first, which
+ * for a typical palette puts the key ink at 45 degrees where the eye is least
+ * sensitive to the pattern).
+ */
+const CLASSIC_ANGLES = [45, 15, 75, 0, 30, 60, 22.5, 67.5, 52.5];
+
+/**
+ * @param {number} count number of inks
+ * @param {number} baseAngle global rotation applied to all screens
+ * @param {number} spread 0..1 scales how far apart the screens sit; 0 collapses
+ *        them onto one angle (useful for a deliberately flat, graphic look)
+ * @returns {number[]} angle per ink, in degrees
+ */
+function screenAngles(count, baseAngle, spread) {
+  const s = spread === undefined ? 1 : Math.max(0, Math.min(1, spread));
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const a = CLASSIC_ANGLES[i % CLASSIC_ANGLES.length];
+    // Interpolate towards the first angle as spread goes to zero.
+    const collapsed = CLASSIC_ANGLES[0] + (a - CLASSIC_ANGLES[0]) * s;
+    out.push(((baseAngle || 0) + collapsed) % 180);
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * Density space
+ * ------------------------------------------------------------------ */
+
+/**
+ * Minimum reflectance, so pure black does not blow the logarithm up.
+ *
+ * Deliberately low. Raising it towards a "realistic" ink reflectance (1-2%)
+ * collapses the basis: a saturated cyan reflects essentially no red, so its red
+ * density and the key ink's red density become equal and the columns stop being
+ * distinguishable, at which point the solver cannot tell black from cyan.
+ */
+const MIN_REFLECTANCE = 0.004;
+
+/**
+ * sRGB byte triple -> optical density triple.
+ * Linearising first matters: density is about light, not about the gamma
+ * encoded number.
+ */
+function toDensity(rgb, out) {
+  const res = out || [0, 0, 0];
+  for (let c = 0; c < 3; c++) {
+    const lin = SRGB_TO_LINEAR[Math.max(0, Math.min(255, Math.round(rgb[c])))];
+    res[c] = -Math.log10(Math.max(MIN_REFLECTANCE, lin));
+  }
+  return res;
+}
+
+/**
+ * Largest eigenvalue of the Gram matrix, by power iteration.
+ *
+ * This is what sets a safe gradient step, and getting it wrong is not a matter
+ * of speed: using the trace as a stand-in (it bounds the eigenvalue, so it looks
+ * safe) diverges the moment the inks are correlated. Four well-spread CMYK inks
+ * were fine; three dark risograph inks all pointing the same way oscillated
+ * between zero and full coverage and settled on nothing, which emptied the
+ * render. n is at most nine, and this runs once per basis, so the exact answer
+ * is affordable.
+ */
+function largestEigenvalue(d, n) {
+  // Gram matrix G = A^T A.
+  const g = new Float64Array(n * n);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      const v =
+        d[i * 3] * d[j * 3] + d[i * 3 + 1] * d[j * 3 + 1] + d[i * 3 + 2] * d[j * 3 + 2];
+      g[i * n + j] = v;
+      g[j * n + i] = v;
+    }
+  }
+  let v = new Float64Array(n).fill(1 / Math.sqrt(n));
+  const w = new Float64Array(n);
+  let lambda = 0;
+  for (let it = 0; it < 40; it++) {
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let j = 0; j < n; j++) sum += g[i * n + j] * v[j];
+      w[i] = sum;
+    }
+    let norm = 0;
+    for (let i = 0; i < n; i++) norm += w[i] * w[i];
+    norm = Math.sqrt(norm);
+    if (norm < 1e-12) return 0;
+    for (let i = 0; i < n; i++) v[i] = w[i] / norm;
+    if (Math.abs(norm - lambda) < 1e-9 * Math.max(1, norm)) {
+      lambda = norm;
+      break;
+    }
+    lambda = norm;
+  }
+  return lambda;
+}
+
+/**
+ * Precompute the density each ink adds over the paper, once per render.
+ *
+ * @param {number[][]} inks rgb triples
+ * @param {number[]} paper rgb
+ * @returns {{d: Float64Array, paperD: number[], count: number, L: number}}
+ */
+function buildInkBasis(inks, paper) {
+  const n = inks.length;
+  const paperD = toDensity(paper);
+  const d = new Float64Array(n * 3);
+  const t = [0, 0, 0];
+  for (let k = 0; k < n; k++) {
+    toDensity(inks[k], t);
+    d[k * 3] = t[0] - paperD[0];
+    d[k * 3 + 1] = t[1] - paperD[1];
+    d[k * 3 + 2] = t[2] - paperD[2];
+  }
+  return { d, paperD, count: n, L: largestEigenvalue(d, n) };
+}
+
+/**
+ * Non-negative lasso by proximal gradient descent.
+ *
+ * Solves  min ||A c - b||^2 + lambda ||c||_1   subject to  0 <= c <= maxCoverage,
+ * where A is the ink density basis and b the target density above paper. Since c
+ * is constrained non-negative, the L1 subgradient is just a constant lambda, so
+ * the proximal step collapses to "push every coverage down a little, then clamp
+ * at zero" - soft thresholding, for free.
+ *
+ * Accelerated with FISTA momentum. Plain proximal gradient is far too slow here:
+ * the ink basis is badly conditioned (every ink is dark in some channel, so the
+ * columns are strongly correlated) and 40 unaccelerated iterations left pure
+ * black sitting at 0.6 key plus a third of everything else instead of converging
+ * to the exact 1.0 key that fits it perfectly. Momentum gets there in a fraction
+ * of the steps, and this still runs per *cell* - a few thousand solves - not per
+ * pixel.
+ *
+ * @param {object} basis from buildInkBasis
+ * @param {number[]} targetRGB
+ * @param {Float64Array} out coverage per ink, 0..maxCoverage
+ * @param {number} [lambda] sparsity weight
+ * @param {number} [maxCoverage]
+ */
+function unmix(basis, targetRGB, out, lambda = 0.015, maxCoverage = 1) {
+  const n = basis.count;
+  const d = basis.d;
+  const target = toDensity(targetRGB);
+  const b0 = target[0] - basis.paperD[0];
+  const b1 = target[1] - basis.paperD[1];
+  const b2 = target[2] - basis.paperD[2];
+
+  for (let k = 0; k < n; k++) out[k] = 0;
+
+  // The stable step is 1 / largest-eigenvalue, computed exactly when the basis
+  // was built. Anything larger oscillates; see largestEigenvalue().
+  const L = basis.L;
+  if (!(L > 1e-9)) return out;
+  const step = 1 / L;
+
+  // FISTA: `y` is the extrapolated point the gradient is taken at, `prev` the
+  // previous iterate. Scratch buffers are reused across calls because this is
+  // invoked once per cell.
+  const y = scratchY(n);
+  const prev = scratchPrev(n);
+  for (let k = 0; k < n; k++) {
+    y[k] = 0;
+    prev[k] = 0;
+  }
+  let t = 1;
+
+  for (let it = 0; it < 60; it++) {
+    // residual = A y - b
+    let r0 = -b0;
+    let r1 = -b1;
+    let r2 = -b2;
+    for (let k = 0; k < n; k++) {
+      const c = y[k];
+      if (c === 0) continue;
+      r0 += c * d[k * 3];
+      r1 += c * d[k * 3 + 1];
+      r2 += c * d[k * 3 + 2];
+    }
+    for (let k = 0; k < n; k++) {
+      const g = r0 * d[k * 3] + r1 * d[k * 3 + 1] + r2 * d[k * 3 + 2];
+      // Gradient step on the data term, then the L1 proximal step: subtract a
+      // constant and clamp at zero, which is what drives unused inks to exactly
+      // zero instead of merely small.
+      // Gradient step, then the L1 proximal step. Expressing the sparsity
+      // weight relative to L makes it scale-free: the same lambda means the
+      // same thing for a pale ink set as for a dense one.
+      let c = y[k] - g * step - lambda;
+      if (c < 0) c = 0;
+      else if (c > maxCoverage) c = maxCoverage;
+      out[k] = c;
+    }
+    const tNext = (1 + Math.sqrt(1 + 4 * t * t)) / 2;
+    const mom = (t - 1) / tNext;
+    let delta = 0;
+    for (let k = 0; k < n; k++) {
+      const d2 = out[k] - prev[k];
+      if (d2 > delta) delta = d2;
+      else if (-d2 > delta) delta = -d2;
+      y[k] = out[k] + mom * d2;
+      prev[k] = out[k];
+    }
+    t = tNext;
+    // Most cells are flat or near-paper and settle in a handful of iterations;
+    // only the awkward ones need the full budget. Bailing early on those is
+    // what keeps a per-cell solver affordable.
+    if (it > 8 && delta < 5e-5) break;
+  }
+  return out;
+}
+
+let _y = null;
+let _prev = null;
+function scratchY(n) {
+  if (!_y || _y.length < n) _y = new Float64Array(n);
+  return _y;
+}
+function scratchPrev(n) {
+  if (!_prev || _prev.length < n) _prev = new Float64Array(n);
+  return _prev;
+}
+
+/**
+ * Order inks the way a press would: darkest (the key) first, then by how much
+ * each contributes, so the most visible screen lands on the least visible angle.
+ * @param {number[][]} inks
+ * @returns {number[]} indices into `inks`
+ */
+function inkOrder(inks) {
+  return inks
+    .map((c, i) => ({ i, l: luma709(c[0], c[1], c[2]) }))
+    .sort((a, b) => a.l - b.l)
+    .map((e) => e.i);
+}
+
+module.exports = {
+  CLASSIC_ANGLES,
+  screenAngles,
+  toDensity,
+  buildInkBasis,
+  unmix,
+  inkOrder,
+  MIN_REFLECTANCE,
 };
 
 });
@@ -4096,6 +4460,1153 @@ module.exports = {
 
 });
 
+window.__define("src/engine/svg.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Vector export.
+ *
+ * A halftone is a list of shapes long before it is a grid of pixels, so it wants
+ * to be vector: a screen exported as SVG scales to any output size with no
+ * resampling at all, which is the form a printer actually wants. Rasterising it
+ * first and hoping 300dpi was enough is the thing this avoids.
+ *
+ * Per-ink screens export as one group per ink with `mix-blend-mode: multiply`,
+ * mirroring how the raster path composites them, so the file reproduces the
+ * render rather than approximating it.
+ *
+ * The dither path is deliberately NOT exported: it is one shape per pixel, so a
+ * modest grid is already hundreds of thousands of rectangles. The caller is told
+ * that plainly instead of being handed a file no application will open.
+ */
+
+const { getShape } = require("./shapes.js");
+const { cellCentre } = require("./halftone.js");
+const { sampleLUT, biasCurve, inkToRadius } = require("./grade.js");
+const { adjustColor, rgbToHex } = require("./color.js");
+const { paletteToLab, nearestIndex } = require("./palette.js");
+const { dotJitter, isIdentity: jitterIsIdentity } = require("./jitter.js");
+
+/** Above this, a viewer will struggle; the caller gets a warning, not a refusal. */
+const BUSY_SHAPE_COUNT = 200000;
+
+function fmt(n) {
+  // Two decimals is well below a printer's resolution and roughly halves the
+  // file size against the default float formatting.
+  return Math.abs(n) < 0.005 ? "0" : (Math.round(n * 100) / 100).toString();
+}
+
+/**
+ * One dot as an SVG element.
+ * @returns {string}
+ */
+function shapeMarkup(shapeId, cx, cy, r, cell, colour, rot) {
+  const t = rot ? ` transform="rotate(${fmt((rot * 180) / Math.PI)} ${fmt(cx)} ${fmt(cy)})"` : "";
+  const fill = ` fill="${colour}"`;
+
+  switch (shapeId) {
+    case "square": {
+      const s = r * 0.8862269254527580;
+      return `<rect x="${fmt(cx - s)}" y="${fmt(cy - s)}" width="${fmt(s * 2)}" height="${fmt(s * 2)}"${fill}${t}/>`;
+    }
+    case "diamond": {
+      const s = r * 1.2533141373155003;
+      const pts = `${fmt(cx)},${fmt(cy - s)} ${fmt(cx + s)},${fmt(cy)} ${fmt(cx)},${fmt(cy + s)} ${fmt(cx - s)},${fmt(cy)}`;
+      return `<polygon points="${pts}"${fill}${t}/>`;
+    }
+    case "ellipse": {
+      // Matches the raster path: 1.3:1, long axis on the 45 degree diagonal.
+      const a = r * Math.sqrt(1.3);
+      const b = r / Math.sqrt(1.3);
+      const deg = 45 + ((rot || 0) * 180) / Math.PI;
+      return `<ellipse cx="${fmt(cx)}" cy="${fmt(cy)}" rx="${fmt(a)}" ry="${fmt(b)}"${fill} transform="rotate(${fmt(deg)} ${fmt(cx)} ${fmt(cy)})"/>`;
+    }
+    case "cross": {
+      const arm = r * 1.35;
+      const th = r * 0.42;
+      return (
+        `<g${t}${fill}>` +
+        `<rect x="${fmt(cx - arm)}" y="${fmt(cy - th)}" width="${fmt(arm * 2)}" height="${fmt(th * 2)}"/>` +
+        `<rect x="${fmt(cx - th)}" y="${fmt(cy - arm)}" width="${fmt(th * 2)}" height="${fmt(arm * 2)}"/>` +
+        `</g>`
+      );
+    }
+    case "line": {
+      const halfW = cell * 0.5;
+      const halfH = (r * r * Math.PI) / (4 * halfW);
+      return `<rect x="${fmt(cx - halfW)}" y="${fmt(cy - halfH)}" width="${fmt(halfW * 2)}" height="${fmt(halfH * 2)}"${fill}${t}/>`;
+    }
+    default:
+      return `<circle cx="${fmt(cx)}" cy="${fmt(cy)}" r="${fmt(r)}"${fill}/>`;
+  }
+}
+
+/**
+ * Single-screen halftone -> SVG.
+ *
+ * @param {object} cells   CellData, already scaled to the output size
+ * @param {object} p       raster params (same object the rasteriser takes)
+ * @param {number} width
+ * @param {number} height
+ * @returns {{svg: string, shapes: number}}
+ */
+function halftoneSVG(cells, p, width, height) {
+  const grid = cells.grid;
+  const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
+  const gain = (grid.cell * (p.dotGain || 0)) / 100;
+  const labPal = paletteToLab(p.palette);
+  const adj = p.colorAdjust || {};
+  const adjOut = [0, 0, 0];
+  const centre = [0, 0];
+  const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
+  const jOut = [0, 0, 1, 0];
+  const fm = p.screenType === "fm" ? p.fmThreshold : null;
+
+  // Grouped by colour: far smaller output, and it gives the printer one object
+  // per ink to select.
+  const byColour = new Map();
+  let shapes = 0;
+
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      const ci = row * grid.cols + col;
+      const cnt = cells.count[ci];
+      if (cnt === 0) continue;
+
+      const L = cells.lum[ci] / cnt;
+      const graded = sampleLUT(p.toneLUT, L);
+      let ink = p.invert ? graded : 1 - graded;
+      ink = biasCurve(ink, p.gradeBias);
+
+      let r;
+      if (fm) {
+        if (ink <= fm(col, row)) continue;
+        r = maxRadius;
+      } else {
+        r = inkToRadius(ink, maxRadius, p.radiusCurve);
+        if (r <= 0.008) continue;
+      }
+      r += gain;
+
+      const q = ci * 3;
+      adjustColor(cells.rgb[q] / cnt, cells.rgb[q + 1] / cnt, cells.rgb[q + 2] / cnt, adj, adjOut);
+      const col3 = p.palette[nearestIndex(labPal, adjOut[0], adjOut[1], adjOut[2])];
+      const hex = rgbToHex(col3[0], col3[1], col3[2]);
+
+      cellCentre(grid, col, row, centre);
+      let rot = 0;
+      let cx = centre[0];
+      let cy = centre[1];
+      if (jit) {
+        dotJitter(col, row, jit, grid.cell, jOut);
+        cx += jOut[0];
+        cy += jOut[1];
+        r *= jOut[2];
+        rot = jOut[3];
+        if (r <= 0.008) continue;
+      }
+
+      if (!byColour.has(hex)) byColour.set(hex, []);
+      byColour.get(hex).push(shapeMarkup(p.shape, cx, cy, r, grid.cell, hex, rot));
+      shapes++;
+    }
+  }
+
+  const bg = rgbToHex(p.background[0], p.background[1], p.background[2]);
+  const groups = [];
+  for (const [hex, list] of byColour) {
+    groups.push(`<g id="ink-${hex.slice(1)}">\n${list.join("\n")}\n</g>`);
+  }
+
+  return { svg: wrap(width, height, bg, groups.join("\n")), shapes };
+}
+
+/**
+ * Per-ink screens -> SVG, one multiply group per ink.
+ * @returns {{svg: string, shapes: number}}
+ */
+function screensSVG(screens, p, width, height) {
+  const gainOf = (cell) => (cell * (p.dotGain || 0)) / 100;
+  const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
+  const jOut = [0, 0, 1, 0];
+  const fm = p.screenType === "fm" ? p.fmThreshold : null;
+  const centre = [0, 0];
+  const groups = [];
+  let shapes = 0;
+
+  screens.forEach((screen, s) => {
+    const grid = screen.grid;
+    const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
+    const gain = gainOf(grid.cell);
+    const hex = rgbToHex(screen.color[0], screen.color[1], screen.color[2]);
+    const mx = screen.offsetX || 0;
+    const my = screen.offsetY || 0;
+    const list = [];
+
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        const ci = row * grid.cols + col;
+        if (screen.count[ci] === 0) continue;
+        let r;
+        if (fm) {
+          if (screen.cov[ci] <= fm(col, row + s * 97)) continue;
+          r = maxRadius;
+        } else {
+          r = inkToRadius(screen.cov[ci], maxRadius, p.radiusCurve);
+          if (r <= 0.008) continue;
+        }
+        r += gain;
+        cellCentre(grid, col, row, centre);
+        let cx = centre[0] + mx;
+        let cy = centre[1] + my;
+        let rot = 0;
+        if (jit) {
+          dotJitter(col, row + s * 31, jit, grid.cell, jOut);
+          cx += jOut[0];
+          cy += jOut[1];
+          r *= jOut[2];
+          rot = jOut[3];
+          if (r <= 0.008) continue;
+        }
+        list.push(shapeMarkup(p.shape, cx, cy, r, grid.cell, hex, rot));
+        shapes++;
+      }
+    }
+
+    // Multiply, so overprinting in the file matches overprinting in the render.
+    groups.push(
+      `<g id="screen-${s}-${hex.slice(1)}" data-angle="${fmt(screen.angle)}" ` +
+        `style="mix-blend-mode: multiply">\n${list.join("\n")}\n</g>`
+    );
+  });
+
+  const bg = rgbToHex(p.background[0], p.background[1], p.background[2]);
+  return { svg: wrap(width, height, bg, groups.join("\n"), true), shapes };
+}
+
+function wrap(width, height, bg, body, isolate) {
+  const style = isolate ? ' style="isolation: isolate"' : "";
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" ` +
+    `viewBox="0 0 ${width} ${height}"${style}>\n` +
+    `<rect width="${width}" height="${height}" fill="${bg}"/>\n` +
+    body +
+    `\n</svg>\n`
+  );
+}
+
+module.exports = { halftoneSVG, screensSVG, shapeMarkup, BUSY_SHAPE_COUNT };
+
+});
+
+window.__define("src/engine/tonemap.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Tonal zone colour mapping.
+ *
+ * By default a pixel or cell takes whichever palette colour is nearest to it.
+ * That is faithful, but it means a dark red and a dark blue both collapse onto
+ * whatever single dark entry exists, and the palette's lighter colours never
+ * appear in shadow areas even when they would read better.
+ *
+ * Tonal mapping instead splits the palette into shadow / midtone / highlight
+ * bands and restricts matching to the band the pixel's luminance falls in. The
+ * palette is already sorted dark to light, so each band owns a contiguous slice
+ * of indices - which is what makes this a cheap index range rather than a
+ * per-pixel search over a subset.
+ *
+ * Bands overlap by one entry when the palette is big enough. Without the
+ * overlap, error diffusion cannot carry error across a band boundary and the
+ * boundary shows up as a hard contour.
+ */
+
+/**
+ * @param {number} paletteCount
+ * @param {number} shadowSplit    luminance 0..1 where shadows end
+ * @param {number} highlightSplit luminance 0..1 where highlights begin
+ * @returns {{bands: number[][], i1: number, i2: number}|null}
+ *          null when the palette is too small to split meaningfully
+ */
+function zoneBands(paletteCount, shadowSplit, highlightSplit) {
+  const n = paletteCount;
+  if (n < 3) return null;
+
+  let s = clamp01(shadowSplit);
+  let h = clamp01(highlightSplit);
+  if (h < s) {
+    const t = s;
+    s = h;
+    h = t;
+  }
+
+  // Index boundaries, keeping at least one colour per band.
+  let i1 = Math.round(n * s);
+  let i2 = Math.round(n * h);
+  i1 = Math.min(Math.max(i1, 1), n - 2);
+  i2 = Math.min(Math.max(i2, i1 + 1), n - 1);
+
+  const overlap = n >= 4 ? 1 : 0;
+  const bands = [
+    [0, Math.min(n, i1 + overlap)],
+    [Math.max(0, i1 - overlap), Math.min(n, i2 + overlap)],
+    [Math.max(0, i2 - overlap), n],
+  ];
+  return { bands, i1, i2 };
+}
+
+/**
+ * Build the `zoneRange` callback the renderers take.
+ *
+ * @param {number} paletteCount
+ * @param {object} params {tonalMapping, shadowSplit, highlightSplit}
+ * @returns {((L:number)=>number[])|null} null when mapping is off or impossible
+ */
+function makeZoneRange(paletteCount, params) {
+  if (!params || !params.tonalMapping) return null;
+  const z = zoneBands(paletteCount, params.shadowSplit, params.highlightSplit);
+  if (!z) return null;
+
+  let s = clamp01(params.shadowSplit);
+  let h = clamp01(params.highlightSplit);
+  if (h < s) {
+    const t = s;
+    s = h;
+    h = t;
+  }
+  const [shadow, mid, high] = z.bands;
+  return (L) => (L < s ? shadow : L < h ? mid : high);
+}
+
+function clamp01(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+module.exports = { zoneBands, makeZoneRange };
+
+});
+
+window.__define("src/state/params.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Single source of truth for the parameter set.
+ *
+ * The UI is generated from PARAM_DEFS, presets are validated against it, and
+ * persisted renders are migrated through it. Adding a control means adding one
+ * entry here.
+ *
+ * Two visibility mechanisms keep the panel from becoming a wall of sliders:
+ *   - `modes`  : which render mode(s) a parameter belongs to
+ *   - `showIf` : a predicate on the current parameters
+ */
+
+const SCHEMA_VERSION = 2;
+
+const MODES = ["halftone", "dither"];
+
+/**
+ * @typedef {object} ParamDef
+ * @property {string} key
+ * @property {string} label
+ * @property {"slider"|"choice"|"chips"|"toggle"|"palette"|"color"} type
+ * @property {*} def default value
+ * @property {number} [min]
+ * @property {number} [max]
+ * @property {number} [step]
+ * @property {number} [decimals]
+ * @property {string} [unit]
+ * @property {string} [section]
+ * @property {string[]} [options]
+ * @property {string[]} [modes]     restrict to these render modes
+ * @property {(p: object) => boolean} [showIf]
+ * @property {string} [hint]
+ */
+
+/** Populated lazily to avoid a require cycle with the engine. */
+let _ditherIds = null;
+function ditherAlgorithmIds() {
+  if (!_ditherIds) {
+    // eslint-disable-next-line global-require
+    _ditherIds = require("../engine/dither.js").ALGORITHM_IDS;
+  }
+  return _ditherIds;
+}
+
+/** @type {ParamDef[]} */
+const PARAM_DEFS = [
+  // ----------------------------------------------------------------- Mode
+  {
+    key: "mode",
+    label: "Mode",
+    section: "mode",
+    type: "choice",
+    def: "halftone",
+    options: MODES,
+    hint: "Halftone varies dot size on a grid. Dither picks one palette colour per pixel.",
+  },
+
+  // ---------------------------------------------------------------- Scale
+  {
+    key: "scaleMode",
+    label: "Scale by",
+    section: "scale",
+    type: "choice",
+    def: "relative",
+    options: ["relative", "dpi"],
+    optionLabels: { relative: "Relative", dpi: "DPI" },
+    hint: "Relative is resolution independent. DPI derives the grid from the document's own resolution.",
+  },
+  {
+    key: "dpi",
+    label: "DPI",
+    section: "scale",
+    type: "slider",
+    def: 150,
+    min: 5,
+    max: 300,
+    step: 1,
+    decimals: 0,
+    showIf: (p) => p.scaleMode === "dpi",
+    hint: "Target output density. The grid is docPixels x (dpi / documentResolution).",
+  },
+  {
+    key: "density",
+    label: "Density",
+    section: "scale",
+    type: "slider",
+    def: 90,
+    min: 8,
+    max: 400,
+    step: 1,
+    decimals: 0,
+    unit: " cells",
+    modes: ["halftone"],
+    showIf: (p) => p.scaleMode !== "dpi",
+    hint: "Cells across the longest edge. Resolution independent, so the preview matches the full render.",
+  },
+  {
+    key: "ditherResolution",
+    label: "Resolution",
+    section: "scale",
+    type: "slider",
+    def: 400,
+    min: 24,
+    max: 2400,
+    step: 1,
+    decimals: 0,
+    unit: " px",
+    modes: ["dither"],
+    showIf: (p) => p.scaleMode !== "dpi",
+    hint: "Dither pixels across the longest edge. Lower values give the chunky bitmap look.",
+  },
+  {
+    key: "angle",
+    label: "Angle",
+    section: "scale",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 90,
+    step: 1,
+    decimals: 0,
+    unit: "°",
+    modes: ["halftone"],
+  },
+
+  // ------------------------------------------------------------- Halftone
+  {
+    key: "radius",
+    label: "Radius",
+    section: "halftone",
+    type: "slider",
+    def: 100,
+    min: 0,
+    max: 200,
+    step: 1,
+    decimals: 0,
+    unit: "%",
+    modes: ["halftone"],
+    hint: "Maximum dot size as a percentage of the cell half-size. Above 100% dots overlap.",
+  },
+  {
+    key: "radiusCurve",
+    label: "Dot Curve",
+    section: "halftone",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    decimals: 2,
+    modes: ["halftone"],
+    hint: "0 = dot area follows tone (classic AM screen). 1 = dot radius follows tone (harder).",
+  },
+  {
+    key: "shape",
+    label: "Shape",
+    section: "halftone",
+    type: "chips",
+    def: "circle",
+    options: ["circle", "ellipse", "square", "diamond", "cross", "line"],
+    modes: ["halftone"],
+    hint: "Ellipse joins its neighbours gradually, avoiding the hard 50% tone jump a circle makes.",
+  },
+  {
+    key: "dotGain",
+    label: "Dot Gain",
+    section: "halftone",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 40,
+    step: 0.5,
+    decimals: 1,
+    unit: "%",
+    modes: ["halftone"],
+    hint: "Simulates a press spreading ink a fixed width around every dot edge. A radius offset, not a tonal curve.",
+  },
+  {
+    key: "screenType",
+    label: "Screen",
+    section: "halftone",
+    type: "choice",
+    def: "am",
+    options: ["am", "fm"],
+    optionLabels: { am: "AM", fm: "FM" },
+    modes: ["halftone"],
+    hint: "AM varies dot size on a grid. FM keeps every dot the same size and varies how many there are - a stochastic screen.",
+  },
+  {
+    key: "screenMode",
+    label: "Screens",
+    section: "halftone",
+    type: "choice",
+    def: "single",
+    options: ["single", "perInk"],
+    modes: ["halftone"],
+    hint: "perInk gives every ink its own angle and overprints them, producing a rosette instead of a moire.",
+  },
+  {
+    key: "screenSpread",
+    label: "Angle Spread",
+    section: "halftone",
+    type: "slider",
+    def: 1,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    decimals: 2,
+    modes: ["halftone"],
+    showIf: (p) => p.screenMode === "perInk",
+    hint: "1 uses the classic 45/15/75/0 separation. 0 collapses every screen onto one angle.",
+  },
+  {
+    key: "edgeAware",
+    label: "Edge Aware",
+    section: "halftone",
+    type: "toggle",
+    def: false,
+    modes: ["halftone"],
+    hint: "Cells straddling an edge take the tone of the dominant side instead of averaging across it.",
+  },
+
+  // --------------------------------------------------------------- Dither
+  {
+    key: "ditherAlgorithm",
+    label: "Algorithm",
+    section: "dither",
+    type: "chips",
+    def: "floydsteinberg",
+    get options() {
+      return ditherAlgorithmIds();
+    },
+    modes: ["dither"],
+  },
+  {
+    key: "ditherStrength",
+    label: "Amount",
+    section: "dither",
+    type: "slider",
+    def: 1,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    decimals: 2,
+    modes: ["dither"],
+    hint: "0 posterises with no pattern at all; 1 is the full dither.",
+  },
+  {
+    key: "serpentine",
+    label: "Serpentine",
+    section: "dither",
+    type: "toggle",
+    def: true,
+    modes: ["dither"],
+    hint: "Alternate the scan direction each row. Cancels most directional error-diffusion artefacts.",
+  },
+
+  // ---------------------------------------------------------------- Press
+  {
+    key: "jitterPosition",
+    label: "Offset",
+    section: "press",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 100,
+    step: 1,
+    decimals: 0,
+    unit: "%",
+    modes: ["halftone"],
+    hint: "Nudges each dot off its grid position, as a percentage of the cell.",
+  },
+  {
+    key: "jitterSize",
+    label: "Size Vary",
+    section: "press",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 100,
+    step: 1,
+    decimals: 0,
+    unit: "%",
+    modes: ["halftone"],
+  },
+  {
+    key: "jitterAngle",
+    label: "Rotate",
+    section: "press",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 180,
+    step: 1,
+    decimals: 0,
+    unit: "°",
+    modes: ["halftone"],
+    hint: "Random per-dot rotation. Only visible on shapes that are not round.",
+  },
+  {
+    key: "misregistration",
+    label: "Off-register",
+    section: "press",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 100,
+    step: 1,
+    decimals: 0,
+    unit: "%",
+    modes: ["halftone"],
+    showIf: (p) => p.screenMode === "perInk",
+    hint: "Each ink plate lands slightly off the others, as a real press does. This is most of what makes a print look printed.",
+  },
+  {
+    key: "seed",
+    label: "Seed",
+    section: "press",
+    type: "slider",
+    def: 1,
+    min: 1,
+    max: 999,
+    step: 1,
+    decimals: 0,
+    modes: ["halftone"],
+    hint: "All imperfection is derived from this, so the same seed always gives the same result.",
+  },
+
+  // ---------------------------------------------------------- Pre-process
+  {
+    key: "blur",
+    label: "Blur",
+    section: "preprocess",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 40,
+    step: 0.1,
+    decimals: 1,
+    hint: "Resolution independent units (px per 1000px of the longest edge).",
+  },
+  {
+    key: "sharpen",
+    label: "Sharpen",
+    section: "preprocess",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 200,
+    step: 1,
+    decimals: 0,
+    unit: "%",
+    hint: "Unsharp mask. Worth using before a dither, which has no tonal resolution to spare.",
+  },
+  {
+    key: "sharpenRadius",
+    label: "Sharpen R",
+    section: "preprocess",
+    type: "slider",
+    def: 2,
+    min: 0.3,
+    max: 10,
+    step: 0.1,
+    decimals: 1,
+    showIf: (p) => p.sharpen > 0,
+  },
+  {
+    key: "noiseReduction",
+    label: "Noise Red.",
+    section: "preprocess",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 100,
+    step: 1,
+    decimals: 0,
+    hint: "Edge-preserving smoothing. Stops sensor noise turning into a field of stray dots.",
+  },
+
+  // --------------------------------------------------------------- Colors
+  {
+    key: "colorCount",
+    label: "Colors",
+    section: "colors",
+    type: "slider",
+    def: 3,
+    min: 2,
+    max: 8,
+    step: 1,
+    decimals: 0,
+  },
+  {
+    key: "spread",
+    label: "Spread",
+    section: "colors",
+    type: "slider",
+    def: 0.35,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    decimals: 2,
+    hint: "Pushes palette entries apart in OKLab for a punchier, screen-printed separation.",
+  },
+  {
+    key: "quantMethod",
+    label: "Method",
+    section: "colors",
+    type: "choice",
+    def: "kmeans",
+    options: ["kmeans", "mediancut", "popularity"],
+    optionLabels: { kmeans: "K-Means", mediancut: "Median Cut", popularity: "Popularity" },
+  },
+  {
+    key: "palette",
+    label: "Palette",
+    section: "colors",
+    type: "palette",
+    def: ["#161616", "#F5EBD8", "#EC3E32"],
+  },
+  {
+    // Not a control of its own: rendered as a small lock badge on each swatch.
+    // Locked entries survive re-extraction, so you can pin your brand red and
+    // let the engine choose the rest.
+    key: "lockedSwatches",
+    label: "Locked swatches",
+    section: "colors",
+    type: "internal",
+    def: [],
+  },
+  {
+    key: "paletteLocked",
+    label: "Lock palette",
+    section: "colors",
+    type: "toggle",
+    def: true,
+    hint: "When off, the palette is re-extracted from the image on every render.",
+  },
+  {
+    key: "background",
+    label: "Background",
+    section: "colors",
+    type: "color",
+    def: "auto",
+    modes: ["halftone"],
+    hint: "auto = lightest palette colour (darkest when Invert is on).",
+  },
+
+  // ----------------------------------------------------------- Tonal zones
+  {
+    key: "tonalMapping",
+    label: "Tonal zones",
+    section: "tonal",
+    type: "toggle",
+    def: false,
+    hint: "Restrict shadows, midtones and highlights each to their own slice of the palette.",
+  },
+  {
+    key: "shadowSplit",
+    label: "Shadows",
+    section: "tonal",
+    type: "slider",
+    def: 0.33,
+    min: 0.05,
+    max: 0.6,
+    step: 0.01,
+    decimals: 2,
+    showIf: (p) => p.tonalMapping,
+  },
+  {
+    key: "highlightSplit",
+    label: "Highlights",
+    section: "tonal",
+    type: "slider",
+    def: 0.66,
+    min: 0.4,
+    max: 0.95,
+    step: 0.01,
+    decimals: 2,
+    showIf: (p) => p.tonalMapping,
+  },
+
+  // ---------------------------------------------------------------- Grade
+  {
+    key: "contrast",
+    label: "Contrast",
+    section: "grade",
+    type: "slider",
+    def: 1,
+    min: 0,
+    max: 3,
+    step: 0.01,
+    decimals: 2,
+  },
+  {
+    key: "gamma",
+    label: "Gamma",
+    section: "grade",
+    type: "slider",
+    def: 1,
+    min: 0.1,
+    max: 3,
+    step: 0.01,
+    decimals: 2,
+  },
+  {
+    key: "blackPoint",
+    label: "Black",
+    section: "grade",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 254,
+    step: 1,
+    decimals: 0,
+  },
+  {
+    key: "whitePoint",
+    label: "White",
+    section: "grade",
+    type: "slider",
+    def: 255,
+    min: 1,
+    max: 255,
+    step: 1,
+    decimals: 0,
+  },
+  {
+    key: "exposure",
+    label: "Exposure",
+    section: "grade",
+    type: "slider",
+    def: 0,
+    min: -100,
+    max: 100,
+    step: 1,
+    decimals: 0,
+    unit: "%",
+  },
+  {
+    key: "gradeBias",
+    label: "Grade Bias",
+    section: "grade",
+    type: "slider",
+    def: 0,
+    min: -1,
+    max: 1,
+    step: 0.01,
+    decimals: 2,
+    modes: ["halftone"],
+    hint: "Bends the tone -> dot size curve without moving pure black or pure white.",
+  },
+  {
+    key: "lumaMode",
+    label: "Luma",
+    section: "grade",
+    type: "choice",
+    def: "luma709",
+    options: ["luma709", "luma601", "perceptual"],
+    optionLabels: { luma709: "Luma 709", luma601: "Luma 601", perceptual: "Perceptual" },
+  },
+
+  // ----------------------------------------------------------- Adjustments
+  {
+    key: "hue",
+    label: "Hue",
+    section: "adjust",
+    type: "slider",
+    def: 0,
+    min: -180,
+    max: 180,
+    step: 1,
+    decimals: 0,
+    unit: "°",
+  },
+  {
+    key: "saturation",
+    label: "Saturation",
+    section: "adjust",
+    type: "slider",
+    def: 1,
+    min: 0,
+    max: 3,
+    step: 0.01,
+    decimals: 2,
+  },
+  {
+    key: "brightness",
+    label: "Brightness",
+    section: "adjust",
+    type: "slider",
+    def: 0,
+    min: -100,
+    max: 100,
+    step: 1,
+    decimals: 0,
+  },
+  {
+    key: "invert",
+    label: "Invert",
+    section: "adjust",
+    type: "toggle",
+    def: false,
+    hint: "Halftone: dots grow in the highlights and the paper flips. Dither: the tone curve inverts.",
+  },
+
+  // ---------------------------------------------------------------- Batch
+  {
+    key: "batchScope",
+    label: "Scope",
+    section: "batch",
+    type: "choice",
+    def: "selection",
+    options: ["selection", "group", "document"],
+    hint: "Which layers Batch Apply touches. Existing halftone output is always skipped.",
+  },
+  {
+    key: "batchSharedPalette",
+    label: "Shared palette",
+    section: "batch",
+    type: "toggle",
+    def: true,
+    hint: "Extract the palette once from the first layer and pin it for the rest, so a sequence does not crawl.",
+  },
+
+  // --------------------------------------------------------------- Output
+  {
+    key: "useSelection",
+    label: "Use selection",
+    section: "output",
+    type: "toggle",
+    def: true,
+    hint: "Confine the render to the active selection when there is one. The grid still anchors to the layer, so dots do not shift when the selection changes.",
+  },
+  {
+    key: "output",
+    label: "Output",
+    section: "output",
+    type: "choice",
+    def: "flat",
+    options: ["flat", "separated"],
+    hint: "Separated writes one solid-colour fill layer per palette colour, each with its own mask.",
+  },
+];
+
+const SECTIONS = [
+  { id: "mode", label: "Mode" },
+  { id: "scale", label: "Scale" },
+  { id: "halftone", label: "Halftone", modes: ["halftone"] },
+  { id: "press", label: "Press Imperfection", modes: ["halftone"] },
+  { id: "dither", label: "Dither", modes: ["dither"] },
+  { id: "preprocess", label: "Pre-process" },
+  { id: "colors", label: "Colors" },
+  { id: "tonal", label: "Tonal Zones" },
+  { id: "grade", label: "Grade" },
+  { id: "adjust", label: "Color Adjustments" },
+  { id: "output", label: "Output" },
+  { id: "batch", label: "Batch" },
+];
+
+const DEF_BY_KEY = Object.create(null);
+for (const d of PARAM_DEFS) DEF_BY_KEY[d.key] = d;
+
+/** @returns {object} a fresh default parameter object */
+function defaultParams() {
+  const p = { version: SCHEMA_VERSION };
+  for (const d of PARAM_DEFS) {
+    p[d.key] = Array.isArray(d.def) ? d.def.slice() : d.def;
+  }
+  return p;
+}
+
+/**
+ * Should this parameter be shown for the current state?
+ * @param {ParamDef} def
+ * @param {object} params
+ */
+function isVisible(def, params) {
+  // Internal params carry state but have no row of their own.
+  if (def.type === "internal") return false;
+  if (def.modes && def.modes.indexOf(params.mode) < 0) return false;
+  if (def.showIf && !def.showIf(params)) return false;
+  return true;
+}
+
+function sectionVisible(section, params) {
+  if (section.modes && section.modes.indexOf(params.mode) < 0) return false;
+  return PARAM_DEFS.some((d) => d.section === section.id && isVisible(d, params));
+}
+
+/**
+ * Coerce and clamp an arbitrary object into a valid parameter set.
+ * Unknown keys are dropped, missing keys fall back to the default.
+ * @param {object} raw
+ * @returns {object}
+ */
+function sanitizeParams(raw) {
+  const out = defaultParams();
+  if (!raw || typeof raw !== "object") return out;
+
+  for (const d of PARAM_DEFS) {
+    const v = raw[d.key];
+    if (v === undefined || v === null) continue;
+    switch (d.type) {
+      case "slider": {
+        const n = Number(v);
+        if (!Number.isFinite(n)) break;
+        out[d.key] = Math.min(d.max, Math.max(d.min, n));
+        break;
+      }
+      case "choice":
+      case "chips":
+        if (d.options.indexOf(v) >= 0) out[d.key] = v;
+        break;
+      case "toggle":
+        out[d.key] = !!v;
+        break;
+      case "internal":
+        if (Array.isArray(v)) {
+          out[d.key] = v
+            .map((n) => Math.round(Number(n)))
+            .filter((n) => Number.isFinite(n) && n >= 0 && n < 64);
+        }
+        break;
+      case "palette":
+        if (Array.isArray(v)) {
+          const hexes = v
+            .filter((c) => typeof c === "string" && /^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(c.trim()))
+            .map((c) => normalizeHex(c));
+          if (hexes.length) out[d.key] = hexes;
+        }
+        break;
+      case "color":
+        if (typeof v === "string") {
+          out[d.key] = v === "auto" ? "auto" : normalizeHex(v) || "auto";
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  // colorCount and the palette length must agree.
+  out.colorCount = Math.min(8, Math.max(2, Math.round(out.colorCount)));
+  if (out.whitePoint <= out.blackPoint) out.whitePoint = Math.min(255, out.blackPoint + 1);
+  if (out.highlightSplit <= out.shadowSplit) {
+    out.highlightSplit = Math.min(0.95, out.shadowSplit + 0.05);
+  }
+  return out;
+}
+
+function normalizeHex(c) {
+  let h = String(c).trim().replace(/^#/, "");
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+  return "#" + h.toUpperCase();
+}
+
+function paramsEqual(a, b) {
+  if (!a || !b) return false;
+  for (const d of PARAM_DEFS) {
+    const va = a[d.key];
+    const vb = b[d.key];
+    if (Array.isArray(va) || Array.isArray(vb)) {
+      if (!Array.isArray(va) || !Array.isArray(vb) || va.length !== vb.length) return false;
+      for (let i = 0; i < va.length; i++) if (va[i] !== vb[i]) return false;
+    } else if (va !== vb) return false;
+  }
+  return true;
+}
+
+function cloneParams(p) {
+  const out = {};
+  for (const k of Object.keys(p)) out[k] = Array.isArray(p[k]) ? p[k].slice() : p[k];
+  return out;
+}
+
+/**
+ * Resolve the grid resolution (cells or dither pixels across the longest edge)
+ * for the current scale mode.
+ *
+ * DPI mode needs the document's own resolution to be meaningful: a 300 ppi
+ * document rendered at 150 dpi wants one output pixel per two document pixels.
+ *
+ * @param {object} params
+ * @param {number} sourceLongestPx longest edge of the document in pixels
+ * @param {number} [docPPI] document resolution; 72 is assumed when unknown
+ */
+function resolveResolution(params, sourceLongestPx, docPPI) {
+  const relative = params.mode === "dither" ? params.ditherResolution : params.density;
+  if (params.scaleMode !== "dpi") return relative;
+  const ppi = docPPI && docPPI > 1 ? docPPI : 72;
+  const inches = sourceLongestPx / ppi;
+  const cells = inches * params.dpi;
+  const def = DEF_BY_KEY[params.mode === "dither" ? "ditherResolution" : "density"];
+  return Math.min(def.max, Math.max(def.min, Math.round(cells)));
+}
+
+module.exports = {
+  SCHEMA_VERSION,
+  MODES,
+  PARAM_DEFS,
+  SECTIONS,
+  DEF_BY_KEY,
+  defaultParams,
+  sanitizeParams,
+  paramsEqual,
+  cloneParams,
+  normalizeHex,
+  isVisible,
+  sectionVisible,
+  resolveResolution,
+};
+
+});
+
 window.__define("src/engine/pipeline.js", function (module, exports, require) {
 "use strict";
 
@@ -4135,6 +5646,9 @@ const {
   rasterizeScreensSeparated,
 } = require("./halftone.js");
 const { screenAngles, buildInkBasis, unmix, inkOrder } = require("./separation.js");
+const { blueNoiseMatrix } = require("./dither.js");
+const { inkOffset } = require("./jitter.js");
+const { halftoneSVG, screensSVG, BUSY_SHAPE_COUNT } = require("./svg.js");
 const { buildToneLUT, applyToneToImage, biasCurve } = require("./grade.js");
 const { ditherToIndices, indicesToRGBA, indicesToMasks } = require("./dither.js");
 const { makeZoneRange } = require("./tonemap.js");
@@ -4546,9 +6060,25 @@ class HalftoneEngine {
   _rasterParams(params) {
     const st = this._paletteStructure(params);
     const ink = st.inkIndices.map((i) => st.out[i]);
+    // Blue noise drives FM screening: no low-frequency energy, so the dots read
+    // as an even grain instead of a pattern. Built once and cached.
+    let fmThreshold = null;
+    if (params.screenType === "fm") {
+      const m = blueNoiseMatrix(64);
+      fmThreshold = (col, row) => m.data[(row % m.size) * m.size + (col % m.size)];
+    }
+
     return {
       radius: params.radius,
       shape: params.shape,
+      screenType: params.screenType,
+      fmThreshold,
+      jitter: {
+        jitterPosition: params.jitterPosition,
+        jitterSize: params.jitterSize,
+        jitterAngle: params.jitterAngle,
+        seed: params.seed,
+      },
       dotGain: params.dotGain,
       gradeBias: params.gradeBias,
       radiusCurve: params.radiusCurve,
@@ -4606,7 +6136,7 @@ class HalftoneEngine {
       const { screens, rp: srp } = this._ensureScreens(params);
       const t0 = now();
       const data = rasterizeScreens(
-        this._scaleScreens(screens, width, height),
+        this._scaleScreens(screens, width, height, params),
         srp,
         width,
         height,
@@ -4645,16 +6175,32 @@ class HalftoneEngine {
     };
   }
 
-  /** Re-express every screen's grid at the output resolution. */
-  _scaleScreens(screens, width, height) {
-    return screens.map((sc) => ({
-      grid: scaleGrid(sc.grid, width, height),
-      cov: sc.cov,
-      count: sc.count,
-      color: sc.color,
-      paletteIndex: sc.paletteIndex,
-      angle: sc.angle,
-    }));
+  /**
+   * Re-express every screen's grid at the output resolution.
+   *
+   * Misregistration is applied here rather than at measurement time because it
+   * is a rendering offset in output pixels: derived from the scaled cell size,
+   * it looks identical on a preview and on a full render.
+   */
+  _scaleScreens(screens, width, height, params) {
+    const amount = params ? params.misregistration : 0;
+    const seed = params ? params.seed : 0;
+    const off = [0, 0];
+    return screens.map((sc, i) => {
+      const grid = scaleGrid(sc.grid, width, height);
+      inkOffset(i, amount, grid.cell, seed, off);
+      return {
+        grid,
+        cov: sc.cov,
+        count: sc.count,
+        color: sc.color,
+        inkSlot: sc.inkSlot,
+        paletteIndex: sc.paletteIndex,
+        angle: sc.angle,
+        offsetX: off[0],
+        offsetY: off[1],
+      };
+    });
   }
 
   /**
@@ -4687,7 +6233,7 @@ class HalftoneEngine {
 
     if (params.screenMode === "perInk") {
       const { screens, rp: srp } = this._ensureScreens(params);
-      const scaled = this._scaleScreens(screens, width, height);
+      const scaled = this._scaleScreens(screens, width, height, params);
       const inkMasks = rasterizeScreensSeparated(scaled, srp, width, height);
       // Transparent inks overlap by design, so the masks are NOT exclusive and
       // the fill layers must be set to Multiply over an opaque paper.
@@ -4728,6 +6274,44 @@ class HalftoneEngine {
   }
 
   /**
+   * Export the render as SVG.
+   *
+   * Halftone only: dithering is one shape per pixel, so even a modest grid runs
+   * to hundreds of thousands of rectangles and no viewer would open the result.
+   * The caller is told that rather than handed a useless file.
+   *
+   * @returns {{svg: string, shapes: number, busy: boolean}}
+   */
+  renderSVG(params, opts = {}) {
+    if (!this.source) throw new Error("HalftoneEngine: no source set");
+    if (params.mode === "dither") {
+      throw new Error(
+        "SVG export covers halftone mode only. A dither is one shape per pixel, " +
+          "which no vector application can usefully open."
+      );
+    }
+    const width = opts.width || this.source.width;
+    const height = opts.height || this.source.height;
+
+    let res;
+    if (params.screenMode === "perInk") {
+      const { screens, rp } = this._ensureScreens(params);
+      res = screensSVG(this._scaleScreens(screens, width, height, params), rp, width, height);
+    } else {
+      const cells = this._ensureCells(params);
+      const rp = this._rasterParams(params);
+      const grid = scaleGrid(cells.grid, width, height);
+      res = halftoneSVG(
+        { lum: cells.lum, rgb: cells.rgb, count: cells.count, grid },
+        rp,
+        width,
+        height
+      );
+    }
+    return { svg: res.svg, shapes: res.shapes, busy: res.shapes > BUSY_SHAPE_COUNT };
+  }
+
+  /**
    * Chunked render that yields to the event loop between bands so Photoshop's
    * UI keeps breathing on very large documents.
    */
@@ -4764,7 +6348,7 @@ class HalftoneEngine {
       const { screens, rp: srp } = this._ensureScreens(params);
       if (shouldCancel()) return null;
       onProgress(0.2);
-      const scaled = this._scaleScreens(screens, width, height);
+      const scaled = this._scaleScreens(screens, width, height, params);
       const data = opts.out || new Uint8ClampedArray(width * height * 4);
       for (let i = 0; i < scaled.length; i++) {
         rasterizeScreens(scaled, srp, width, height, data, {
@@ -4855,730 +6439,6 @@ function now() {
 }
 
 module.exports = { HalftoneEngine, SAMPLES_PER_CELL_EDGE, ANALYSIS_MIN, ANALYSIS_MAX };
-
-});
-
-window.__define("src/state/params.js", function (module, exports, require) {
-"use strict";
-
-/**
- * Single source of truth for the parameter set.
- *
- * The UI is generated from PARAM_DEFS, presets are validated against it, and
- * persisted renders are migrated through it. Adding a control means adding one
- * entry here.
- *
- * Two visibility mechanisms keep the panel from becoming a wall of sliders:
- *   - `modes`  : which render mode(s) a parameter belongs to
- *   - `showIf` : a predicate on the current parameters
- */
-
-const SCHEMA_VERSION = 2;
-
-const MODES = ["halftone", "dither"];
-
-/**
- * @typedef {object} ParamDef
- * @property {string} key
- * @property {string} label
- * @property {"slider"|"choice"|"chips"|"toggle"|"palette"|"color"} type
- * @property {*} def default value
- * @property {number} [min]
- * @property {number} [max]
- * @property {number} [step]
- * @property {number} [decimals]
- * @property {string} [unit]
- * @property {string} [section]
- * @property {string[]} [options]
- * @property {string[]} [modes]     restrict to these render modes
- * @property {(p: object) => boolean} [showIf]
- * @property {string} [hint]
- */
-
-/** Populated lazily to avoid a require cycle with the engine. */
-let _ditherIds = null;
-function ditherAlgorithmIds() {
-  if (!_ditherIds) {
-    // eslint-disable-next-line global-require
-    _ditherIds = require("../engine/dither.js").ALGORITHM_IDS;
-  }
-  return _ditherIds;
-}
-
-/** @type {ParamDef[]} */
-const PARAM_DEFS = [
-  // ----------------------------------------------------------------- Mode
-  {
-    key: "mode",
-    label: "Mode",
-    section: "mode",
-    type: "choice",
-    def: "halftone",
-    options: MODES,
-    hint: "Halftone varies dot size on a grid. Dither picks one palette colour per pixel.",
-  },
-
-  // ---------------------------------------------------------------- Scale
-  {
-    key: "scaleMode",
-    label: "Scale by",
-    section: "scale",
-    type: "choice",
-    def: "relative",
-    options: ["relative", "dpi"],
-    hint: "Relative is resolution independent. DPI derives the grid from the document's own resolution.",
-  },
-  {
-    key: "dpi",
-    label: "DPI",
-    section: "scale",
-    type: "slider",
-    def: 150,
-    min: 5,
-    max: 300,
-    step: 1,
-    decimals: 0,
-    showIf: (p) => p.scaleMode === "dpi",
-    hint: "Target output density. The grid is docPixels x (dpi / documentResolution).",
-  },
-  {
-    key: "density",
-    label: "Density",
-    section: "scale",
-    type: "slider",
-    def: 90,
-    min: 8,
-    max: 400,
-    step: 1,
-    decimals: 0,
-    unit: " cells",
-    modes: ["halftone"],
-    showIf: (p) => p.scaleMode !== "dpi",
-    hint: "Cells across the longest edge. Resolution independent, so the preview matches the full render.",
-  },
-  {
-    key: "ditherResolution",
-    label: "Resolution",
-    section: "scale",
-    type: "slider",
-    def: 400,
-    min: 24,
-    max: 2400,
-    step: 1,
-    decimals: 0,
-    unit: " px",
-    modes: ["dither"],
-    showIf: (p) => p.scaleMode !== "dpi",
-    hint: "Dither pixels across the longest edge. Lower values give the chunky bitmap look.",
-  },
-  {
-    key: "angle",
-    label: "Angle",
-    section: "scale",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 90,
-    step: 1,
-    decimals: 0,
-    unit: "°",
-    modes: ["halftone"],
-  },
-
-  // ------------------------------------------------------------- Halftone
-  {
-    key: "radius",
-    label: "Radius",
-    section: "halftone",
-    type: "slider",
-    def: 100,
-    min: 0,
-    max: 200,
-    step: 1,
-    decimals: 0,
-    unit: "%",
-    modes: ["halftone"],
-    hint: "Maximum dot size as a percentage of the cell half-size. Above 100% dots overlap.",
-  },
-  {
-    key: "radiusCurve",
-    label: "Dot Curve",
-    section: "halftone",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 1,
-    step: 0.01,
-    decimals: 2,
-    modes: ["halftone"],
-    hint: "0 = dot area follows tone (classic AM screen). 1 = dot radius follows tone (harder).",
-  },
-  {
-    key: "shape",
-    label: "Shape",
-    section: "halftone",
-    type: "chips",
-    def: "circle",
-    options: ["circle", "ellipse", "square", "diamond", "cross", "line"],
-    modes: ["halftone"],
-    hint: "Ellipse joins its neighbours gradually, avoiding the hard 50% tone jump a circle makes.",
-  },
-  {
-    key: "dotGain",
-    label: "Dot Gain",
-    section: "halftone",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 40,
-    step: 0.5,
-    decimals: 1,
-    unit: "%",
-    modes: ["halftone"],
-    hint: "Simulates a press spreading ink a fixed width around every dot edge. A radius offset, not a tonal curve.",
-  },
-  {
-    key: "screenMode",
-    label: "Screens",
-    section: "halftone",
-    type: "choice",
-    def: "single",
-    options: ["single", "perInk"],
-    modes: ["halftone"],
-    hint: "perInk gives every ink its own angle and overprints them, producing a rosette instead of a moire.",
-  },
-  {
-    key: "screenSpread",
-    label: "Angle Spread",
-    section: "halftone",
-    type: "slider",
-    def: 1,
-    min: 0,
-    max: 1,
-    step: 0.01,
-    decimals: 2,
-    modes: ["halftone"],
-    showIf: (p) => p.screenMode === "perInk",
-    hint: "1 uses the classic 45/15/75/0 separation. 0 collapses every screen onto one angle.",
-  },
-  {
-    key: "edgeAware",
-    label: "Edge Aware",
-    section: "halftone",
-    type: "toggle",
-    def: false,
-    modes: ["halftone"],
-    hint: "Cells straddling an edge take the tone of the dominant side instead of averaging across it.",
-  },
-
-  // --------------------------------------------------------------- Dither
-  {
-    key: "ditherAlgorithm",
-    label: "Algorithm",
-    section: "dither",
-    type: "chips",
-    def: "floydsteinberg",
-    get options() {
-      return ditherAlgorithmIds();
-    },
-    modes: ["dither"],
-  },
-  {
-    key: "ditherStrength",
-    label: "Amount",
-    section: "dither",
-    type: "slider",
-    def: 1,
-    min: 0,
-    max: 1,
-    step: 0.01,
-    decimals: 2,
-    modes: ["dither"],
-    hint: "0 posterises with no pattern at all; 1 is the full dither.",
-  },
-  {
-    key: "serpentine",
-    label: "Serpentine",
-    section: "dither",
-    type: "toggle",
-    def: true,
-    modes: ["dither"],
-    hint: "Alternate the scan direction each row. Cancels most directional error-diffusion artefacts.",
-  },
-
-  // ---------------------------------------------------------- Pre-process
-  {
-    key: "blur",
-    label: "Blur",
-    section: "preprocess",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 40,
-    step: 0.1,
-    decimals: 1,
-    hint: "Resolution independent units (px per 1000px of the longest edge).",
-  },
-  {
-    key: "sharpen",
-    label: "Sharpen",
-    section: "preprocess",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 200,
-    step: 1,
-    decimals: 0,
-    unit: "%",
-    hint: "Unsharp mask. Worth using before a dither, which has no tonal resolution to spare.",
-  },
-  {
-    key: "sharpenRadius",
-    label: "Sharpen R",
-    section: "preprocess",
-    type: "slider",
-    def: 2,
-    min: 0.3,
-    max: 10,
-    step: 0.1,
-    decimals: 1,
-    showIf: (p) => p.sharpen > 0,
-  },
-  {
-    key: "noiseReduction",
-    label: "Noise Red.",
-    section: "preprocess",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 100,
-    step: 1,
-    decimals: 0,
-    hint: "Edge-preserving smoothing. Stops sensor noise turning into a field of stray dots.",
-  },
-
-  // --------------------------------------------------------------- Colors
-  {
-    key: "colorCount",
-    label: "Colors",
-    section: "colors",
-    type: "slider",
-    def: 3,
-    min: 2,
-    max: 8,
-    step: 1,
-    decimals: 0,
-  },
-  {
-    key: "spread",
-    label: "Spread",
-    section: "colors",
-    type: "slider",
-    def: 0.35,
-    min: 0,
-    max: 1,
-    step: 0.01,
-    decimals: 2,
-    hint: "Pushes palette entries apart in OKLab for a punchier, screen-printed separation.",
-  },
-  {
-    key: "quantMethod",
-    label: "Method",
-    section: "colors",
-    type: "choice",
-    def: "kmeans",
-    options: ["kmeans", "mediancut", "popularity"],
-  },
-  {
-    key: "palette",
-    label: "Palette",
-    section: "colors",
-    type: "palette",
-    def: ["#161616", "#F5EBD8", "#EC3E32"],
-  },
-  {
-    // Not a control of its own: rendered as a small lock badge on each swatch.
-    // Locked entries survive re-extraction, so you can pin your brand red and
-    // let the engine choose the rest.
-    key: "lockedSwatches",
-    label: "Locked swatches",
-    section: "colors",
-    type: "internal",
-    def: [],
-  },
-  {
-    key: "paletteLocked",
-    label: "Lock palette",
-    section: "colors",
-    type: "toggle",
-    def: true,
-    hint: "When off, the palette is re-extracted from the image on every render.",
-  },
-  {
-    key: "background",
-    label: "Background",
-    section: "colors",
-    type: "color",
-    def: "auto",
-    modes: ["halftone"],
-    hint: "auto = lightest palette colour (darkest when Invert is on).",
-  },
-
-  // ----------------------------------------------------------- Tonal zones
-  {
-    key: "tonalMapping",
-    label: "Tonal zones",
-    section: "tonal",
-    type: "toggle",
-    def: false,
-    hint: "Restrict shadows, midtones and highlights each to their own slice of the palette.",
-  },
-  {
-    key: "shadowSplit",
-    label: "Shadows",
-    section: "tonal",
-    type: "slider",
-    def: 0.33,
-    min: 0.05,
-    max: 0.6,
-    step: 0.01,
-    decimals: 2,
-    showIf: (p) => p.tonalMapping,
-  },
-  {
-    key: "highlightSplit",
-    label: "Highlights",
-    section: "tonal",
-    type: "slider",
-    def: 0.66,
-    min: 0.4,
-    max: 0.95,
-    step: 0.01,
-    decimals: 2,
-    showIf: (p) => p.tonalMapping,
-  },
-
-  // ---------------------------------------------------------------- Grade
-  {
-    key: "contrast",
-    label: "Contrast",
-    section: "grade",
-    type: "slider",
-    def: 1,
-    min: 0,
-    max: 3,
-    step: 0.01,
-    decimals: 2,
-  },
-  {
-    key: "gamma",
-    label: "Gamma",
-    section: "grade",
-    type: "slider",
-    def: 1,
-    min: 0.1,
-    max: 3,
-    step: 0.01,
-    decimals: 2,
-  },
-  {
-    key: "blackPoint",
-    label: "Black",
-    section: "grade",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 254,
-    step: 1,
-    decimals: 0,
-  },
-  {
-    key: "whitePoint",
-    label: "White",
-    section: "grade",
-    type: "slider",
-    def: 255,
-    min: 1,
-    max: 255,
-    step: 1,
-    decimals: 0,
-  },
-  {
-    key: "exposure",
-    label: "Exposure",
-    section: "grade",
-    type: "slider",
-    def: 0,
-    min: -100,
-    max: 100,
-    step: 1,
-    decimals: 0,
-    unit: "%",
-  },
-  {
-    key: "gradeBias",
-    label: "Grade Bias",
-    section: "grade",
-    type: "slider",
-    def: 0,
-    min: -1,
-    max: 1,
-    step: 0.01,
-    decimals: 2,
-    modes: ["halftone"],
-    hint: "Bends the tone -> dot size curve without moving pure black or pure white.",
-  },
-  {
-    key: "lumaMode",
-    label: "Luma",
-    section: "grade",
-    type: "choice",
-    def: "luma709",
-    options: ["luma709", "luma601", "perceptual"],
-  },
-
-  // ----------------------------------------------------------- Adjustments
-  {
-    key: "hue",
-    label: "Hue",
-    section: "adjust",
-    type: "slider",
-    def: 0,
-    min: -180,
-    max: 180,
-    step: 1,
-    decimals: 0,
-    unit: "°",
-  },
-  {
-    key: "saturation",
-    label: "Saturation",
-    section: "adjust",
-    type: "slider",
-    def: 1,
-    min: 0,
-    max: 3,
-    step: 0.01,
-    decimals: 2,
-  },
-  {
-    key: "brightness",
-    label: "Brightness",
-    section: "adjust",
-    type: "slider",
-    def: 0,
-    min: -100,
-    max: 100,
-    step: 1,
-    decimals: 0,
-  },
-  {
-    key: "invert",
-    label: "Invert",
-    section: "adjust",
-    type: "toggle",
-    def: false,
-    hint: "Halftone: dots grow in the highlights and the paper flips. Dither: the tone curve inverts.",
-  },
-
-  // ---------------------------------------------------------------- Batch
-  {
-    key: "batchScope",
-    label: "Scope",
-    section: "batch",
-    type: "choice",
-    def: "selection",
-    options: ["selection", "group", "document"],
-    hint: "Which layers Batch Apply touches. Existing halftone output is always skipped.",
-  },
-  {
-    key: "batchSharedPalette",
-    label: "Shared palette",
-    section: "batch",
-    type: "toggle",
-    def: true,
-    hint: "Extract the palette once from the first layer and pin it for the rest, so a sequence does not crawl.",
-  },
-
-  // --------------------------------------------------------------- Output
-  {
-    key: "output",
-    label: "Output",
-    section: "output",
-    type: "choice",
-    def: "flat",
-    options: ["flat", "separated"],
-    hint: "Separated writes one solid-colour fill layer per palette colour, each with its own mask.",
-  },
-];
-
-const SECTIONS = [
-  { id: "mode", label: "Mode" },
-  { id: "scale", label: "Scale" },
-  { id: "halftone", label: "Halftone", modes: ["halftone"] },
-  { id: "dither", label: "Dither", modes: ["dither"] },
-  { id: "preprocess", label: "Pre-process" },
-  { id: "colors", label: "Colors" },
-  { id: "tonal", label: "Tonal Zones" },
-  { id: "grade", label: "Grade" },
-  { id: "adjust", label: "Color Adjustments" },
-  { id: "output", label: "Output" },
-  { id: "batch", label: "Batch" },
-];
-
-const DEF_BY_KEY = Object.create(null);
-for (const d of PARAM_DEFS) DEF_BY_KEY[d.key] = d;
-
-/** @returns {object} a fresh default parameter object */
-function defaultParams() {
-  const p = { version: SCHEMA_VERSION };
-  for (const d of PARAM_DEFS) {
-    p[d.key] = Array.isArray(d.def) ? d.def.slice() : d.def;
-  }
-  return p;
-}
-
-/**
- * Should this parameter be shown for the current state?
- * @param {ParamDef} def
- * @param {object} params
- */
-function isVisible(def, params) {
-  // Internal params carry state but have no row of their own.
-  if (def.type === "internal") return false;
-  if (def.modes && def.modes.indexOf(params.mode) < 0) return false;
-  if (def.showIf && !def.showIf(params)) return false;
-  return true;
-}
-
-function sectionVisible(section, params) {
-  if (section.modes && section.modes.indexOf(params.mode) < 0) return false;
-  return PARAM_DEFS.some((d) => d.section === section.id && isVisible(d, params));
-}
-
-/**
- * Coerce and clamp an arbitrary object into a valid parameter set.
- * Unknown keys are dropped, missing keys fall back to the default.
- * @param {object} raw
- * @returns {object}
- */
-function sanitizeParams(raw) {
-  const out = defaultParams();
-  if (!raw || typeof raw !== "object") return out;
-
-  for (const d of PARAM_DEFS) {
-    const v = raw[d.key];
-    if (v === undefined || v === null) continue;
-    switch (d.type) {
-      case "slider": {
-        const n = Number(v);
-        if (!Number.isFinite(n)) break;
-        out[d.key] = Math.min(d.max, Math.max(d.min, n));
-        break;
-      }
-      case "choice":
-      case "chips":
-        if (d.options.indexOf(v) >= 0) out[d.key] = v;
-        break;
-      case "toggle":
-        out[d.key] = !!v;
-        break;
-      case "internal":
-        if (Array.isArray(v)) {
-          out[d.key] = v
-            .map((n) => Math.round(Number(n)))
-            .filter((n) => Number.isFinite(n) && n >= 0 && n < 64);
-        }
-        break;
-      case "palette":
-        if (Array.isArray(v)) {
-          const hexes = v
-            .filter((c) => typeof c === "string" && /^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(c.trim()))
-            .map((c) => normalizeHex(c));
-          if (hexes.length) out[d.key] = hexes;
-        }
-        break;
-      case "color":
-        if (typeof v === "string") {
-          out[d.key] = v === "auto" ? "auto" : normalizeHex(v) || "auto";
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  // colorCount and the palette length must agree.
-  out.colorCount = Math.min(8, Math.max(2, Math.round(out.colorCount)));
-  if (out.whitePoint <= out.blackPoint) out.whitePoint = Math.min(255, out.blackPoint + 1);
-  if (out.highlightSplit <= out.shadowSplit) {
-    out.highlightSplit = Math.min(0.95, out.shadowSplit + 0.05);
-  }
-  return out;
-}
-
-function normalizeHex(c) {
-  let h = String(c).trim().replace(/^#/, "");
-  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-  return "#" + h.toUpperCase();
-}
-
-function paramsEqual(a, b) {
-  if (!a || !b) return false;
-  for (const d of PARAM_DEFS) {
-    const va = a[d.key];
-    const vb = b[d.key];
-    if (Array.isArray(va) || Array.isArray(vb)) {
-      if (!Array.isArray(va) || !Array.isArray(vb) || va.length !== vb.length) return false;
-      for (let i = 0; i < va.length; i++) if (va[i] !== vb[i]) return false;
-    } else if (va !== vb) return false;
-  }
-  return true;
-}
-
-function cloneParams(p) {
-  const out = {};
-  for (const k of Object.keys(p)) out[k] = Array.isArray(p[k]) ? p[k].slice() : p[k];
-  return out;
-}
-
-/**
- * Resolve the grid resolution (cells or dither pixels across the longest edge)
- * for the current scale mode.
- *
- * DPI mode needs the document's own resolution to be meaningful: a 300 ppi
- * document rendered at 150 dpi wants one output pixel per two document pixels.
- *
- * @param {object} params
- * @param {number} sourceLongestPx longest edge of the document in pixels
- * @param {number} [docPPI] document resolution; 72 is assumed when unknown
- */
-function resolveResolution(params, sourceLongestPx, docPPI) {
-  const relative = params.mode === "dither" ? params.ditherResolution : params.density;
-  if (params.scaleMode !== "dpi") return relative;
-  const ppi = docPPI && docPPI > 1 ? docPPI : 72;
-  const inches = sourceLongestPx / ppi;
-  const cells = inches * params.dpi;
-  const def = DEF_BY_KEY[params.mode === "dither" ? "ditherResolution" : "density"];
-  return Math.min(def.max, Math.max(def.min, Math.round(cells)));
-}
-
-module.exports = {
-  SCHEMA_VERSION,
-  MODES,
-  PARAM_DEFS,
-  SECTIONS,
-  DEF_BY_KEY,
-  defaultParams,
-  sanitizeParams,
-  paramsEqual,
-  cloneParams,
-  normalizeHex,
-  isVisible,
-  sectionVisible,
-  resolveResolution,
-};
 
 });
 
@@ -6125,10 +6985,11 @@ function createChoice(def, value, onChange, labels) {
   if (def.hint) label.title = def.hint;
   const seg = el("div", "seg");
   const buttons = {};
+  const nameOf = (opt) => optionLabel(def, opt, labels);
 
   for (const opt of def.options) {
-    const b = el("button", "seg-item", (labels && labels[opt]) || titleCase(opt));
-    b.title = (labels && labels[opt]) || titleCase(opt);
+    const b = el("button", "seg-item", nameOf(opt));
+    b.title = nameOf(opt);
     b.addEventListener("click", () => {
       set(opt);
       onChange(opt, true);
@@ -6156,6 +7017,19 @@ function titleCase(s) {
 }
 
 /**
+ * The display name for one option of a choice.
+ *
+ * Title-casing the id is right for `circle` and `perInk`, and wrong for every
+ * acronym and compound we have: it produces "Dpi", "Am", "Kmeans", "Luma709".
+ * A def may therefore carry an `optionLabels` map, which wins.
+ */
+function optionLabel(def, opt, labels) {
+  if (labels && labels[opt]) return labels[opt];
+  if (def && def.optionLabels && def.optionLabels[opt]) return def.optionLabels[opt];
+  return titleCase(opt);
+}
+
+/**
  * A wrapping list of chips, for choices with too many options to fit a
  * segmented bar (the dither algorithm list has two dozen).
  *
@@ -6176,7 +7050,7 @@ function createChipChoice(def, value, onChange, meta = {}) {
   const groups = meta.groups && meta.groupOf ? meta.groups : null;
 
   const addChip = (opt, host) => {
-    const text = (meta.labels && meta.labels[opt]) || titleCase(opt);
+    const text = optionLabel(def, opt, meta.labels);
     const b = el("button", "algo-chip", text);
     b.title = text;
     b.addEventListener("click", () => {
@@ -6449,17 +7323,34 @@ function createColorField(def, value, onChange, getForeground) {
   return { el: row, set };
 }
 
-/** A collapsible section. */
+/**
+ * A collapsible section.
+ *
+ * The head carries a summary of the section's key values on the right, so a
+ * collapsed section still says what it is set to. With a dozen sections and only
+ * a couple of them open at a time, that is the difference between a panel you
+ * can scan and one where every setting has to be hunted for.
+ */
 function createSection(id, label, open) {
   const section = el("div", "section" + (open ? " open" : ""));
   const head = el("div", "section-head");
   // A text glyph rather than a CSS triangle or a pseudo-element: UXP renders
   // neither, and a border-triangle came out as a solid square.
   const caret = el("div", "section-caret", open ? "\u25BC" : "\u25B6");
+  const title = el("div", "section-title", label);
+  const summary = el("div", "section-summary", "");
   head.appendChild(caret);
-  head.appendChild(el("div", null, label));
+  head.appendChild(title);
+  head.appendChild(summary);
   const body = el("div", "section-body");
-  const api = { el: section, body, onToggle: null };
+  const api = {
+    el: section,
+    body,
+    onToggle: null,
+    setSummary: (text) => {
+      summary.textContent = text || "";
+    },
+  };
   head.addEventListener("click", () => {
     const isOpen = section.className.indexOf("open") >= 0;
     section.className = "section" + (isOpen ? "" : " open");
@@ -6483,6 +7374,7 @@ module.exports = {
   createSection,
   normalizeHex,
   titleCase,
+  optionLabel,
 };
 
 });
@@ -6649,91 +7541,6 @@ function toDataURL(rgba, width, height) {
 }
 
 module.exports = { encodePNG, toDataURL, toBase64, crc32, adler32 };
-
-});
-
-window.__define("src/util/base64.js", function (module, exports, require) {
-"use strict";
-
-/**
- * UTF-8 aware base64, implemented locally rather than relying on btoa/atob or
- * TextEncoder, neither of which is guaranteed across UXP host versions.
- */
-
-const { toBase64 } = require("./png.js");
-
-const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const B64_INV = (() => {
-  const t = new Int16Array(256).fill(-1);
-  for (let i = 0; i < B64.length; i++) t[B64.charCodeAt(i)] = i;
-  return t;
-})();
-
-/** @param {string} str @returns {Uint8Array} */
-function utf8Encode(str) {
-  const out = [];
-  for (let i = 0; i < str.length; i++) {
-    let c = str.charCodeAt(i);
-    if (c < 0x80) {
-      out.push(c);
-    } else if (c < 0x800) {
-      out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
-    } else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
-      const c2 = str.charCodeAt(++i);
-      c = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00);
-      out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
-    } else {
-      out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
-    }
-  }
-  return Uint8Array.from(out);
-}
-
-/** @param {Uint8Array} bytes @returns {string} */
-function utf8Decode(bytes) {
-  let out = "";
-  for (let i = 0; i < bytes.length; ) {
-    const b = bytes[i++];
-    if (b < 0x80) {
-      out += String.fromCharCode(b);
-    } else if (b < 0xe0) {
-      out += String.fromCharCode(((b & 31) << 6) | (bytes[i++] & 63));
-    } else if (b < 0xf0) {
-      out += String.fromCharCode(((b & 15) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63));
-    } else {
-      const cp =
-        ((b & 7) << 18) | ((bytes[i++] & 63) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63);
-      const c = cp - 0x10000;
-      out += String.fromCharCode(0xd800 + (c >> 10), 0xdc00 + (c & 1023));
-    }
-  }
-  return out;
-}
-
-/** @param {string} str @returns {string} base64 */
-function encodeString(str) {
-  return toBase64(utf8Encode(str));
-}
-
-/** @param {string} b64 @returns {string} */
-function decodeString(b64) {
-  const clean = String(b64).replace(/[^A-Za-z0-9+/]/g, "");
-  const bytes = new Uint8Array(Math.floor((clean.length * 3) / 4));
-  let p = 0;
-  for (let i = 0; i + 1 < clean.length; i += 4) {
-    const a = B64_INV[clean.charCodeAt(i)];
-    const b = B64_INV[clean.charCodeAt(i + 1)];
-    const c = i + 2 < clean.length ? B64_INV[clean.charCodeAt(i + 2)] : -1;
-    const d = i + 3 < clean.length ? B64_INV[clean.charCodeAt(i + 3)] : -1;
-    if (a < 0 || b < 0) break;
-    bytes[p++] = (a << 2) | (b >> 4);
-    if (c >= 0) bytes[p++] = ((b & 15) << 4) | (c >> 2);
-    if (d >= 0) bytes[p++] = ((c & 3) << 6) | d;
-  }
-  return utf8Decode(bytes.subarray(0, p));
-}
-
-module.exports = { encodeString, decodeString, utf8Encode, utf8Decode };
 
 });
 
@@ -7458,6 +8265,65 @@ async function writeLayerMask(opts) {
   }
 }
 
+/**
+ * Read the active selection as an 8-bit mask.
+ *
+ * `imaging.getSelection` is probed rather than assumed, and a document with no
+ * selection is a normal outcome, not an error - both come back as null so the
+ * caller can simply carry on rendering the whole layer.
+ *
+ * @param {number} documentID
+ * @param {{left:number, top:number, right:number, bottom:number}} [bounds]
+ * @returns {Promise<{data: Uint8ClampedArray, width: number, height: number,
+ *                    bounds: object}|null>}
+ */
+async function readSelection(documentID, bounds) {
+  let im;
+  try {
+    im = imaging();
+  } catch (e) {
+    return null;
+  }
+  if (typeof im.getSelection !== "function") return null;
+
+  let result;
+  try {
+    result = await im.getSelection(
+      bounds ? { documentID, sourceBounds: bounds } : { documentID }
+    );
+  } catch (e) {
+    // No selection is the overwhelmingly common case and throws on some builds.
+    return null;
+  }
+  if (!result || !result.imageData) return null;
+
+  const imageData = result.imageData;
+  try {
+    const width = imageData.width;
+    const height = imageData.height;
+    if (!width || !height) return null;
+    const raw = await imageData.getData({ chunky: true });
+    const components = imageData.components || 1;
+    let data;
+    if (components === 1) {
+      data = raw instanceof Uint8ClampedArray ? raw : new Uint8ClampedArray(raw);
+    } else {
+      // Some builds hand back a multi-component buffer; the first channel is
+      // the coverage.
+      data = new Uint8ClampedArray(width * height);
+      for (let i = 0, p = 0; i < data.length; i++, p += components) data[i] = raw[p];
+    }
+    return {
+      data,
+      width,
+      height,
+      bounds: result.sourceBounds || bounds || null,
+    };
+  } finally {
+    if (imageData && typeof imageData.dispose === "function") imageData.dispose();
+  }
+}
+
 /** @returns {boolean} whether the colour-separated output is possible here. */
 function canWriteMasks() {
   try {
@@ -7489,6 +8355,7 @@ function foregroundRGB() {
 
 module.exports = {
   readLayerPixels,
+  readSelection,
   writeLayerPixels,
   writeLayerMask,
   canWriteMasks,
@@ -7497,6 +8364,91 @@ module.exports = {
   toRGBA,
   READ_MAX_LONGEST,
 };
+
+});
+
+window.__define("src/util/base64.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * UTF-8 aware base64, implemented locally rather than relying on btoa/atob or
+ * TextEncoder, neither of which is guaranteed across UXP host versions.
+ */
+
+const { toBase64 } = require("./png.js");
+
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64_INV = (() => {
+  const t = new Int16Array(256).fill(-1);
+  for (let i = 0; i < B64.length; i++) t[B64.charCodeAt(i)] = i;
+  return t;
+})();
+
+/** @param {string} str @returns {Uint8Array} */
+function utf8Encode(str) {
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    let c = str.charCodeAt(i);
+    if (c < 0x80) {
+      out.push(c);
+    } else if (c < 0x800) {
+      out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    } else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+      const c2 = str.charCodeAt(++i);
+      c = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00);
+      out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    } else {
+      out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+/** @param {Uint8Array} bytes @returns {string} */
+function utf8Decode(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; ) {
+    const b = bytes[i++];
+    if (b < 0x80) {
+      out += String.fromCharCode(b);
+    } else if (b < 0xe0) {
+      out += String.fromCharCode(((b & 31) << 6) | (bytes[i++] & 63));
+    } else if (b < 0xf0) {
+      out += String.fromCharCode(((b & 15) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63));
+    } else {
+      const cp =
+        ((b & 7) << 18) | ((bytes[i++] & 63) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63);
+      const c = cp - 0x10000;
+      out += String.fromCharCode(0xd800 + (c >> 10), 0xdc00 + (c & 1023));
+    }
+  }
+  return out;
+}
+
+/** @param {string} str @returns {string} base64 */
+function encodeString(str) {
+  return toBase64(utf8Encode(str));
+}
+
+/** @param {string} b64 @returns {string} */
+function decodeString(b64) {
+  const clean = String(b64).replace(/[^A-Za-z0-9+/]/g, "");
+  const bytes = new Uint8Array(Math.floor((clean.length * 3) / 4));
+  let p = 0;
+  for (let i = 0; i + 1 < clean.length; i += 4) {
+    const a = B64_INV[clean.charCodeAt(i)];
+    const b = B64_INV[clean.charCodeAt(i + 1)];
+    const c = i + 2 < clean.length ? B64_INV[clean.charCodeAt(i + 2)] : -1;
+    const d = i + 3 < clean.length ? B64_INV[clean.charCodeAt(i + 3)] : -1;
+    if (a < 0 || b < 0) break;
+    bytes[p++] = (a << 2) | (b >> 4);
+    if (c >= 0) bytes[p++] = ((b & 15) << 4) | (c >> 2);
+    if (d >= 0) bytes[p++] = ((c & 3) << 6) | d;
+  }
+  return utf8Decode(bytes.subarray(0, p));
+}
+
+module.exports = { encodeString, decodeString, utf8Encode, utf8Decode };
 
 });
 
@@ -8007,6 +8959,10 @@ async function writeRender(engine, params, ctx, opts) {
   // --- separated -----------------------------------------------------
   report(0.25);
   const sep = engine.renderSeparated(params, { width, height });
+  if (opts.selection) {
+    // Multiply every mask by the selection, so the whole stack is confined to it.
+    maskSelection(sep.masks, width, height, bounds, opts.selection);
+  }
   report(0.55);
 
   const layerIds = [];
@@ -8064,6 +9020,13 @@ async function writeFlat(engine, params, opts) {
   });
   if (!out) throw new Error("Render was cancelled.");
 
+  if (opts.selection) {
+    const kept = applySelectionMask(out.data, width, height, bounds, opts.selection);
+    if (kept <= 0) {
+      throw new Error("The active selection does not overlap this layer, so there is nothing to render.");
+    }
+  }
+
   let layerId = existingLayerId;
   if (!layerId) {
     await L.selectLayers([anchorLayerId]);
@@ -8081,6 +9044,76 @@ async function writeFlat(engine, params, opts) {
     targetBounds: bounds,
   });
   return { layerIds: [layerId] };
+}
+
+/**
+ * Confine a rendered frame to the active selection.
+ *
+ * The render still covers the layer, and the selection is applied as alpha
+ * afterwards. Doing it this way rather than rendering only the selected
+ * rectangle keeps the halftone grid anchored to the layer, so a dot does not
+ * move when the selection changes - which is what would make a selection-limited
+ * render fail to line up with the rest of the artwork.
+ *
+ * @param {Uint8ClampedArray} data RGBA, modified in place
+ * @param {number} width
+ * @param {number} height
+ * @param {object} bounds render bounds in document space
+ * @param {object} sel from IM.readSelection
+ * @returns {number} the fraction of the frame that survived
+ */
+function applySelectionMask(data, width, height, bounds, sel) {
+  const sb = sel.bounds || { left: 0, top: 0, right: sel.width, bottom: sel.height };
+  const sw = sel.width;
+  const sh = sel.height;
+  // The selection may have been read at a different scale than the render.
+  const sx = sw / Math.max(1, sb.right - sb.left);
+  const sy = sh / Math.max(1, sb.bottom - sb.top);
+  let kept = 0;
+
+  for (let y = 0; y < height; y++) {
+    const docY = bounds.top + y;
+    const my = Math.floor((docY - sb.top) * sy);
+    const rowInside = my >= 0 && my < sh;
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (!rowInside) {
+        data[i + 3] = 0;
+        continue;
+      }
+      const docX = bounds.left + x;
+      const mx = Math.floor((docX - sb.left) * sx);
+      if (mx < 0 || mx >= sw) {
+        data[i + 3] = 0;
+        continue;
+      }
+      const a = sel.data[my * sw + mx];
+      data[i + 3] = a;
+      if (a > 0) kept++;
+    }
+  }
+  return kept / Math.max(1, width * height);
+}
+
+/** Multiply a set of coverage masks by the selection. */
+function maskSelection(masks, width, height, bounds, sel) {
+  const sb = sel.bounds || { left: 0, top: 0, right: sel.width, bottom: sel.height };
+  const sx = sel.width / Math.max(1, sb.right - sb.left);
+  const sy = sel.height / Math.max(1, sb.bottom - sb.top);
+  for (let y = 0; y < height; y++) {
+    const my = Math.floor((bounds.top + y - sb.top) * sy);
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      let a = 0;
+      if (my >= 0 && my < sel.height) {
+        const mx = Math.floor((bounds.left + x - sb.left) * sx);
+        if (mx >= 0 && mx < sel.width) a = sel.data[my * sel.width + mx];
+      }
+      if (a === 255) continue;
+      const f = a / 255;
+      for (const m of masks) m[i] = m[i] * f;
+    }
+  }
 }
 
 function hexToRgbTriplet(hex) {
@@ -8119,6 +9152,13 @@ async function buildRenderFor(engine, params, targetLayer, d, report) {
     engine.setSource(image);
     engine.sourceLayerId = targetLayer.id;
   }
+  // The active selection, if the user wants it respected and the host can
+  // report it. Read before the layer is touched, since converting to a Smart
+  // Object is the kind of operation that can clear it.
+  let selection = null;
+  if (params.useSelection) {
+    selection = await IM.readSelection(d.id, bounds);
+  }
   report(0.05);
 
   // 1. Seal the original inside a Smart Object. Nothing destructive happens to
@@ -8142,6 +9182,7 @@ async function buildRenderFor(engine, params, targetLayer, d, report) {
     height,
     group,
     anchorLayerId: so.id,
+    selection,
     report,
   });
 
@@ -8150,6 +9191,7 @@ async function buildRenderFor(engine, params, targetLayer, d, report) {
     docName: d.name,
     bounds,
     outputMode: written.mode,
+    selectionApplied: !!selection,
     sourceLayerName: META.SOURCE_LAYER_NAME,
   });
   const persistence = await META.saveRecord([group.id].concat(written.layerIds), record);
@@ -8228,6 +9270,7 @@ async function updateExisting(engine, params, hooks = {}) {
     }
     engine.setSource(image);
     engine.sourceLayerId = ctx.sourceLayer.id;
+    const selection = params.useSelection ? await IM.readSelection(d.id, bounds) : null;
     report(0.15);
 
     // Everything in the group except the source is previous output.
@@ -8256,6 +9299,7 @@ async function updateExisting(engine, params, hooks = {}) {
       group: ctx.group,
       anchorLayerId: ctx.sourceLayer.id,
       existingLayerId: canReuse ? stale[0].id : null,
+      selection,
       report,
     });
 
@@ -8773,6 +9817,64 @@ module.exports = {
 
 });
 
+window.__define("src/photoshop/files.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Saving generated text (currently SVG) to disk.
+ *
+ * UXP has no `download` and no direct filesystem path access: a plugin can only
+ * write where the user has pointed a file picker, which is what
+ * `localFileSystem.getFileForSaving` provides. That is the whole reason this is
+ * a Photoshop-layer module rather than something the engine does itself - the
+ * engine produces a string, and this decides where it lands.
+ */
+
+const { uxp } = require("./host.js");
+
+function fs() {
+  const u = uxp();
+  if (!u || !u.storage || !u.storage.localFileSystem) {
+    throw new Error("File access is unavailable; check the plugin's localFileSystem permission.");
+  }
+  return u.storage.localFileSystem;
+}
+
+/**
+ * Ask the user where to put a text file and write it there.
+ *
+ * @param {string} defaultName suggested file name, extension included
+ * @param {string} text
+ * @param {string} ext used to filter the save dialog
+ * @returns {Promise<string|null>} the file name, or null if the user cancelled
+ */
+async function saveText(defaultName, text, ext) {
+  const file = await fs().getFileForSaving(defaultName, ext ? { types: [ext] } : undefined);
+  if (!file) return null;
+  // utf8 is the default format for a string write, but naming it means a host
+  // build that defaults to binary does not silently mangle the file.
+  await file.write(text, { format: uxp().storage.formats.utf8 });
+  return file.name;
+}
+
+/**
+ * A file name that is safe on every platform and still recognisable.
+ * @param {string} base
+ * @param {string} ext without the dot
+ */
+function safeName(base, ext) {
+  const cleaned = String(base || "halftone")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+  return `${cleaned || "halftone"}.${ext}`;
+}
+
+module.exports = { saveText, safeName };
+
+});
+
 window.__define("src/ui/panel.js", function (module, exports, require) {
 "use strict";
 
@@ -8795,6 +9897,7 @@ const C = require("./controls.js");
 const {
   PARAM_DEFS,
   SECTIONS,
+  DEF_BY_KEY,
   defaultParams,
   sanitizeParams,
   isVisible,
@@ -8811,6 +9914,7 @@ const META = require("../photoshop/metadata.js");
 const IM = require("../photoshop/imaging.js");
 const BATCH = require("../photoshop/batch.js");
 const SWATCH = require("../photoshop/swatches.js");
+const FILES = require("../photoshop/files.js");
 
 const PREVIEW_MAX = 460;
 /** Cap on the dither grid used for previews; above this the preview approximates. */
@@ -8886,11 +9990,13 @@ class Panel {
     const host = this.$("sections");
     host.textContent = "";
     this.controls = {};
+    this.sections = {};
 
     for (const sec of SECTIONS) {
       if (!sectionVisible(sec, this.params)) continue;
       const open = this.sectionOpen[sec.id] !== false;
       const s = C.createSection(sec.id, sec.label, open);
+      this.sections[sec.id] = s;
       s.onToggle = (isOpen) => {
         this.sectionOpen[sec.id] = isOpen;
       };
@@ -8913,6 +10019,52 @@ class Panel {
       }
       host.appendChild(s.el);
     }
+    this.refreshSummaries();
+  }
+
+  /**
+   * Update the readout on every section head.
+   *
+   * The rule is "say what is not the default": a choice always shows its value,
+   * a toggle shows its name only when it is on, and a slider appears only once
+   * it has been moved. A panel of defaults therefore stays quiet, and anything
+   * you have touched is visible without opening the section it lives in.
+   */
+  refreshSummaries() {
+    if (!this.sections) return;
+    for (const sec of SECTIONS) {
+      const s = this.sections[sec.id];
+      if (!s) continue;
+      s.setSummary(this.summaryFor(sec.id));
+    }
+    const modeBadge = this.$("brand-mode");
+    if (modeBadge) modeBadge.textContent = this.params.mode === "dither" ? "Dither" : "Halftone";
+  }
+
+  summaryFor(sectionId) {
+    const keys = SECTION_SUMMARY[sectionId];
+    if (!keys) return "";
+    const parts = [];
+    for (const key of keys) {
+      const def = DEF_BY_KEY[key];
+      if (!def || !isVisible(def, this.params)) continue;
+      const v = this.params[key];
+      if (def.type === "choice" || def.type === "chips") {
+        parts.push(C.optionLabel(def, v, key === "ditherAlgorithm" ? ALGORITHM_LABELS : null));
+      } else if (def.type === "toggle") {
+        // Only when it deviates, and phrased so an off-by-default-on toggle
+        // still reads correctly rather than silently vanishing.
+        if (v !== def.def) parts.push((v ? "" : "no ") + def.label.toLowerCase());
+      } else if (def.type === "slider") {
+        if (Math.abs(v - def.def) > (def.step || 1) / 1000) {
+          parts.push(shortLabel(def) + " " + v.toFixed(def.decimals || 0) + (def.unit || ""));
+        }
+      } else if (def.type === "palette") {
+        parts.push(`${(v || []).length} colours`);
+      }
+      if (parts.length >= 3) break;
+    }
+    return parts.join(" · ");
   }
 
   /** Does changing `key` alter which controls should be on screen? */
@@ -8993,6 +10145,7 @@ class Panel {
     this.$("btn-update").addEventListener("click", () => this.update());
     this.$("btn-reset").addEventListener("click", () => this.resetAll());
     this.$("btn-batch").addEventListener("click", () => this.batchApply());
+    this.$("btn-svg").addEventListener("click", () => this.exportSVG());
     this.bindCompare();
     this.$("btn-save-preset").addEventListener("click", () => this.savePreset());
     this.$("btn-load-preset").addEventListener("click", () => this.promptLoadPreset());
@@ -9021,6 +10174,7 @@ class Panel {
 
   onParamsChanged(committed) {
     this.renderPresetChips();
+    this.refreshSummaries();
     this.schedulePreview();
     if (committed) this.persistSession();
   }
@@ -9181,7 +10335,7 @@ class Panel {
       this._lastBadge =
         `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
         (out.exact ? "" : " · approx");
-      this.$("preview-badge").textContent = this._lastBadge;
+      this.badge(this._lastBadge);
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
       this.notice(`Preview failed: ${e.message}`, "error");
@@ -9294,6 +10448,56 @@ class Panel {
     });
   }
 
+  /* ------------------------------------------------------ SVG export */
+
+  /**
+   * Write the current halftone out as vector art.
+   *
+   * The size used is the *document* size of the loaded layer, not the analysis
+   * image the preview draws from: the analysis read is capped at 2600px, but the
+   * SVG carries no pixels, so exporting at the layer's real dimensions costs
+   * nothing and gives the printer a file at the right physical scale.
+   */
+  async exportSVG() {
+    if (!this.engine.hasSource()) {
+      this.notice("Load a layer first — there is nothing to export yet.", "warn");
+      return;
+    }
+    if (this.params.mode === "dither") {
+      this.notice(
+        "SVG export covers halftone mode only. A dither is one shape per pixel, " +
+          "so even a small image becomes hundreds of thousands of rectangles that " +
+          "no vector application will open. Switch to Halftone mode to export.",
+        "warn"
+      );
+      return;
+    }
+
+    await this.guard("Building SVG…", async () => {
+      const b = this.sourceInfo && this.sourceInfo.bounds;
+      const size = b
+        ? { width: Math.round(b.right - b.left), height: Math.round(b.bottom - b.top) }
+        : { width: this.engine.source.width, height: this.engine.source.height };
+
+      const out = this.engine.renderSVG(this.params, size);
+      const base = (this.sourceInfo && this.sourceInfo.layerName) || "halftone";
+      const name = await FILES.saveText(FILES.safeName(base + " halftone", "svg"), out.svg, "svg");
+      if (!name) {
+        this.notice("SVG export cancelled.");
+        return;
+      }
+      const kb = Math.round(out.svg.length / 1024);
+      this.notice(
+        `Wrote ${name}: ${out.shapes} shapes at ${size.width}x${size.height}, ${kb} KB.` +
+          (out.busy
+            ? " That is a lot of objects — expect illustration apps to be slow opening it; " +
+              "a larger Radius or a coarser grid will thin it out."
+            : ""),
+        out.busy ? "warn" : ""
+      );
+    });
+  }
+
   /* --------------------------------------------------------- compare */
 
   /**
@@ -9308,7 +10512,7 @@ class Panel {
       const img = this.$("preview");
       this._renderedSrc = img.src;
       img.src = this.sourceDataURL();
-      this.$("preview-badge").textContent = "original";
+      this.badge("original");
     };
     const hide = () => {
       if (!this._renderedSrc) return;
@@ -9316,7 +10520,7 @@ class Panel {
       // button was held, and a re-render would race a pending preview tick.
       this.$("preview").src = this._renderedSrc;
       this._renderedSrc = null;
-      this.$("preview-badge").textContent = this._lastBadge || "";
+      this.badge(this._lastBadge);
     };
     btn.addEventListener("pointerdown", show);
     btn.addEventListener("pointerup", hide);
@@ -9549,6 +10753,7 @@ class Panel {
       "btn-update",
       "btn-reset",
       "btn-batch",
+      "btn-svg",
       "btn-save-preset",
       "btn-load-preset",
     ]) {
@@ -9557,6 +10762,13 @@ class Panel {
       if (enabled) b.removeAttribute("disabled");
       else b.setAttribute("disabled", "true");
     }
+  }
+
+  /** The overlay in the preview's corner; hidden when there is nothing to say. */
+  badge(text) {
+    const b = this.$("preview-badge");
+    b.textContent = text || "";
+    b.className = "preview-badge" + (text ? " show" : "");
   }
 
   status(text, kind) {
@@ -9576,6 +10788,32 @@ class Panel {
     n.textContent = text;
     n.className = "notice show" + (kind ? " " + kind : "");
   }
+}
+
+/**
+ * Which parameters each section head reports, in order. Kept short on purpose:
+ * a summary that lists everything is a second copy of the section, not a
+ * summary, and a 300px panel has room for about three items.
+ */
+const SECTION_SUMMARY = {
+  // Not `mode`: the badge in the header already says which engine is running.
+  mode: ["lumaMode"],
+  scale: ["scaleMode", "density", "dpi", "ditherResolution"],
+  halftone: ["shape", "screenType", "radius", "angle"],
+  press: ["jitterPosition", "jitterSize", "misregistration"],
+  dither: ["ditherAlgorithm", "ditherStrength"],
+  preprocess: ["blur", "sharpen", "noiseReduction"],
+  colors: ["colorCount", "quantMethod", "spread"],
+  tonal: ["tonalMapping"],
+  grade: ["contrast", "gamma", "exposure", "gradeBias"],
+  adjust: ["invert", "hue", "saturation", "brightness"],
+  output: ["output", "useSelection"],
+  batch: ["batchScope", "batchSharedPalette"],
+};
+
+/** "Sharpen Radius" -> "sharpen": enough to tell two sliders apart, no more. */
+function shortLabel(def) {
+  return String(def.label).split(" ")[0].toLowerCase();
 }
 
 const ALGORITHM_LABELS = {};

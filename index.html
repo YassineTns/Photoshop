@@ -3,7 +3,8 @@
 
   The markup is intentionally minimal: every control is built at runtime from
   src/state/params.js so the panel and the engine can never disagree about what
-  parameters exist.
+  parameters exist. What is here is the chrome around them - header, preview,
+  actions, presets - which has no schema to be generated from.
 -->
 <html>
   <head>
@@ -12,9 +13,15 @@
   </head>
   <body>
     <div id="app">
-      <div id="status" class="status">
-        <span id="status-dot" class="status-dot"></span>
-        <span id="status-text">Starting…</span>
+      <div class="brand">
+        <div class="brand-mark">
+          <div class="brand-dot brand-dot-1"></div>
+          <div class="brand-dot brand-dot-2"></div>
+          <div class="brand-dot brand-dot-3"></div>
+          <div class="brand-dot brand-dot-4"></div>
+        </div>
+        <div class="brand-name">Halftone Studio</div>
+        <div id="brand-mode" class="brand-mode">Halftone</div>
       </div>
 
       <div id="preview-wrap" class="preview-wrap">
@@ -25,28 +32,36 @@
         <div id="preview-badge" class="preview-badge"></div>
       </div>
 
-      <div class="toolbar">
-        <button id="btn-load" class="btn">Load Layer</button>
-        <button id="btn-apply" class="btn btn-primary">Apply</button>
-        <button id="btn-update" class="btn">Update</button>
-      </div>
-
-      <div class="toolbar">
-        <button id="btn-batch" class="btn btn-small">Batch Apply</button>
-        <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
+      <div id="status" class="status">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-text">Starting…</span>
       </div>
 
       <div id="progress" class="progress"><div id="progress-bar" class="progress-bar"></div></div>
 
+      <div class="actions">
+        <div class="toolbar">
+          <button id="btn-load" class="btn">Load Layer</button>
+          <button id="btn-apply" class="btn btn-primary">Apply</button>
+          <button id="btn-update" class="btn">Update</button>
+        </div>
+        <div class="toolbar toolbar-tail">
+          <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
+          <button id="btn-batch" class="btn btn-small">Batch Apply</button>
+          <button id="btn-svg" class="btn btn-small">Export SVG</button>
+        </div>
+      </div>
+
       <div id="sections" class="sections"></div>
 
       <div class="preset-bar">
+        <div class="bar-label">Presets</div>
         <div class="preset-row">
           <div id="preset-list" class="preset-list"></div>
         </div>
         <div class="toolbar">
-          <button id="btn-save-preset" class="btn btn-small">Save Preset</button>
-          <button id="btn-load-preset" class="btn btn-small">Load Preset</button>
+          <button id="btn-save-preset" class="btn btn-small">Save</button>
+          <button id="btn-load-preset" class="btn btn-small">Load</button>
           <button id="btn-reset" class="btn btn-small">Reset All</button>
         </div>
       </div>
