@@ -313,6 +313,7 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
   const jOut = [0, 0, 1, 0];
   const fm = p.screenType === "fm" ? p.fmThreshold : null;
+  const cellColor = p.cellColor || null;
 
   const rowStart = chunk.rowStart || 0;
   const rowEnd = chunk.rowEnd === undefined ? grid.rows : Math.min(grid.rows, chunk.rowEnd);
@@ -346,12 +347,17 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       r += gain;
 
       // --- colour: cell mean -> hue/sat/bright -> nearest palette -----
-      const q = ci * 3;
-      const cr = cells.rgb[q] / cnt;
-      const cg = cells.rgb[q + 1] / cnt;
-      const cb = cells.rgb[q + 2] / cnt;
-      adjustColor(cr, cg, cb, adj, adjOut);
-      const pi = nearestIndex(labPal, adjOut[0], adjOut[1], adjOut[2]);
+      // The pipeline caches this per cell, because it depends on none of the
+      // geometry controls; computing it here is the fallback for callers that
+      // do not (the SVG exporter, and any direct use of the rasteriser).
+      let pi;
+      if (cellColor) {
+        pi = cellColor[ci];
+      } else {
+        const q = ci * 3;
+        adjustColor(cells.rgb[q] / cnt, cells.rgb[q + 1] / cnt, cells.rgb[q + 2] / cnt, adj, adjOut);
+        pi = nearestIndex(labPal, adjOut[0], adjOut[1], adjOut[2]);
+      }
       const col3 = p.palette[pi];
 
       cellCentre(grid, col, row, centre);

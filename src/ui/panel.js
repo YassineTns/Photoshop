@@ -56,6 +56,15 @@ const PREVIEW_HEIGHT_MAX = 380;
 const PREVIEW_DITHER_GRID = 700;
 const SLOW_FRAME_MS = 45;
 const DEBOUNCE_MS = 90;
+/**
+ * Resolution multiplier used *during* a drag, and only once frames are actually
+ * overrunning. Encoding a preview costs roughly the square of its size, so 0.6
+ * is about a third of the work; on release the panel always redraws at full
+ * size, so the reduction is never what you are left looking at.
+ */
+const DRAFT_SCALE = 0.6;
+/** How long after the last draft frame to redraw at full size regardless. */
+const DRAFT_UPGRADE_MS = 260;
 
 class Panel {
   constructor(root) {
@@ -75,6 +84,7 @@ class Panel {
     this._sourceURL = null;
     this._renderedSrc = null;
     this._cancel = false;
+    this._upgrade = null;
     /**
      * Window state, as opposed to render parameters. It is persisted with the
      * session but deliberately kept out of params.js and out of presets: how
@@ -324,7 +334,9 @@ class Panel {
   onParamsChanged(committed) {
     this.renderPresetChips();
     this.refreshSummaries();
-    this.schedulePreview();
+    // Uncommitted means a control is still being dragged, which is the only
+    // time a lower-resolution frame is worth having.
+    this.schedulePreview(!committed);
     if (committed) this.persistSession();
   }
 
@@ -435,14 +447,27 @@ class Panel {
 
   /* ------------------------------------------------------- previewing */
 
-  schedulePreview() {
+  /**
+   * @param {boolean} [interactive] true while a control is still being dragged
+   */
+  schedulePreview(interactive) {
     if (!this.engine.hasSource()) return;
+    const draft = !!interactive && this.lastFrameMs > SLOW_FRAME_MS;
+    // A draft frame is only ever an intermediate state. Releasing the control
+    // commits and redraws at full size, but a drag that ends without one - a
+    // lost pointer, a cancelled gesture - would otherwise leave the coarse
+    // frame on screen for good. So every draft arms a short upgrade.
+    if (this._upgrade) {
+      clearTimeout(this._upgrade);
+      this._upgrade = null;
+    }
+
     if (this.lastFrameMs > SLOW_FRAME_MS) {
       // The last frame overran; debounce instead of trying to keep up.
       if (this._timer) clearTimeout(this._timer);
       this._timer = setTimeout(() => {
         this._timer = null;
-        this.drawPreview();
+        this.drawPreview({ draft });
       }, DEBOUNCE_MS);
       return;
     }
@@ -451,7 +476,7 @@ class Panel {
       typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
     this._raf = schedule(() => {
       this._raf = null;
-      this.drawPreview();
+      this.drawPreview({ draft });
     });
   }
 
@@ -492,6 +517,17 @@ class Panel {
    * The docked <img> caps itself with max-width/max-height, so it simply
    * displays the larger frame smaller.
    */
+  /**
+   * Redraw at full size once the drag goes quiet, in case no commit ever comes.
+   */
+  armFullRedraw() {
+    if (this._upgrade) clearTimeout(this._upgrade);
+    this._upgrade = setTimeout(() => {
+      this._upgrade = null;
+      this.drawPreview();
+    }, DRAFT_UPGRADE_MS);
+  }
+
   previewSize() {
     const docked = this.dockedPreviewSize();
     const want = BUS.requestedSize();
@@ -503,7 +539,7 @@ class Panel {
     return { width: w, height: Math.max(1, Math.round(src.height * s)) };
   }
 
-  drawPreview() {
+  drawPreview(opts = {}) {
     if (!this.engine.hasSource()) return;
     // drawPreview is now also driven by the frame bus, so it can be reached
     // from another panel's callback. Confirm this document is still standing
@@ -512,7 +548,14 @@ class Panel {
     if (!img) return;
     const t0 = Date.now();
     try {
-      const size = this.previewSize();
+      const full = this.previewSize();
+      const size = opts.draft
+        ? {
+            width: Math.max(32, Math.round(full.width * DRAFT_SCALE)),
+            height: Math.max(32, Math.round(full.height * DRAFT_SCALE)),
+          }
+        : full;
+      if (opts.draft) this.armFullRedraw();
       const out = this.engine.render(
         this.params,
         Object.assign({ maxDitherGrid: PREVIEW_DITHER_GRID }, size)
@@ -526,7 +569,9 @@ class Panel {
       const screens = out.angles ? ` · ${out.angles.length} screens @ ${out.angles.join("/")}°` : "";
       this._lastBadge =
         `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
-        (out.exact ? "" : " · approx");
+        (out.exact ? "" : " · approx") +
+        // Say so rather than quietly showing a coarser picture than the render.
+        (opts.draft ? " · draft" : "");
       this.badge(this._lastBadge);
       // Hand the same frame to the detached panel, if one is open. One object
       // and one callback: the data URL was built for the docked <img> anyway.

@@ -51,9 +51,10 @@ const {
   paletteToHex,
   padPalette,
   paletteToLab,
+  nearestIndex,
   pickBackgroundIndex,
 } = require("./palette.js");
-const { hexToRgb } = require("./color.js");
+const { hexToRgb, adjustColor } = require("./color.js");
 const { resolveResolution } = require("../state/params.js");
 
 /** Samples along a cell edge in the analysis image. 8 -> 64 samples per cell. */
@@ -76,6 +77,7 @@ class HalftoneEngine {
     this._dither = null;
     this._screens = null;
     this._basePalette = null;
+    this._cellColors = null;
     this.stats = {};
   }
 
@@ -87,6 +89,7 @@ class HalftoneEngine {
     this._dither = null;
     this._screens = null;
     this._basePalette = null;
+    this._cellColors = null;
   }
 
   hasSource() {
@@ -183,6 +186,53 @@ class HalftoneEngine {
     this.stats.cells = grid.cols * grid.rows;
     this._cells = { key, cells };
     return cells;
+  }
+
+  /**
+   * Which palette entry each cell resolves to.
+   *
+   * This is a third of the per-frame cost and almost none of it is ever new.
+   * Deciding a cell's colour means converting its mean RGB to OKLab and
+   * searching the palette - and neither depends on radius, dot curve, shape,
+   * dot gain, screen type, jitter or any other geometry control. Before this
+   * cache, dragging the Radius slider redid a hundred and sixty thousand OKLab
+   * conversions per frame to arrive at exactly the answers it already had.
+   *
+   * The key is everything that genuinely changes the answer: the cells
+   * themselves, the palette being matched against, and the hue/saturation/
+   * brightness adjustment, which is applied to both sides of the comparison.
+   *
+   * @returns {Uint8Array} one palette index per cell
+   */
+  _ensureCellColors(params, cells, rp) {
+    const count = cells.grid.cols * cells.grid.rows;
+    const key = [
+      this._cells ? this._cells.key : "",
+      count,
+      paletteToHex(rp.palette).join(","),
+      params.hue,
+      params.saturation,
+      params.brightness,
+    ].join("|");
+    if (this._cellColors && this._cellColors.key === key) return this._cellColors.index;
+
+    const t0 = now();
+    const labPal = paletteToLab(rp.palette);
+    const adj = rp.colorAdjust || {};
+    const out = new Uint8Array(count);
+    const tmp = [0, 0, 0];
+
+    for (let ci = 0; ci < count; ci++) {
+      const cnt = cells.count[ci];
+      if (cnt === 0) continue;
+      const q = ci * 3;
+      adjustColor(cells.rgb[q] / cnt, cells.rgb[q + 1] / cnt, cells.rgb[q + 2] / cnt, adj, tmp);
+      out[ci] = nearestIndex(labPal, tmp[0], tmp[1], tmp[2]);
+    }
+
+    this.stats.colorMs = now() - t0;
+    this._cellColors = { key, index: out };
+    return out;
   }
 
   /* ------------------------------------------------------------------ *
@@ -547,6 +597,7 @@ class HalftoneEngine {
 
     const cells = this._ensureCells(params);
     const rp = this._rasterParams(params);
+    rp.cellColor = this._ensureCellColors(params, cells, rp);
     const grid = scaleGrid(cells.grid, width, height);
     const outCells = { lum: cells.lum, rgb: cells.rgb, count: cells.count, grid };
 

@@ -184,7 +184,10 @@ src/
     styles.css
   state/params.js      the parameter schema - single source of truth
   presets/presets.js   the thirteen built-in presets
-  util/                PNG encoder, UTF-8 base64
+  util/
+    png.js             PNG encoder: filtering, opaque RGB, chunked base64
+    deflate.js         fixed-Huffman deflate, so the preview is not sent raw
+    base64.js          UTF-8 base64 for the metadata layer
 playground.html        the engine, bundled to run in a browser (generated)
 panel-preview.html     the real panel, bundled the same way (generated)
 test/                  engine suite + mocked-host integration suite
@@ -467,7 +470,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (376 assertions) + mocked host (210 assertions)
+npm test              # engine (395 assertions) + mocked host (210 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)
@@ -560,6 +563,48 @@ Synthetic photograph, Node 22 (Photoshop will differ, but the ratios hold):
 Slider latency is flat in document size. Full renders are chunked with yields so
 Photoshop's UI keeps breathing, and reads from Photoshop are capped at 2600px on
 the longest edge while the render is still written at full resolution.
+
+#### Where the *preview loop* time went
+
+The panel showing 1116 ms on a real 160,000-cell preview was the prompt for this,
+and profiling put almost none of it where it was assumed to be. Three things, in
+order of what they were worth:
+
+- **A third of every frame was recomputing colours that had not changed.**
+  Deciding which palette entry a cell takes means an OKLab conversion and a
+  palette search, and it depends on the palette and the hue/saturation/brightness
+  adjustment — on *none* of the geometry controls. Dragging Radius was redoing
+  160,000 OKLab conversions per frame to arrive at the answers it already had.
+  Caching it per cell took the render from ~26 ms to 14 ms.
+- **The preview PNG was uncompressed.** The encoder emitted stored deflate
+  blocks — valid, and 603 KB of data URL for a 340×340 preview, rebuilt on every
+  drag. It now uses a real fixed-Huffman deflate (`src/util/deflate.js`) with
+  scanline filtering, and drops the alpha channel when the frame is opaque, which
+  a preview always is: **216 KB**. In JS that costs about 3 ms more than emitting
+  it raw; what it buys is 2.8× less string for the host to flatten, transfer and
+  decode on every frame. That side cannot be measured from Node, which is stated
+  here rather than dressed up as a benchmark.
+- **Below a measured frame budget, drags render at 60% scale** and snap back to
+  full size on release. Encoding cost is roughly quadratic in size, so that is
+  about a third of the work; the badge says `draft` while it applies, and it only
+  engages once frames are actually overrunning.
+
+Measured end to end on one preview frame, same machine, same document:
+
+| | Before | After |
+|---|---|---|
+| Render | 22–30 ms | **14 ms** |
+| PNG + base64 | 16–19 ms | 19 ms |
+| Data URL handed to the host | 603 KB | **216 KB** |
+
+Both new pieces are checked against implementations that share nothing with
+them. The compressor's output must inflate back to its input under **Node's own
+zlib**, across 19 cases including empty input, incompressible noise, and the
+sizes either side of the minimum match, the maximum match and the 32 KB window.
+The encoder's output must decode to the exact pixels under a PNG decoder written
+from the specification in `test/pngdecode.js`, which uses its own CRC and its own
+unfilter. And the colour cache must render *identically* to a cold engine across
+thirteen parameter variants.
 
 #### Where the rasteriser time went
 

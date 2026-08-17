@@ -1423,6 +1423,308 @@ group("DPI scale mode");
   ok(resolveResolution(rel, 3000, 0) === 123, "a missing document resolution does not break relative mode");
 }
 
+group("Per-cell colour cache");
+{
+  // Deciding which palette entry a cell takes means an OKLab conversion and a
+  // palette search per cell, and it depends on none of the geometry controls.
+  // Caching it is most of what makes a slider drag interactive - and is only
+  // acceptable if the cached result is indistinguishable from the uncached one.
+  const src = F.photo(700, 520);
+  const base = { mode: "halftone", density: 60 };
+  const SIZE = { width: 300, height: 220 };
+
+  // A warmed engine has a cache built for entirely different parameters; a cold
+  // one has none. They must agree exactly.
+  const variants = [
+    ["defaults", {}],
+    ["hue", { hue: 60 }],
+    ["saturation", { saturation: 1.4 }],
+    ["brightness", { brightness: 0.8 }],
+    ["extracted palette", { colorCount: 6, paletteLocked: false }],
+    ["radius", { radius: 140 }],
+    ["shape", { shape: "diamond" }],
+    ["angle", { angle: 33 }],
+    ["invert", { invert: true }],
+    ["contrast", { contrast: 0.4 }],
+    ["tonal zones", { tonalMapping: true }],
+    ["per-ink", { screenMode: "perInk" }],
+    ["fm", { screenType: "fm" }],
+  ];
+
+  let differed = null;
+  for (const [name, over] of variants) {
+    const p = sanitizeParams(Object.assign({}, base, over));
+    const cold = new HalftoneEngine();
+    cold.setSource(src);
+    const warm = new HalftoneEngine();
+    warm.setSource(src);
+    // Build a cache for something else entirely first.
+    warm.render(sanitizeParams(Object.assign({}, base, { hue: 180, radius: 40, shape: "square" })), SIZE);
+
+    const a = cold.render(p, SIZE);
+    const b = warm.render(p, SIZE);
+    for (let i = 0; i < a.data.length; i++) {
+      if (a.data[i] !== b.data[i]) {
+        differed = `${name}: byte ${i}`;
+        break;
+      }
+    }
+    if (differed) break;
+  }
+  ok(differed === null, `a warmed cache renders identically to a cold one, ${variants.length} variants (${differed || "exact"})`);
+
+  // And the cache has to actually hold, or it is only overhead.
+  const e = new HalftoneEngine();
+  e.setSource(src);
+  const p0 = sanitizeParams(base);
+  e.render(p0, SIZE);
+  const first = e._cellColors;
+  ok(!!first, "the first render builds the cache");
+
+  for (const over of [{ radius: 150 }, { shape: "cross" }, { dotGain: 8 }, { radiusCurve: 0.5 }]) {
+    e.render(sanitizeParams(Object.assign({}, base, over)), SIZE);
+  }
+  ok(e._cellColors === first, "geometry-only changes reuse it");
+
+  e.render(sanitizeParams(Object.assign({}, base, { hue: 45 })), SIZE);
+  ok(e._cellColors !== first, "but a hue change rebuilds it");
+
+  const afterHue = e._cellColors;
+  e.render(sanitizeParams(Object.assign({}, base, { hue: 45, density: 90 })), SIZE);
+  ok(e._cellColors !== afterHue, "and so does a different grid");
+
+  // A new source must never show the previous image's colours.
+  const other = new HalftoneEngine();
+  other.setSource(src);
+  other.render(p0, SIZE);
+  other.setSource(F.flats(700, 520));
+  const flatsOut = other.render(p0, SIZE);
+  const fresh = new HalftoneEngine();
+  fresh.setSource(F.flats(700, 520));
+  const flatsRef = fresh.render(p0, SIZE);
+  let leaked = false;
+  for (let i = 0; i < flatsOut.data.length; i++) {
+    if (flatsOut.data[i] !== flatsRef.data[i]) {
+      leaked = true;
+      break;
+    }
+  }
+  ok(!leaked, "changing the source drops the cache rather than reusing it");
+}
+
+group("Deflate and PNG");
+{
+  // The preview reaches the panel as a PNG data URL, so this code runs on every
+  // frame and a bug in it is a corrupt or unopenable image rather than a slow
+  // one. Both halves are therefore checked against implementations that share
+  // nothing with them: the compressor against Node's own zlib, and the encoder
+  // against a decoder written from the specification in test/pngdecode.js.
+  const zlib = require("zlib");
+  const { zlibDeflate, deflateRaw, adler32 } = require("../src/engine/../util/deflate.js");
+  const { encodePNG, toBase64 } = require("../src/util/png.js");
+  const { decodePNG } = require("./pngdecode.js");
+
+  /* ---- the compressor ------------------------------------------- */
+
+  const cases = [];
+  cases.push(["empty", new Uint8Array(0)]);
+  cases.push(["one byte", Uint8Array.from([42])]);
+  cases.push(["two bytes", Uint8Array.from([1, 2])]);
+  cases.push(["three identical", Uint8Array.from([7, 7, 7])]);
+  cases.push(["100k zeros", new Uint8Array(100000)]);
+  cases.push(["300k of one byte", new Uint8Array(300000).fill(0xab)]);
+  // Sizes either side of every internal boundary: minimum match, maximum match,
+  // the 32k window, and the 64k a stored block would have used.
+  for (const n of [2, 3, 4, 257, 258, 259, 32767, 32768, 32769, 65535, 65536]) {
+    const b = new Uint8Array(n);
+    for (let i = 0; i < n; i++) b[i] = (i * 7 + ((i >> 8) & 3)) & 255;
+    cases.push([`pattern n=${n}`, b]);
+  }
+  // Genuinely incompressible: a compressor that "wins" here is broken.
+  cases.push(["200k of noise", new Uint8Array(require("crypto").randomBytes(200000))]);
+  // And the actual payload.
+  {
+    const e = new HalftoneEngine();
+    e.setSource(F.photo(1200, 1200));
+    const out = e.render(sanitizeParams({ mode: "halftone", density: 90 }), {
+      width: 340,
+      height: 340,
+    });
+    const stride = 340 * 4;
+    const raw = new Uint8Array((stride + 1) * 340);
+    for (let y = 0; y < 340; y++) {
+      raw.set(out.data.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
+    }
+    cases.push(["a halftone frame", raw]);
+  }
+
+  let broke = null;
+  let noise = null;
+  for (const [name, data] of cases) {
+    let back;
+    try {
+      back = zlib.inflateSync(Buffer.from(zlibDeflate(data)));
+    } catch (err) {
+      broke = broke || `${name}: inflate threw "${err.message}"`;
+      continue;
+    }
+    if (back.length !== data.length) {
+      broke = broke || `${name}: got ${back.length} bytes, expected ${data.length}`;
+      continue;
+    }
+    for (let i = 0; i < data.length; i++) {
+      if (back[i] !== data[i]) {
+        broke = broke || `${name}: byte ${i} is ${back[i]}, expected ${data[i]}`;
+        break;
+      }
+    }
+    if (name === "200k of noise") noise = zlibDeflate(data).length / data.length;
+  }
+  ok(broke === null, `every stream inflates back to its input, ${cases.length} cases (${broke || "exact"})`);
+  ok(
+    noise !== null && noise > 1.0 && noise < 1.2,
+    `incompressible data is passed through, not "compressed" (${((noise || 0) * 100).toFixed(0)}%)`
+  );
+
+  // Compression has to actually happen, or none of the cost is justified.
+  const flat = new Uint8Array(200000).fill(9);
+  ok(
+    zlibDeflate(flat).length < flat.length / 50,
+    `a flat buffer compresses hard (${zlibDeflate(flat).length} bytes from ${flat.length})`
+  );
+
+  // level 0 emits literals only; it must still be a valid stream.
+  const lit = Uint8Array.from({ length: 5000 }, (_, i) => (i * 31) & 255);
+  const rawLit = deflateRaw(lit, { level: 0 });
+  const wrapped = new Uint8Array(2 + rawLit.length + 4);
+  wrapped[0] = 0x78;
+  wrapped[1] = 0x01;
+  wrapped.set(rawLit, 2);
+  const ad = adler32(lit);
+  wrapped[2 + rawLit.length] = (ad >>> 24) & 255;
+  wrapped[3 + rawLit.length] = (ad >>> 16) & 255;
+  wrapped[4 + rawLit.length] = (ad >>> 8) & 255;
+  wrapped[5 + rawLit.length] = ad & 255;
+  let litOk = false;
+  try {
+    litOk = Buffer.from(lit).equals(zlib.inflateSync(Buffer.from(wrapped)));
+  } catch (err) {
+    litOk = false;
+  }
+  ok(litOk, "the literals-only path produces a valid stream too");
+
+  // Adler-32 against a known vector, since the fast form defers the modulo.
+  ok(adler32(new Uint8Array([97, 98, 99])) === 0x024d0127, "adler32 matches its reference value");
+  ok(
+    adler32(new Uint8Array(100000).fill(255)) ===
+      adler32Slow(new Uint8Array(100000).fill(255)),
+    "and the deferred modulo agrees with the textbook loop over a long buffer"
+  );
+
+  /* ---- the encoder ---------------------------------------------- */
+
+  const engine = new HalftoneEngine();
+  engine.setSource(F.photo(900, 700));
+  const params = sanitizeParams({ mode: "halftone", density: 70 });
+
+  let encBroke = null;
+  let sawRGB = false;
+  let sawRGBA = false;
+  let sawUpFilter = false;
+
+  for (const [w, h] of [[1, 1], [2, 3], [17, 5], [340, 340], [200, 137]]) {
+    const out = engine.render(params, { width: w, height: h });
+    const png = encodePNG(out.data, w, h);
+    let back;
+    try {
+      back = decodePNG(png);
+    } catch (err) {
+      encBroke = encBroke || `${w}x${h}: ${err.message}`;
+      continue;
+    }
+    if (back.width !== w || back.height !== h) {
+      encBroke = encBroke || `${w}x${h}: decoded as ${back.width}x${back.height}`;
+      continue;
+    }
+    for (let i = 0; i < out.data.length; i++) {
+      if (back.data[i] !== out.data[i]) {
+        encBroke = encBroke || `${w}x${h}: pixel byte ${i} differs`;
+        break;
+      }
+    }
+    if (back.channels === 3) sawRGB = true;
+    if (back.filters.indexOf(2) >= 0) sawUpFilter = true;
+  }
+  ok(encBroke === null, `every PNG decodes back to the exact pixels (${encBroke || "5 sizes, exact"})`);
+  ok(sawRGB, "an opaque render drops the alpha channel");
+  ok(sawUpFilter, "and rows are filtered rather than stored raw");
+
+  // Transparency must survive: the separated output and any future alpha path
+  // depend on it, and the opacity test is what decides the colour type.
+  {
+    const w = 40;
+    const h = 30;
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      rgba[i * 4] = i & 255;
+      rgba[i * 4 + 1] = (i * 3) & 255;
+      rgba[i * 4 + 2] = (i * 7) & 255;
+      rgba[i * 4 + 3] = i % 5 === 0 ? 0 : 200;
+    }
+    const back = decodePNG(encodePNG(rgba, w, h));
+    sawRGBA = back.channels === 4;
+    let same = true;
+    for (let i = 0; i < rgba.length; i++) {
+      if (back.data[i] !== rgba[i]) {
+        same = false;
+        break;
+      }
+    }
+    ok(sawRGBA, "a frame with transparency keeps its alpha channel");
+    ok(same, "and round-trips exactly");
+  }
+
+  // The encoder reuses its working buffers between calls; a stale one would
+  // show up as the previous image bleeding into the next.
+  {
+    const a = engine.render(params, { width: 120, height: 90 });
+    const pngA = encodePNG(a.data, 120, 90);
+    const b = engine.render(sanitizeParams({ mode: "halftone", density: 20 }), {
+      width: 120,
+      height: 90,
+    });
+    encodePNG(b.data, 120, 90);
+    const againA = encodePNG(a.data, 120, 90);
+    ok(
+      Buffer.from(pngA).equals(Buffer.from(againA)),
+      "reused buffers do not leak one frame into the next"
+    );
+  }
+
+  /* ---- base64 ---------------------------------------------------- */
+
+  let b64Bad = null;
+  for (const n of [0, 1, 2, 3, 4, 5, 8191, 8192, 8193, 24577]) {
+    const bytes = new Uint8Array(n);
+    for (let i = 0; i < n; i++) bytes[i] = (i * 37 + 11) & 255;
+    const mine = toBase64(bytes);
+    const ref = Buffer.from(bytes).toString("base64");
+    if (mine !== ref) b64Bad = b64Bad || `n=${n}`;
+  }
+  // The sizes above straddle the chunk boundary the fast path uses.
+  ok(b64Bad === null, `base64 matches Node's, across the chunk boundary (${b64Bad || "10 sizes"})`);
+}
+
+function adler32Slow(buf) {
+  let a = 1;
+  let b = 0;
+  for (let i = 0; i < buf.length; i++) {
+    a = (a + buf[i]) % 65521;
+    b = (b + a) % 65521;
+  }
+  return ((b << 16) | a) >>> 0;
+}
+
 group("Rasteriser fast paths");
 {
   // Two optimisations in the rasteriser trade clarity for speed, and both are
