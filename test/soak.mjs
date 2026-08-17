@@ -141,6 +141,21 @@ const click = (id) => p.evaluate(i => { const e = document.getElementById(i); if
   steps.push(["panning moves the window", afterPan.view === beforePan.view
     ? [`the window stayed at ${beforePan.view}`] : []]);
 
+  // A zoom step draws a reduced frame first for speed. What you are left
+  // looking at must always be the full one, or the speed was bought with
+  // quality the user did not agree to.
+  await click("btn-zoom-in");
+  await p.waitForTimeout(60);
+  const during = await p.evaluate(() => window.halftonePanel._lastBadge || "");
+  await p.waitForTimeout(600);
+  const after = await p.evaluate(() => window.halftonePanel._lastBadge || "");
+  steps.push(["a zoom step settles at full quality", [
+    ...(/draft/.test(during) ? [] : ["the first frame after a zoom was not a draft, so the step paid full price"]),
+    ...(/draft/.test(after) ? ["the panel was left showing a draft frame"] : []),
+  ]]);
+  await click("btn-zoom-out");
+  await p.waitForTimeout(600);
+
   // Fit must undo all of it.
   await click("btn-zoom-fit");
   await p.waitForTimeout(420);

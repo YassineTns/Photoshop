@@ -103,6 +103,13 @@ const ZOOM_MAX = 8;
  */
 const ASSUMED_BOX_WIDTH = 460;
 const ASSUMED_PANEL_HEIGHT = 720;
+/**
+ * How long a preview-box measurement stays good for.
+ *
+ * Long enough that one interaction measures once instead of a dozen times,
+ * short enough that dragging the panel's edge is caught within a frame or two.
+ */
+const BOX_CACHE_MS = 250;
 
 class Panel {
   constructor(root) {
@@ -694,6 +701,14 @@ class Panel {
    *
    * @returns {{width:number, height:number, measured:boolean, source:string}}
    */
+  /**
+   * Forget the cached measurement. Called whenever the box could have changed
+   * shape for a reason the panel knows about.
+   */
+  invalidateBox() {
+    this._boxCache = null;
+  }
+
   panelSize() {
     const app = this.$("app");
     const s = GEO.sizeOf(app);
@@ -817,6 +832,28 @@ class Panel {
 
   /* ------------------------------------------------------------ zoom */
 
+  /**
+   * Record that an input event type is delivered by this host, once.
+   *
+   * Which DOM events a UXP panel actually receives is not something this
+   * environment can look up - Adobe's documentation is unreachable from here -
+   * and it is not something to guess at either. So the panel reports what it
+   * observes: the first time an event type arrives it says so, in the log the
+   * user can send. An event type that never appears in that log is one this
+   * build does not deliver, which is a fact rather than a theory, and the
+   * feature built on it can then be replaced rather than debugged.
+   */
+  noteInput(name) {
+    if (!this._sawInput) this._sawInput = {};
+    if (this._sawInput[name]) return;
+    this._sawInput[name] = true;
+    try {
+      console.warn(`[Halftone Studio] input: "${name}" is delivered by this build`);
+    } catch (e) {
+      /* never let a diagnostic break an interaction */
+    }
+  }
+
   bindZoom() {
     const wrap = this.$("preview-wrap");
     this.on("btn-zoom-in", "click", () => this.zoomBy(ZOOM_STEP));
@@ -836,17 +873,36 @@ class Panel {
      * preview would have zoomed it, repeatedly, while preventDefault stopped the
      * scroll. Nothing is done unless the direction is actually known.
      */
-    wrap.addEventListener("wheel", (e) => {
+    const onWheel = (name) => (e) => {
+      this.noteInput(name);
       if (!this.engine.hasSource()) return;
-      const dy = Number(e.deltaY);
-      if (!Number.isFinite(dy) || dy === 0) return;
+      // `wheelDelta` is the legacy sibling of `deltaY` and has the opposite
+      // sign. Taking whichever is present costs nothing and means the gesture
+      // works on a host that only implements one of them.
+      let dy = Number(e.deltaY);
+      if (!Number.isFinite(dy) || dy === 0) {
+        const legacy = Number(e.wheelDelta);
+        dy = Number.isFinite(legacy) && legacy !== 0 ? -legacy : NaN;
+      }
+      if (!Number.isFinite(dy) || dy === 0) {
+        // The event arrived but carries no direction, so there is nothing to
+        // act on. Worth saying once: it is the difference between "this host
+        // sends no wheel events" and "it sends them without a delta".
+        this.noteInput(name + " (no usable delta)");
+        return;
+      }
       this.zoomBy(dy > 0 ? 1 / ZOOM_STEP : ZOOM_STEP, this.pointerInView(e));
       if (e.preventDefault) e.preventDefault();
-    });
+    };
+    wrap.addEventListener("wheel", onWheel("wheel"));
+    // The legacy name, for a host that never got as far as the standard one.
+    // Harmless where it is not dispatched; the two guard each other.
+    wrap.addEventListener("mousewheel", onWheel("mousewheel"));
 
     let panning = false;
     let start = null;
     wrap.addEventListener("pointerdown", (e) => {
+      this.noteInput("pointerdown");
       if (!this.canPan()) return;
       // The compare seam lives inside the preview, so its own drag would also
       // start a pan and the image would slide out from under the handle.
@@ -864,6 +920,7 @@ class Panel {
     });
 
     wrap.addEventListener("pointermove", (e) => {
+      this.noteInput("pointermove");
       if (!panning) return;
       const plan = this.renderPlan(start.box);
       // Dragging moves the image with the pointer, so the centre moves against
@@ -925,15 +982,30 @@ class Panel {
    * @returns {{width:number, height:number, exact:boolean, source:string}}
    */
   previewBox() {
+    /*
+     * Memoised, because measuring is not free and this is called many times per
+     * frame - by outputBox, renderPlan, fitZoom, canPan and updateZoomBar,
+     * several of them more than once. Each call was reaching
+     * getBoundingClientRect, which in UXP is a layout query rather than a field
+     * read, so a single zoom step was paying for a dozen of them. The box
+     * changes when the panel is resized, when full-preview is toggled or when
+     * the grip is dragged; the last two say so, and a short expiry covers the
+     * first without polling the host on every draw.
+     */
+    const now = Date.now();
+    if (this._boxCache && now - this._boxCache.at < BOX_CACHE_MS) return this._boxCache.box;
+
     const wrapW = GEO.sizeOf(this.$("preview-wrap")).width;
     const panel = this.panelSize();
     const raw = wrapW === null ? panel.width : wrapW;
-    return {
+    const box = {
       width: Math.max(120, Math.min(PREVIEW_MAX, Math.round(raw))),
       height: this.previewBoxHeight(),
       exact: wrapW !== null || panel.measured,
       source: wrapW !== null ? "wrap" : panel.source,
     };
+    this._boxCache = { at: now, box };
+    return box;
   }
 
   /**
@@ -977,9 +1049,19 @@ class Panel {
     this.afterZoom();
   }
 
+  /**
+   * Redraw after the viewport changed.
+   *
+   * A zoom step used to render and encode a full-size frame, so pressing + four
+   * times paid for four of them back to back and the panel felt like it was
+   * catching up rather than responding. It now draws the same reduced frame a
+   * slider drag draws, and upgrades to full size once the clicking stops -
+   * which is the same trade already made for dragging, for the same reason.
+   * The full frame is always what you are left looking at.
+   */
   afterZoom() {
     this.updateZoomBar();
-    this.drawPreview();
+    this.drawPreview({ draft: true });
   }
 
   updateZoomBar() {
@@ -1250,6 +1332,7 @@ class Panel {
       // scroll and the pinned preview has eaten the thing it exists to serve.
       const max = Math.max(PREVIEW_HEIGHT_MIN, Math.round(this.panelSize().height * 0.7));
       this.ui.previewHeight = clampInt(startH + (e.clientY - startY), PREVIEW_HEIGHT_MIN, max);
+      this.invalidateBox();
       this.applyPreviewHeight();
       this.drawPreview();
     });
@@ -1291,6 +1374,7 @@ class Panel {
    * one it was trying to stabilise.
    */
   applyPreviewHeight() {
+    this.invalidateBox();
     const wrap = this.$("preview-wrap");
     if (!wrap) return;
     // In full-preview mode the box is sized by the layout, not by the grip.
@@ -1312,6 +1396,7 @@ class Panel {
    */
   toggleTheatre() {
     this.theatre = !this.theatre;
+    this.invalidateBox();
     const app = this.$("app");
     if (app) app.className = this.theatre ? "theatre" : "";
     const btn = this.$("btn-theatre");
