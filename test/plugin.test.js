@@ -994,6 +994,147 @@ async function main() {
   }
 
   /* ================================================================ */
+  group("Detached preview panel");
+  {
+    // Two panel entrypoints, one JS realm. They cannot see each other's DOM,
+    // so the only thing they share is the module registry - which is exactly
+    // what the frame bus is. If that sharing ever stopped holding, this is the
+    // test that would say so.
+    resetModules();
+    const { ps, document } = install({ width: 800, height: 600, image: F.photo(800, 600) });
+    const BUS = require("../src/ui/framebus.js");
+    const { Panel } = require("../src/ui/panel.js");
+    const { PreviewPanel } = require("../src/ui/previewpanel.js");
+
+    BUS.reset();
+    ok(BUS.latest() === null, "the bus starts with no frame");
+    ok(BUS.isAttached() === false, "and with nothing attached");
+
+    const panel = new Panel(document);
+    await panel.init();
+    document.getElementById("btn-load").emit("click");
+    ok(await waitFor(() => panel.engine.hasSource()), "the controls panel loaded a layer");
+    ok(await waitFor(() => !!BUS.latest()), "rendering publishes a frame to the bus");
+    const first = BUS.latest();
+    ok(
+      first.url.indexOf("data:image/png;base64,") === 0,
+      "the frame carries a displayable image"
+    );
+    ok(/cells|px/.test(first.badge), `and the badge that goes with it ("${first.badge}")`);
+
+    // The detached panel is a separate document. The mock hands out one shared
+    // element per id, which is enough to prove the wiring: what matters is that
+    // it receives the frame at all.
+    const preview = new PreviewPanel(document);
+    preview.init();
+    ok(BUS.isAttached() === true, "the detached panel registers itself");
+    ok(
+      document.getElementById("detached-img").src === first.url,
+      "it immediately shows the frame that already existed, rather than sitting blank"
+    );
+
+    // A later render must reach it too.
+    panel.setParam("radius", 55, true);
+    panel.drawPreview();
+    ok(
+      await waitFor(() => document.getElementById("detached-img").src !== first.url),
+      "a later render reaches the detached panel"
+    );
+
+    // Size negotiation: a big detached window must make the controls panel
+    // rasterise bigger, otherwise the detached view is only magnified.
+    const docked = panel.dockedPreviewSize();
+    BUS.requestSize({ width: 1200, height: 900 });
+    const bigger = panel.previewSize();
+    ok(
+      bigger.width > docked.width,
+      `a large detached window raises the render size (${docked.width} -> ${bigger.width})`
+    );
+    ok(
+      Math.abs(bigger.width / bigger.height - docked.width / docked.height) < 0.01,
+      "and keeps the aspect ratio"
+    );
+
+    // A small one must not drag it below what the docked panel needs.
+    BUS.requestSize({ width: 80, height: 60 });
+    ok(
+      panel.previewSize().width === docked.width,
+      "a small detached window never shrinks the docked preview"
+    );
+
+    // Closing it hands the size back.
+    preview.dispose();
+    ok(BUS.isAttached() === false, "closing the detached panel unregisters it");
+    ok(
+      panel.previewSize().width === docked.width,
+      "and the controls panel goes back to rendering for itself"
+    );
+
+    BUS.reset();
+    uninstall();
+  }
+
+  /* ================================================================ */
+  group("Preview resizing");
+  {
+    resetModules();
+    const { document } = install({ width: 800, height: 600, image: F.photo(800, 600) });
+    const { Panel } = require("../src/ui/panel.js");
+    const META = require("../src/photoshop/metadata.js");
+    require("../src/ui/framebus.js").reset();
+
+    const panel = new Panel(document);
+    await panel.init();
+    document.getElementById("btn-load").emit("click");
+    ok(await waitFor(() => panel.engine.hasSource()), "a layer is loaded");
+
+    const auto = panel.previewBoxHeight();
+    ok(auto > 0, `the preview has an automatic height (${auto}px)`);
+
+    // Drag the grip down.
+    const grip = document.getElementById("preview-grip");
+    grip.emit("pointerdown", { clientY: 100, pointerId: 1 });
+    grip.emit("pointermove", { clientY: 220, pointerId: 1 });
+    ok(panel.previewBoxHeight() > auto, `dragging down grows it (${panel.previewBoxHeight()}px)`);
+    grip.emit("pointerup", { clientY: 220, pointerId: 1 });
+
+    const grown = panel.ui.previewHeight;
+    ok(grown !== null, "the dragged height is remembered");
+
+    // Clamped: it may never take the whole panel, or the pinned preview has
+    // eaten the controls it exists to serve.
+    grip.emit("pointerdown", { clientY: 0, pointerId: 1 });
+    grip.emit("pointermove", { clientY: 9000, pointerId: 1 });
+    grip.emit("pointerup", { clientY: 9000, pointerId: 1 });
+    const appH = document.getElementById("app").clientHeight || 720;
+    ok(
+      panel.ui.previewHeight <= Math.round(appH * 0.7) + 1,
+      `it is capped at 70% of the panel (${panel.ui.previewHeight} of ${appH})`
+    );
+
+    // And never smaller than something you can actually see.
+    grip.emit("pointerdown", { clientY: 500, pointerId: 1 });
+    grip.emit("pointermove", { clientY: -9000, pointerId: 1 });
+    grip.emit("pointerup", { clientY: -9000, pointerId: 1 });
+    ok(panel.ui.previewHeight >= 110, `and floored (${panel.ui.previewHeight}px)`);
+
+    // Double-click restores the automatic size.
+    grip.emit("dblclick", {});
+    ok(panel.ui.previewHeight === null, "double-click goes back to automatic");
+    ok(panel.previewBoxHeight() === auto, "which is the height it started at");
+
+    // It is window state, not a render parameter: it must survive a session but
+    // never ride along in a preset or in a layer's stored parameters.
+    panel.ui.previewHeight = 240;
+    await panel.persistSession();
+    const session = await META.loadSession();
+    ok(session.ui && session.ui.previewHeight === 240, "the height is stored with the session");
+    ok(session.params.previewHeight === undefined, "and is not smuggled into the render parameters");
+
+    uninstall();
+  }
+
+  /* ================================================================ */
   group("Control behaviour");
   {
     resetModules();

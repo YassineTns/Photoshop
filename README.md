@@ -70,7 +70,17 @@ reload each time.
    time, and it is **pinned**: the header holds it while the controls scroll
    underneath, so it is on screen whichever setting you are reaching for. It is
    capped at 42% of the panel height so it never crowds out the controls it is
-   showing you the effect of.
+   showing you the effect of, and the bar under it drags to resize (double-click
+   to go back to automatic).
+
+   For a genuinely large view, open the second panel — **Plugins ▸ Halftone
+   Studio ▸ Halftone Preview** — and float it. It shows nothing but the render,
+   at whatever size that window is, and it tells the controls panel how big it
+   is so frames are *rasterised* for it rather than magnified. Worth being clear
+   about the docked one: in a 340px panel a landscape image is limited by the
+   panel's **width**, so dragging the box taller gains nothing for landscape
+   artwork. It helps for portrait work, and it is genuinely useful in the other
+   direction — dragging it small buys space back for the controls.
 4. Press **Apply**. The plugin builds:
 
 ```
@@ -134,9 +144,11 @@ Conventions:
 ## Architecture
 
 ```
-manifest.json          UXP manifest (v5)
-index.html             panel markup
+manifest.json          UXP manifest (v5) - two panel entrypoints
+index.html             controls panel markup
 main.js                bootstrap (at the root: see the note in the file)
+preview.html           detached preview panel markup
+preview-main.js        its bootstrap (at the root for the same reason)
 src/
   engine/              the renderers - pure JS, zero UXP dependencies
     color.js           sRGB/linear, OKLab, HSL, luma
@@ -166,6 +178,8 @@ src/
     files.js           writing generated files through a save dialog
   ui/
     panel.js           panel controller
+    previewpanel.js    the detached preview panel's controller
+    framebus.js        the channel between the two panels
     controls.js        sliders, segmented pickers, chips, toggles, palette
     styles.css
   state/params.js      the parameter schema - single source of truth
@@ -453,7 +467,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (376 assertions) + mocked host (186 assertions)
+npm test              # engine (376 assertions) + mocked host (210 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)
@@ -619,6 +633,31 @@ only tests the cases it happens to try.
     200,000 shapes the panel warns that illustration apps will struggle.
 11. **`imaging.getSelection` is probed, not assumed.** On a build without it the
     selection is silently ignored and the whole layer renders.
+12. **The two panels share modules, not messages.** A UXP plugin has one
+    JavaScript realm but one document per panel, so the detached preview gets
+    its frames through a module both panels `require` rather than through any
+    messaging API. If a host build did not share modules between panel
+    documents, the detached panel would say it is waiting instead of showing
+    anything; the docked panel is unaffected either way.
+
+### The visual direction
+
+The look — near-black, strictly flat, 1px rules as the structural device, capitals
+with wide letter-spacing against lower-case body text, one deep red rationed to
+the primary action and to live state — was **proposed, not sampled**. The
+reference site it was meant to follow blocks automated access, so none of the
+values are measured from it. Everything lives in the tokens at the top of
+`src/ui/styles.css`, so recalibrating against real screenshots is a token edit
+and touches nothing else.
+
+Two rules in there are worth knowing before editing:
+
+- **The accent and the error colour are both red**, and at 10px they are
+  indistinguishable by hue. They are separated by *form*: the accent appears only
+  as a filled area, an error only as text with a rule and a tint, never filled.
+- **Red text never uses `--accent`**, which reaches only 3.35:1 on the dark
+  background — fine behind white text, illegible as text itself. That is what
+  `--accent-on-dark-text` is for.
 
 ## Roadmap
 

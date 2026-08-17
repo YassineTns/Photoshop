@@ -130,8 +130,16 @@ function wrapModule(rel) {
   );
 }
 
-/** What the real panel needs on top of that - the Photoshop layer, mostly. */
-const PANEL_MODULES = collect(["src/ui/panel.js"], MODULES);
+/**
+ * What the real panel needs on top of that - the Photoshop layer, mostly.
+ *
+ * Both panel entrypoints are listed. The crawler follows requires, so it can
+ * only start from a root someone names, and the detached preview panel is a
+ * second root rather than something the docked panel requires: they meet at the
+ * frame bus, which is the whole design. Leaving it out builds a page that
+ * cannot construct the second panel at all.
+ */
+const PANEL_MODULES = collect(["src/ui/panel.js", "src/ui/previewpanel.js"], MODULES);
 
 /**
  * Stand-ins for the two modules only Photoshop provides. Deliberately minimal:

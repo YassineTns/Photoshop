@@ -55,6 +55,52 @@
           ]
         }
       ]
+    },
+    {
+      "type": "panel",
+      "id": "halftonePreviewPanel",
+      "label": {
+        "default": "Halftone Preview"
+      },
+      "main": "preview.html",
+      "minimumSize": {
+        "width": 200,
+        "height": 160
+      },
+      "maximumSize": {
+        "width": 4000,
+        "height": 4000
+      },
+      "preferredDockedSize": {
+        "width": 400,
+        "height": 320
+      },
+      "preferredFloatingSize": {
+        "width": 760,
+        "height": 560
+      },
+      "icons": [
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/icon-23.png",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "darkest",
+            "dark",
+            "medium",
+            "lightest",
+            "light",
+            "all"
+          ],
+          "species": [
+            "generic"
+          ]
+        }
+      ]
     }
   ],
   "requiredPermissions": {

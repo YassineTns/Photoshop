@@ -262,8 +262,17 @@ async function loadSession() {
   return readJSONFile(SESSION_FILE, null);
 }
 
-async function saveSession(params) {
-  return writeJSONFile(SESSION_FILE, { version: SCHEMA_VERSION, params: sanitizeParams(params) });
+/**
+ * @param {object} params render parameters
+ * @param {object} [ui] window state (preview height and the like), stored
+ *        alongside but deliberately not part of the parameter schema
+ */
+async function saveSession(params, ui) {
+  return writeJSONFile(SESSION_FILE, {
+    version: SCHEMA_VERSION,
+    params: sanitizeParams(params),
+    ui: ui || undefined,
+  });
 }
 
 module.exports = {

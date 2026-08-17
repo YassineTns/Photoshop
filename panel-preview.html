@@ -8,10 +8,18 @@
 /*
  * Halftone Studio panel styling.
  *
- * The look is an instrument panel rather than a document: near-black surfaces, a
- * cyan-to-violet accent that only ever marks *live* state, numeric readouts in
- * monospace, and a hairline accent rail down any section you have opened. The
- * discipline is that colour means something - if it glows, it is on.
+ * DIRECTION: "noir editorial". Near-black, strictly flat surfaces; hierarchy
+ * comes from a step in background luminance and a 1px rule, never from a shadow.
+ * Titles are capitals with wide letter-spacing against lower-case body text at
+ * the same size, so the contrast is casing and spacing rather than scale. One
+ * accent - a deep red - rationed to the primary action and to live state, never
+ * used as a large flat area.
+ *
+ * PROVENANCE: this direction was proposed rather than sampled. omerta.fr, the
+ * reference, blocks automated access (robots.txt), so nothing here is measured
+ * from that site; it is a coherent art direction in the same register, tuned
+ * contrast-first for an 11px panel. Every value lives in the tokens below, so
+ * recalibrating against real screenshots is a token edit and nothing more.
  *
  * WRITTEN FOR UXP, NOT FOR A BROWSER
  * ----------------------------------
@@ -38,73 +46,83 @@
  * Flex longhand is used throughout rather than the shorthand, for the same
  * reason: it is the form UXP handles predictably.
  *
- * DECORATION THAT IS ALLOWED TO FAIL
- * ----------------------------------
- * Everything decorative here is chosen so that UXP ignoring it costs nothing.
- * A `box-shadow` that does not paint leaves a flat box; a `text-shadow` that
- * does not paint leaves plain text; a `transition` that does not run snaps
- * instead of sliding. Gradients are ALWAYS `background-image` layered over a
- * solid `background-color`, never the `background` shorthand - if UXP drops the
- * gradient the solid colour is still there, whereas a dropped shorthand would
- * leave the element transparent. Every accent surface therefore has a flat
- * fallback that is still legible and still the right colour.
+ * NOTHING HERE NEEDS TO DEGRADE
+ * -----------------------------
+ * The previous revision leaned on gradients and glows and had to be built so
+ * that UXP dropping them cost nothing. This direction is flat by intent: no
+ * gradients, no shadows, no glows anywhere. That removes the failure mode
+ * rather than handling it - there is no decoration left for UXP to ignore.
+ *
+ * TWO REDS, TOLD APART BY FORM
+ * ----------------------------
+ * `--accent` and `--danger` are both red and at 10px are indistinguishable by
+ * hue. They are separated by shape instead, and the rule is absolute: the
+ * accent appears ONLY as a filled area, and an error appears ONLY as text with
+ * a 1px rule and a tinted background, never filled. A third token,
+ * `--accent-on-dark-text`, exists because the accent red only reaches 3.35:1 on
+ * the dark background - fine behind white text, illegible as text itself - so
+ * red *text* uses the lighter value.
  */
 
 :root {
-  --bg: #0b0d13;
-  --bg-raised: #13161f;
-  --bg-raised-hi: #1b1f2c;
-  --bg-sunken: #06070b;
-  --border: #212636;
-  --border-strong: #333a52;
-  --text: #e9ecf6;
-  --text-dim: #8b93ad;
-  --text-faint: #5c6482;
-  --accent: #00e0ff;
-  --accent-2: #8a63ff;
-  --accent-hi: #5cf0ff;
-  --accent-soft: #12283a;
-  --accent-text: #04070e;
-  --glow: rgba(0, 224, 255, 0.4);
-  --glow-soft: rgba(0, 224, 255, 0.16);
-  --track: #1f2434;
-  --fill: #465070;
-  --danger: #ff5f6d;
-  --warn: #ffb340;
-  --ok: #2fe08a;
-  --radius: 5px;
-  --radius-sm: 3px;
-  --mono: "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  --bg: #0b0b0c;
+  --bg-raised: #16161a;
+  --bg-raised-hi: #1f1f24;
+  --bg-sunken: #070709;
+  --border: #2a2a30;
+  --border-strong: #3e3e46;
+  --text: #f2f1ee;
+  --text-dim: #a5a4a0;
+  --text-faint: #858480;
+  --accent: #c8102e;
+  --accent-2: #c9a227;
+  --accent-hi: #e11836;
+  --accent-soft: #2a1116;
+  --accent-text: #ffffff;
+  /* The accent is only 3.35:1 on --bg, so red *text* uses this instead. */
+  --accent-on-dark-text: #ff3b52;
+  --track: #2a2a30;
+  --fill: #55555e;
+  --danger: #ff6b6b;
+  --warn: #e8a33d;
+  --ok: #3dd68c;
+  --radius: 4px;
+  --radius-sm: 2px;
+  --font-ui: "Adobe Clean", -apple-system, "Segoe UI Variable Text", "Segoe UI",
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "Adobe Clean", -apple-system, "Segoe UI Variable Display",
+    "Segoe UI Semibold", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
 }
 
 /*
- * The light theme is the same instrument in daylight, not a different design:
- * the accents keep their identity but darken enough to stay legible on white,
- * and the glows shrink to almost nothing because a glow on white is just haze.
+ * The light theme is the same composition in daylight. The accent darkens
+ * rather than lightens - on white, a hover that gets brighter reads as fading -
+ * and `--accent-on-dark-text` collapses back onto the accent because the
+ * contrast problem it solves does not exist here.
  */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #eef0f5;
+    --bg: #fbfaf8;
     --bg-raised: #ffffff;
-    --bg-raised-hi: #f5f7fb;
-    --bg-sunken: #e2e6ee;
-    --border: #d3d8e4;
-    --border-strong: #b0b8cb;
-    --text: #10131c;
-    --text-dim: #545c73;
-    --text-faint: #838ba3;
-    --accent: #0077a8;
-    --accent-2: #5a3fd6;
-    --accent-hi: #005c86;
-    --accent-soft: #d5ecf6;
+    --bg-raised-hi: #f2f0ec;
+    --bg-sunken: #edebe6;
+    --border: #dcd9d2;
+    --border-strong: #b9b5ac;
+    --text: #111112;
+    --text-dim: #55534e;
+    --text-faint: #7c7a74;
+    --accent: #a50e26;
+    --accent-2: #8a6b12;
+    --accent-hi: #8a0b1f;
+    --accent-soft: #fbebee;
     --accent-text: #ffffff;
-    --glow: rgba(0, 119, 168, 0.22);
-    --glow-soft: rgba(0, 119, 168, 0.08);
-    --track: #cdd3e0;
-    --fill: #8992a8;
-    --danger: #c8353f;
-    --warn: #a4700d;
-    --ok: #16874f;
+    --accent-on-dark-text: #a50e26;
+    --track: #dcd9d2;
+    --fill: #8a8781;
+    --danger: #b3261e;
+    --warn: #8a5a00;
+    --ok: #146b3a;
   }
 }
 
@@ -123,7 +141,7 @@ body {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: "Adobe Clean", -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   font-size: 11px;
   -webkit-user-select: none;
   user-select: none;
@@ -163,10 +181,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 9px;
+  padding: 11px;
   background-color: var(--bg);
-  /* A cold pool of light at the top. Dropped by UXP, the flat colour remains. */
-  background-image: linear-gradient(180deg, var(--glow-soft), transparent 220px);
 }
 
 #head {
@@ -174,10 +190,10 @@ body {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  /* A hard line, so a control clipped at the top of the list reads as scrolled
+  /* A hard rule, so a control clipped at the top of the list reads as scrolled
      under the head rather than as a rendering fault. */
   border-bottom: 1px solid var(--border-strong);
-  padding-bottom: 9px;
+  padding-bottom: 12px;
 }
 
 #scroll {
@@ -191,7 +207,7 @@ body {
   flex-direction: column;
   /* Room for the scrollbar, so it never sits on top of a control. */
   padding-right: 2px;
-  padding-top: 9px;
+  padding-top: 14px;
 }
 
 /*
@@ -210,12 +226,15 @@ body {
  */
 #head > *,
 #scroll > * {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   flex-shrink: 0;
 }
 
 /* The head's own padding provides the gap; a trailing margin would double it. */
 #head > *:last-child { margin-bottom: 0; }
+
+/* Air between blocks, per the direction: generous vertically, tight inside. */
+#scroll > .preset-bar { margin-top: 6px; }
 
 /* ------------------------------------------------------------ brand */
 
@@ -223,38 +242,35 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  min-height: 24px;
-  margin-bottom: 7px;
+  min-height: 22px;
+  margin-bottom: 10px;
 }
 
 /*
- * The mark is a four-dot halftone ramp: the plugin's whole idea in 20 pixels.
+ * The mark is a four-dot halftone ramp: the plugin's whole idea in 18 pixels.
  * Four real divs, because pseudo-elements do not render here.
  */
 .brand-mark {
   position: relative;
-  width: 20px;
-  height: 20px;
-  min-width: 20px;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 9px;
-  border-radius: var(--radius-sm);
-  background-color: var(--accent-soft);
-  background-image: linear-gradient(135deg, var(--accent-soft), transparent);
-  box-shadow: 0 0 12px var(--glow-soft);
+  margin-right: 10px;
+  background-color: var(--accent);
 }
 
 .brand-dot {
   position: absolute;
   border-radius: 50%;
-  background-color: var(--accent);
+  background-color: var(--bg);
 }
 
-.brand-dot-1 { width: 8px; height: 8px; left: 2px; top: 2px; box-shadow: 0 0 6px var(--glow); }
-.brand-dot-2 { width: 5px; height: 5px; left: 12px; top: 4px; }
-.brand-dot-3 { width: 5px; height: 5px; left: 4px; top: 12px; }
-.brand-dot-4 { width: 3px; height: 3px; left: 13px; top: 13px; background-color: var(--accent-2); }
+.brand-dot-1 { width: 7px; height: 7px; left: 2px; top: 2px; }
+.brand-dot-2 { width: 5px; height: 5px; left: 11px; top: 3px; }
+.brand-dot-3 { width: 5px; height: 5px; left: 3px; top: 11px; }
+.brand-dot-4 { width: 3px; height: 3px; left: 12px; top: 12px; }
 
 .brand-name {
   flex-grow: 1;
@@ -263,21 +279,23 @@ body {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  font-family: var(--font-display);
 }
 
+/* Panel title: capitals at 0.12em, per the direction's spacing table. */
 .brand-name-a {
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   color: var(--text);
 }
 
 .brand-name-b {
   font-size: 12px;
-  font-weight: 300;
-  letter-spacing: 0.16em;
+  font-weight: 400;
+  letter-spacing: 0.12em;
   color: var(--text-faint);
-  margin-left: 5px;
+  margin-left: 6px;
 }
 
 /* Says which engine is running without opening the Mode section. */
@@ -285,27 +303,23 @@ body {
   flex-grow: 0;
   flex-shrink: 0;
   min-height: 17px;
-  padding: 1px 9px;
-  border-radius: 9px;
-  border: 1px solid var(--accent);
-  background-color: var(--accent-soft);
-  color: var(--accent);
-  font-family: var(--mono);
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background-color: var(--bg-raised);
+  color: var(--text-dim);
   font-size: 9px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   white-space: nowrap;
-  box-shadow: 0 0 10px var(--glow-soft);
 }
 
-/* A hairline that fades out: the accent leaking from under the header. */
+/* A rule, which in this direction is the structural device, not a decoration. */
 .rule {
   min-height: 1px;
   height: 1px;
-  margin-bottom: 9px;
+  margin-bottom: 12px;
   background-color: var(--border);
-  background-image: linear-gradient(90deg, var(--accent), var(--border) 45%, transparent);
-  opacity: 0.75;
 }
 
 /* ----------------------------------------------------------- status */
@@ -317,7 +331,7 @@ body {
   color: var(--text-dim);
   font-size: 10px;
   min-height: 14px;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 .status-dot {
@@ -328,12 +342,12 @@ body {
   background-color: var(--text-faint);
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 7px;
+  margin-right: 8px;
 }
 
-.status-dot.ready { background-color: var(--ok); box-shadow: 0 0 8px var(--ok); }
-.status-dot.busy { background-color: var(--accent); box-shadow: 0 0 8px var(--glow); }
-.status-dot.error { background-color: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.status-dot.ready { background-color: var(--ok); }
+.status-dot.busy { background-color: var(--accent-on-dark-text); }
+.status-dot.error { background-color: var(--danger); }
 
 #status-text {
   overflow: hidden;
@@ -350,30 +364,27 @@ body {
   position: relative;
   flex-shrink: 0;
   background-color: var(--bg-sunken);
-  /*
-   * A faint engineering grid behind an empty preview. If UXP ignores
-   * background-size the gradients simply paint once across the box, which is a
-   * near-invisible hairline rather than anything broken - and the moment an
-   * image loads it covers this entirely.
-   */
-  background-image: linear-gradient(var(--border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border) 1px, transparent 1px);
-  background-size: 18px 18px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   min-height: 112px;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  margin-bottom: 6px;
-  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.55);
+  margin-bottom: 0;
 }
 
+/*
+ * The frame may be rasterised for a larger detached window than this box, so
+ * both maxima are needed. With width and height both auto, the two constraints
+ * are applied proportionally and the aspect ratio survives.
+ */
 .preview {
   display: none;
   max-width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
 }
 
@@ -383,13 +394,12 @@ body {
   color: var(--text-faint);
   font-size: 10px;
   text-align: center;
-  padding: 30px 16px;
+  padding: 26px 16px;
   line-height: 1.8;
-  letter-spacing: 0.02em;
 }
 
 .preview-empty b {
-  color: var(--accent);
+  color: var(--text-dim);
   font-weight: 600;
 }
 
@@ -406,26 +416,47 @@ body {
   position: absolute;
   right: 6px;
   bottom: 6px;
-  background-color: rgba(4, 7, 14, 0.82);
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border-strong);
-  color: var(--accent);
+  color: var(--text-dim);
   font-family: var(--mono);
   font-size: 9px;
-  letter-spacing: 0.03em;
   padding: 2px 7px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
+
+/* Drag to resize the preview; double-click to go back to automatic. */
+.preview-grip {
+  min-height: 11px;
+  height: 11px;
+  margin-bottom: 10px;
+  cursor: ns-resize;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.grip-line {
+  width: 36px;
+  height: 2px;
+  min-height: 2px;
+  border-radius: 1px;
+  background-color: var(--border-strong);
+}
+
+.preview-grip:hover .grip-line { background-color: var(--text-faint); }
+.preview-grip.dragging .grip-line { background-color: var(--accent-on-dark-text); }
 
 /* --------------------------------------------------------- controls */
 
 .actions {
   display: flex;
   flex-direction: column;
-  padding: 8px;
+  padding: 11px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background-color: var(--bg-raised);
-  background-image: linear-gradient(180deg, var(--bg-raised-hi), var(--bg-raised));
 }
 
 .toolbar {
@@ -435,27 +466,33 @@ body {
 }
 
 .toolbar > * {
-  margin-right: 5px;
+  margin-right: 6px;
 }
 
 .toolbar > *:last-child { margin-right: 0; }
 
 .toolbar-tail { margin-top: 6px; }
 
+/*
+ * Outline by default, filled only for the primary action - the direction is
+ * explicit that two filled buttons never sit side by side. Capitals at 0.08em,
+ * per its spacing table.
+ */
 .btn {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
   min-height: 26px;
-  padding: 0 8px;
-  background-color: var(--bg-raised-hi);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.18));
+  padding: 0 6px;
+  background-color: transparent;
   color: var(--text);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-family: inherit;
-  letter-spacing: 0.02em;
+  font-size: 10px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -463,18 +500,14 @@ body {
 }
 
 .btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  box-shadow: 0 0 10px var(--glow-soft);
+  border-color: var(--text-dim);
+  color: var(--text);
 }
 
-.btn:active {
-  background-color: var(--bg-sunken);
-  background-image: none;
-}
+.btn:active { background-color: var(--bg-raised-hi); }
 
 .btn[disabled] {
-  opacity: 0.32;
+  opacity: 0.34;
   cursor: default;
   border-color: var(--border);
 }
@@ -482,73 +515,70 @@ body {
 .btn[disabled]:hover {
   border-color: var(--border);
   color: var(--text);
-  box-shadow: none;
 }
 
-/* The one place the two accents meet: the button that commits the render. */
 .btn-primary {
   background-color: var(--accent);
-  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   border-color: var(--accent);
   color: var(--accent-text);
   font-weight: 700;
-  letter-spacing: 0.06em;
-  box-shadow: 0 0 14px var(--glow);
 }
 
 .btn-primary:hover {
   background-color: var(--accent-hi);
   border-color: var(--accent-hi);
   color: var(--accent-text);
-  box-shadow: 0 0 20px var(--glow);
 }
 
 .btn-small {
   min-height: 22px;
-  font-size: 10px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
   color: var(--text-dim);
+  border-color: var(--border);
 }
+
+.btn-small:hover { border-color: var(--border-strong); }
 
 /*
  * Only on screen while something is running that can actually be stopped, so
  * it never offers a promise it cannot keep. The panel toggles the class.
+ *
+ * Outline and text, never filled: the direction reserves flat red for the
+ * accent, and an error or a stop is told apart from it by form rather than hue.
  */
 .btn-cancel { display: none; }
 
 .btn-cancel.show {
   display: block;
-  color: var(--danger);
-  border-color: var(--danger);
+  color: var(--accent-on-dark-text);
+  border-color: var(--accent-on-dark-text);
+  background-color: var(--accent-soft);
 }
 
 .btn-cancel.show:hover {
-  color: var(--danger);
-  border-color: var(--danger);
-  background-color: var(--bg-sunken);
-  box-shadow: 0 0 12px rgba(255, 95, 109, 0.25);
+  color: var(--accent-on-dark-text);
+  border-color: var(--accent-on-dark-text);
 }
 
 /* A parent row with nothing visible in it must not leave a gap behind. */
 .toolbar-hidden { display: none; }
 
 .progress {
-  min-height: 3px;
-  height: 3px;
+  min-height: 2px;
+  height: 2px;
   background-color: var(--track);
-  border-radius: 2px;
   overflow: hidden;
   opacity: 0;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 .progress.active { opacity: 1; }
 
 .progress-bar {
-  height: 3px;
+  height: 2px;
   width: 0%;
   background-color: var(--accent);
-  background-image: linear-gradient(90deg, var(--accent-2), var(--accent));
-  box-shadow: 0 0 8px var(--glow);
 }
 
 /* --------------------------------------------------------- sections */
@@ -567,9 +597,9 @@ body {
 .section {
   border: 1px solid var(--border);
   border-left: 2px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background-color: var(--bg-raised);
-  margin-bottom: 4px;
+  margin-bottom: 5px;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -577,14 +607,13 @@ body {
 .section.open {
   border-color: var(--border-strong);
   border-left-color: var(--accent);
-  box-shadow: 0 0 14px var(--glow-soft);
 }
 
 .section-head {
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 7px 9px;
+  padding: 8px 11px;
   cursor: pointer;
   min-height: 23px;
 }
@@ -593,25 +622,27 @@ body {
 
 /* A real glyph, because pseudo-elements and CSS triangles both fail in UXP. */
 .section-caret {
-  width: 10px;
-  min-width: 10px;
+  width: 9px;
+  min-width: 9px;
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 7px;
+  margin-right: 9px;
   font-size: 7px;
   line-height: 1;
   color: var(--text-faint);
 }
 
-.section.open .section-caret { color: var(--accent); }
+.section.open .section-caret { color: var(--accent-on-dark-text); }
 
+/* Section label: capitals at 0.18em, the widest step in the spacing table. */
 .section-title {
   flex-grow: 0;
   flex-shrink: 1;
   min-width: 0;
-  font-size: 10px;
+  font-family: var(--font-display);
+  font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--text-dim);
   overflow: hidden;
@@ -630,11 +661,10 @@ body {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  margin-left: 9px;
+  margin-left: 10px;
   text-align: right;
   font-family: var(--mono);
   font-size: 9px;
-  letter-spacing: 0.02em;
   color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -646,7 +676,7 @@ body {
 
 .section-body {
   display: none;
-  padding: 3px 9px 9px;
+  padding: 4px 11px 10px;
   border-top: 1px solid var(--border);
   background-color: var(--bg-raised);
 }
@@ -669,13 +699,14 @@ body {
 
 .ctl > *:last-child { margin-right: 0; }
 
+/* Body text: lower case, no letter-spacing at all, per the direction. */
 .ctl-label {
   width: 64px;
   min-width: 64px;
   flex-grow: 0;
   flex-shrink: 0;
   color: var(--text-dim);
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -698,60 +729,41 @@ body {
 .slider-track {
   position: relative;
   width: 100%;
-  height: 4px;
-  min-height: 4px;
+  height: 2px;
+  min-height: 2px;
   background-color: var(--track);
-  border-radius: 2px;
 }
 
 .slider-fill {
   position: absolute;
   left: 0;
   top: 0;
-  height: 4px;
+  height: 2px;
   background-color: var(--fill);
-  border-radius: 2px;
 }
 
-/* Only a moved slider glows: the accent marks state, it does not decorate. */
-.ctl.modified .slider-fill {
-  background-color: var(--accent);
-  background-image: linear-gradient(90deg, var(--accent-2), var(--accent));
-  box-shadow: 0 0 8px var(--glow-soft);
-}
+/* Only a moved slider takes the accent: colour marks state, it does not decorate. */
+.ctl.modified .slider-fill { background-color: var(--accent); }
 
 .slider-thumb {
   position: absolute;
-  top: -3px;
+  top: -4px;
   width: 10px;
   height: 10px;
   margin-left: -5px;
   border-radius: 50%;
   background-color: var(--text);
   border: 1px solid var(--bg);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
-.slider:hover .slider-thumb {
-  background-color: var(--accent-hi);
-  box-shadow: 0 0 10px var(--glow);
-}
-
-.slider.dragging .slider-thumb {
-  background-color: var(--accent);
-  box-shadow: 0 0 14px var(--glow);
-}
+.slider:hover .slider-thumb { background-color: var(--accent-on-dark-text); }
+.slider.dragging .slider-thumb { background-color: var(--accent); }
 
 /*
  * Explicit width: a UXP input asserts its own and would eat the slider.
  * Monospace, so the numbers stop dancing as they change - this is a readout.
  */
 .ctl-value {
-  /*
-   * Wide enough for the longest readout the schema can produce ("400 cells"),
-   * because monospace does not shrink to fit and a clipped number is worse than
-   * a wide field.
-   */
   width: 66px;
   min-width: 66px;
   flex-grow: 0;
@@ -769,12 +781,10 @@ body {
   user-select: text;
 }
 
-.ctl.modified .ctl-value { color: var(--accent); }
+.ctl.modified .ctl-value { color: var(--text); border-color: var(--border-strong); }
 .ctl-value:hover { border-color: var(--border-strong); }
-.ctl-value:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 8px var(--glow-soft);
-}
+/* Focus is a 1px accent rule, not a halo: the direction allows no shadows. */
+.ctl-value:focus { border-color: var(--accent-on-dark-text); }
 
 .ctl-reset {
   width: 14px;
@@ -794,7 +804,7 @@ body {
 }
 
 .ctl.modified .ctl-reset { visibility: visible; }
-.ctl-reset:hover { color: var(--accent); }
+.ctl-reset:hover { color: var(--accent-on-dark-text); }
 
 /* ----------------------------------------------------- segmented set */
 
@@ -816,15 +826,16 @@ body {
   min-width: 0;
   min-height: 22px;
   text-align: center;
-  background-color: var(--bg-raised-hi);
+  background-color: transparent;
   color: var(--text-dim);
   border: 0;
   border-right: 1px solid var(--border);
-  font-size: 10px;
-  letter-spacing: 0.03em;
+  font-size: 9px;
+  font-family: var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
   padding: 0 3px;
-  font-family: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -834,12 +845,11 @@ body {
 
 .seg-item.active {
   background-color: var(--accent);
-  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   color: var(--accent-text);
   font-weight: 700;
 }
 
-.seg-item:hover { color: var(--accent); background-color: var(--bg-raised); }
+.seg-item:hover { color: var(--text); background-color: var(--bg-raised-hi); }
 .seg-item.active:hover { color: var(--accent-text); background-color: var(--accent-hi); }
 
 /* ------------------------------------------------------------ chips */
@@ -860,56 +870,55 @@ body {
   color: var(--text-faint);
   font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  margin-top: 5px;
-  margin-bottom: 3px;
+  letter-spacing: 0.18em;
+  margin-top: 6px;
+  margin-bottom: 4px;
 }
 
+/* Squared off: the direction rules out pills, which break the register. */
 .algo-chip {
   min-height: 21px;
   padding: 0 8px;
-  background-color: var(--bg-sunken);
+  background-color: transparent;
   border: 1px solid var(--border);
-  border-radius: 11px;
+  border-radius: var(--radius-sm);
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
-  font-family: inherit;
+  font-family: var(--font-ui);
   white-space: nowrap;
 }
 
 .algo-chip:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 
 .algo-chip.active {
   background-color: var(--accent);
-  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   color: var(--accent-text);
   border-color: var(--accent);
-  font-weight: 700;
-  box-shadow: 0 0 12px var(--glow-soft);
+  font-weight: 600;
 }
 
 /* --------------------------------------------------------- toggle */
 
 .toggle {
-  width: 34px;
-  min-width: 34px;
+  width: 32px;
+  min-width: 32px;
   height: 18px;
   min-height: 18px;
   flex-grow: 0;
   flex-shrink: 0;
-  border-radius: 9px;
-  background-color: var(--track);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border-strong);
   position: relative;
   cursor: pointer;
   padding: 0;
 }
 
-.toggle:hover { border-color: var(--accent); }
+.toggle:hover { border-color: var(--text-faint); }
 
 .toggle-knob {
   position: absolute;
@@ -917,20 +926,17 @@ body {
   left: 2px;
   width: 12px;
   height: 12px;
-  border-radius: 6px;
   background-color: var(--text-faint);
 }
 
 .toggle.on {
   background-color: var(--accent);
-  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   border-color: var(--accent);
-  box-shadow: 0 0 12px var(--glow-soft);
 }
 
 .toggle.on .toggle-knob {
-  left: 18px;
-  background-color: #ffffff;
+  left: 16px;
+  background-color: var(--accent-text);
 }
 
 /* -------------------------------------------------------- palette */
@@ -963,17 +969,14 @@ body {
   padding: 0;
 }
 
-.swatch:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 10px var(--glow-soft);
-}
+.swatch:hover { border-color: var(--text); }
 
 .swatch-input {
   width: 70px;
   min-width: 70px;
   min-height: 22px;
   background-color: var(--bg-sunken);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--accent-on-dark-text);
   border-radius: var(--radius-sm);
   color: var(--text);
   font-family: var(--mono);
@@ -983,23 +986,22 @@ body {
   user-select: text;
 }
 
+/* The one place gold earns its keep: a pinned swatch is a "premium" detail. */
 .swatch-lock {
   position: absolute;
-  right: 3px;
-  bottom: 3px;
+  right: 2px;
+  bottom: 2px;
   width: 7px;
   height: 7px;
-  border-radius: 4px;
-  background-color: var(--accent);
+  background-color: var(--accent-2);
   border: 1px solid var(--bg-sunken);
-  box-shadow: 0 0 6px var(--glow);
 }
 
 .palette-actions {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 .palette-actions > * {
@@ -1011,7 +1013,9 @@ body {
   color: var(--text-faint);
   font-size: 9px;
   line-height: 1.6;
-  padding: 5px 0 2px;
+  padding: 6px 0 2px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
 }
 
 /* --------------------------------------------------------- presets */
@@ -1020,8 +1024,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background-color: var(--bg-raised);
-  background-image: linear-gradient(180deg, var(--bg-raised-hi), var(--bg-raised));
-  padding: 8px;
+  padding: 11px;
   display: flex;
   flex-direction: column;
 }
@@ -1030,28 +1033,27 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--text-faint);
-  margin-bottom: 6px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
 }
 
 /* A real element: the accent tick a ::before would otherwise have drawn. */
 .bar-tick {
-  width: 3px;
+  width: 2px;
   height: 9px;
-  min-width: 3px;
+  min-width: 2px;
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 7px;
-  border-radius: 2px;
+  margin-right: 8px;
   background-color: var(--accent);
-  box-shadow: 0 0 6px var(--glow);
 }
 
-.preset-row { margin-bottom: 4px; }
+.preset-row { margin-bottom: 5px; }
 
 .preset-list {
   display: flex;
@@ -1066,45 +1068,47 @@ body {
 
 .preset-chip {
   min-height: 22px;
-  padding: 0 10px;
-  background-color: var(--bg-sunken);
-  border: 1px solid var(--border-strong);
-  border-radius: 11px;
+  padding: 0 9px;
+  background-color: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
-  font-family: inherit;
+  font-family: var(--font-ui);
   white-space: nowrap;
 }
 
 .preset-chip:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  box-shadow: 0 0 10px var(--glow-soft);
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 
 .preset-chip.active {
   background-color: var(--accent);
-  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   color: var(--accent-text);
   border-color: var(--accent);
-  font-weight: 700;
-  box-shadow: 0 0 14px var(--glow-soft);
+  font-weight: 600;
 }
 
 .preset-chip.user { border-style: dashed; }
 
 /* ---------------------------------------------------------- notice */
 
+/*
+ * Never a filled area, whatever it is reporting. Flat red belongs to the
+ * accent alone; a message is a rule plus a tint plus text, so the two reds are
+ * told apart by form rather than by hue at 10px.
+ */
 .notice {
   display: none;
-  padding: 8px 10px;
-  border-radius: var(--radius);
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
   font-size: 10px;
   line-height: 1.6;
   border: 1px solid var(--border);
-  border-left-width: 3px;
-  border-left-color: var(--accent);
+  border-left-width: 2px;
+  border-left-color: var(--border-strong);
   background-color: var(--bg-raised);
   color: var(--text-dim);
   -webkit-user-select: text;
@@ -1114,7 +1118,9 @@ body {
 .notice.show { display: block; }
 
 .notice.error {
+  border-color: var(--danger);
   border-left-color: var(--danger);
+  background-color: var(--accent-soft);
   color: var(--text);
 }
 
@@ -1122,6 +1128,62 @@ body {
   border-left-color: var(--warn);
   color: var(--text);
 }
+
+/* ------------------------------------------- detached preview panel */
+
+/*
+ * The second entrypoint. It is nothing but a frame in a box, so it gets no
+ * chrome at all - anything else would be competing with the picture, which is
+ * the only reason the window exists.
+ */
+#detached {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 8px;
+  background-color: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.detached-wrap {
+  position: relative;
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0;
+  min-height: 0;
+  background-color: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.detached-img {
+  display: none;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+}
+
+.detached-img.visible { display: block; }
+
+.detached-empty {
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: center;
+  padding: 24px;
+  line-height: 1.8;
+  max-width: 320px;
+}
+
+.detached-empty.hidden { display: none; }
 
 </style>
 </head>
@@ -1155,6 +1217,9 @@ body {
           </div>
           <img id="preview" class="preview" />
           <div id="preview-badge" class="preview-badge"></div>
+        </div>
+        <div id="preview-grip" class="preview-grip" title="Drag to resize the preview, double-click to reset">
+          <div class="grip-line"></div>
         </div>
 
         <div id="status" class="status">
@@ -9066,8 +9131,17 @@ async function loadSession() {
   return readJSONFile(SESSION_FILE, null);
 }
 
-async function saveSession(params) {
-  return writeJSONFile(SESSION_FILE, { version: SCHEMA_VERSION, params: sanitizeParams(params) });
+/**
+ * @param {object} params render parameters
+ * @param {object} [ui] window state (preview height and the like), stored
+ *        alongside but deliberately not part of the parameter schema
+ */
+async function saveSession(params, ui) {
+  return writeJSONFile(SESSION_FILE, {
+    version: SCHEMA_VERSION,
+    params: sanitizeParams(params),
+    ui: ui || undefined,
+  });
 }
 
 module.exports = {
@@ -10166,6 +10240,147 @@ module.exports = {
 
 });
 
+window.__define("src/ui/framebus.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * The channel between the controls panel and the detached preview panel.
+ *
+ * A UXP plugin has one JavaScript realm but one document per panel, so the two
+ * panels cannot see each other's DOM and `window` is not shared. What they do
+ * share is the module registry: `require("./framebus.js")` from either document
+ * returns the same object. That single shared object is the entire transport -
+ * no messaging API, no serialisation, no polling.
+ *
+ * The bus keeps the last frame as well as the subscriber list, so a preview
+ * panel opened *after* a render still has something to show immediately instead
+ * of sitting blank until the next slider move.
+ *
+ * If a host build turns out not to share modules between panel documents, the
+ * detached panel simply never receives a frame; it says so on screen rather
+ * than showing an empty box, and the docked panel is unaffected.
+ */
+
+/** @typedef {{url: string, width: number, height: number, badge: string}} Frame */
+
+/** @type {Frame|null} */
+let current = null;
+/** @type {Array<(f: Frame|null) => void>} */
+let listeners = [];
+/** Set by the detached panel so the controls panel can say whether it is open. */
+let attached = 0;
+/** The size the detached panel would like frames rendered at, if it is open. */
+let wanted = null;
+/** @type {((s: {width:number,height:number}|null) => void)|null} */
+let onWanted = null;
+
+/**
+ * Publish a rendered frame. Cheap enough to call on every preview tick: it is
+ * one object assignment plus a callback per listener, and the data URL has
+ * already been built for the docked preview anyway.
+ * @param {Frame|null} frame
+ */
+function publish(frame) {
+  current = frame;
+  for (let i = 0; i < listeners.length; i++) {
+    try {
+      listeners[i](frame);
+    } catch (e) {
+      // One broken listener must not stop the others, and must never take the
+      // render down with it.
+    }
+  }
+}
+
+/**
+ * Listen for frames. Fires immediately with the current frame if there is one.
+ * @param {(f: Frame|null) => void} fn
+ * @returns {() => void} unsubscribe
+ */
+function subscribe(fn) {
+  listeners.push(fn);
+  if (current) {
+    try {
+      fn(current);
+    } catch (e) {
+      /* as above */
+    }
+  }
+  return () => {
+    listeners = listeners.filter((l) => l !== fn);
+  };
+}
+
+/** @returns {Frame|null} the most recent frame, if any. */
+function latest() {
+  return current;
+}
+
+/** The detached panel registers itself so the controls panel can report it. */
+function setAttached(isOpen) {
+  attached = isOpen ? attached + 1 : Math.max(0, attached - 1);
+  if (!attached) requestSize(null);
+}
+
+/**
+ * The detached panel says how big it is; the controls panel renders for the
+ * larger of the two windows.
+ *
+ * Without this the detached view is only *bigger*, not sharper: it would be
+ * showing a frame rasterised for a 360px panel, scaled up. With it, floating the
+ * preview onto a second monitor actually buys resolution.
+ *
+ * @param {{width:number,height:number}|null} size
+ */
+function requestSize(size) {
+  wanted = size;
+  if (onWanted) {
+    try {
+      onWanted(size);
+    } catch (e) {
+      /* the controls panel will pick it up on the next tick regardless */
+    }
+  }
+}
+
+/** @returns {{width:number,height:number}|null} */
+function requestedSize() {
+  return attached ? wanted : null;
+}
+
+/** The controls panel listens so it can re-render at once on a resize. */
+function onSizeRequest(fn) {
+  onWanted = fn;
+}
+
+/** @returns {boolean} whether a detached preview panel is listening. */
+function isAttached() {
+  return attached > 0;
+}
+
+/** Test seam: drop every listener and the retained frame. */
+function reset() {
+  current = null;
+  listeners = [];
+  attached = 0;
+  wanted = null;
+  onWanted = null;
+}
+
+module.exports = {
+  publish,
+  subscribe,
+  latest,
+  setAttached,
+  isAttached,
+  requestSize,
+  requestedSize,
+  onSizeRequest,
+  reset,
+};
+
+});
+
 window.__define("src/photoshop/files.js", function (module, exports, require) {
 "use strict";
 
@@ -10263,6 +10478,7 @@ const META = require("../photoshop/metadata.js");
 const IM = require("../photoshop/imaging.js");
 const BATCH = require("../photoshop/batch.js");
 const SWATCH = require("../photoshop/swatches.js");
+const BUS = require("./framebus.js");
 const FILES = require("../photoshop/files.js");
 
 const PREVIEW_MAX = 460;
@@ -10301,6 +10517,13 @@ class Panel {
     this._sourceURL = null;
     this._renderedSrc = null;
     this._cancel = false;
+    /**
+     * Window state, as opposed to render parameters. It is persisted with the
+     * session but deliberately kept out of params.js and out of presets: how
+     * tall you like the preview box is a property of your panel, not of the
+     * halftone, and a preset that resized your panel would be obnoxious.
+     */
+    this.ui = { previewHeight: null };
   }
 
   /* ---------------------------------------------------------------- */
@@ -10329,6 +10552,7 @@ class Panel {
         this.params = sanitizeParams(session.params);
         this.rebuild();
       }
+      if (session && session.ui) this.ui = sanitizeUI(session.ui);
       this.userPresets = await META.loadUserPresets();
       this.renderPresetChips();
     } catch (e) {
@@ -10336,6 +10560,10 @@ class Panel {
     }
 
     this.showCancel(false);
+    this.bindPreviewGrip();
+    this.applyPreviewHeight();
+    // A detached preview panel resizing means we should re-rasterise for it.
+    BUS.onSizeRequest(() => this.schedulePreview());
     this.watchSelection();
     this.refreshContext();
   }
@@ -10669,17 +10897,12 @@ class Panel {
     });
   }
 
-  previewSize() {
+  /** The size the docked preview box can show, after the grip and the cap. */
+  dockedPreviewSize() {
     const src = this.engine.source;
     const wrap = this.$("preview-wrap");
     const availW = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
-
-    const app = this.$("app");
-    const panelH = (app && app.clientHeight) || 720;
-    const availH = Math.max(
-      PREVIEW_HEIGHT_MIN,
-      Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION))
-    );
+    const availH = this.previewBoxHeight();
 
     // Fit inside both, never upscale: an image smaller than the panel is shown
     // at its own size rather than blown up into a blur.
@@ -10690,8 +10913,45 @@ class Panel {
     };
   }
 
+  /** How tall the docked preview box is: the user's drag, or the default cap. */
+  previewBoxHeight() {
+    if (this.ui.previewHeight) return this.ui.previewHeight;
+    const app = this.$("app");
+    const panelH = (app && app.clientHeight) || 720;
+    return Math.max(
+      PREVIEW_HEIGHT_MIN,
+      Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION))
+    );
+  }
+
+  /**
+   * The size to actually rasterise at.
+   *
+   * Normally that is the docked box. But when the detached preview panel is
+   * open it asks for its own, larger size, and we render for whichever window
+   * is bigger - otherwise the detached view would only be *bigger*, showing a
+   * frame rasterised for a 360px panel and scaled up, rather than sharper.
+   * The docked <img> caps itself with max-width/max-height, so it simply
+   * displays the larger frame smaller.
+   */
+  previewSize() {
+    const docked = this.dockedPreviewSize();
+    const want = BUS.requestedSize();
+    if (!want) return docked;
+    const src = this.engine.source;
+    const s = Math.min(1, want.width / src.width, want.height / src.height);
+    const w = Math.max(1, Math.round(src.width * s));
+    if (w <= docked.width) return docked;
+    return { width: w, height: Math.max(1, Math.round(src.height * s)) };
+  }
+
   drawPreview() {
     if (!this.engine.hasSource()) return;
+    // drawPreview is now also driven by the frame bus, so it can be reached
+    // from another panel's callback. Confirm this document is still standing
+    // rather than throwing out of someone else's stack.
+    const img = this.$("preview");
+    if (!img) return;
     const t0 = Date.now();
     try {
       const size = this.previewSize();
@@ -10699,8 +10959,9 @@ class Panel {
         this.params,
         Object.assign({ maxDitherGrid: PREVIEW_DITHER_GRID }, size)
       );
-      this.$("preview").src = toDataURL(out.data, out.width, out.height);
-      this.$("preview").className = "preview visible";
+      const url = toDataURL(out.data, out.width, out.height);
+      img.src = url;
+      img.className = "preview visible";
       this.$("preview-empty").className = "preview-empty hidden";
       this.lastFrameMs = Date.now() - t0;
       const unit = this.params.mode === "dither" ? "px" : "cells";
@@ -10709,6 +10970,9 @@ class Panel {
         `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
         (out.exact ? "" : " · approx");
       this.badge(this._lastBadge);
+      // Hand the same frame to the detached panel, if one is open. One object
+      // and one callback: the data URL was built for the docked <img> anyway.
+      BUS.publish({ url, width: out.width, height: out.height, badge: this._lastBadge });
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
       this.notice(`Preview failed: ${e.message}`, "error");
@@ -10828,6 +11092,88 @@ class Panel {
     );
   }
 
+  /* ---------------------------------------------------- preview size */
+
+  /**
+   * Drag the bar under the preview to resize it; double-click to go back to
+   * the automatic size.
+   *
+   * Worth saying plainly, because it is the first thing anyone tries: in a
+   * 340px-wide panel a landscape image is limited by the panel's *width*, so
+   * making the box taller gains nothing. It helps for portrait artwork, and it
+   * is genuinely useful in the other direction - dragging it small buys back
+   * space for the controls. To see a halftone properly large, open the
+   * "Halftone Preview" panel and float it.
+   */
+  bindPreviewGrip() {
+    const grip = this.$("preview-grip");
+    if (!grip) return;
+    let dragging = false;
+    let startY = 0;
+    let startH = 0;
+
+    grip.addEventListener("pointerdown", (e) => {
+      if (!this.engine.hasSource()) return;
+      dragging = true;
+      startY = e.clientY;
+      startH = this.previewBoxHeight();
+      grip.className = "preview-grip dragging";
+      try {
+        grip.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* capture is an optimisation, not a requirement */
+      }
+      e.preventDefault();
+    });
+
+    grip.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const app = this.$("app");
+      const panelH = (app && app.clientHeight) || 720;
+      // Never more than 70% of the panel: past that there is nothing left to
+      // scroll and the pinned preview has eaten the thing it exists to serve.
+      const max = Math.max(PREVIEW_HEIGHT_MIN, Math.round(panelH * 0.7));
+      this.ui.previewHeight = clampInt(startH + (e.clientY - startY), PREVIEW_HEIGHT_MIN, max);
+      this.applyPreviewHeight();
+      this.drawPreview();
+    });
+
+    const end = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      grip.className = "preview-grip";
+      try {
+        grip.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        /* ignore */
+      }
+      this.persistSession();
+    };
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+
+    grip.addEventListener("dblclick", () => {
+      this.ui.previewHeight = null;
+      this.applyPreviewHeight();
+      this.drawPreview();
+      this.persistSession();
+    });
+  }
+
+  /**
+   * Pin the box to the height the user dragged it to - and only then.
+   *
+   * Left to itself the box shrink-wraps the frame, so a landscape image sits in
+   * a landscape box with no dead space. Forcing a height unconditionally put
+   * black bands above and below every render, which is a worse default than the
+   * one it was trying to stabilise.
+   */
+  applyPreviewHeight() {
+    const wrap = this.$("preview-wrap");
+    if (!wrap) return;
+    wrap.style.height = this.ui.previewHeight ? this.ui.previewHeight + "px" : "";
+  }
+
   /* ------------------------------------------------------ SVG export */
 
   /**
@@ -10893,12 +11239,14 @@ class Panel {
       this._renderedSrc = img.src;
       img.src = this.sourceDataURL();
       this.badge("original");
+      BUS.publish({ url: img.src, width: 0, height: 0, badge: "original" });
     };
     const hide = () => {
       if (!this._renderedSrc) return;
       // Restore rather than re-render: nothing can have changed while the
       // button was held, and a re-render would race a pending preview tick.
       this.$("preview").src = this._renderedSrc;
+      BUS.publish({ url: this._renderedSrc, width: 0, height: 0, badge: this._lastBadge });
       this._renderedSrc = null;
       this.badge(this._lastBadge);
     };
@@ -11095,7 +11443,7 @@ class Panel {
 
   async persistSession() {
     try {
-      await META.saveSession(this.params);
+      await META.saveSession(this.params, this.ui);
     } catch (e) {
       /* best effort */
     }
@@ -11235,6 +11583,25 @@ for (const a of ALGORITHMS) {
   ALGORITHM_FAMILY_OF[a.id] = a.family;
 }
 
+/** Clamp to an integer inside [lo, hi]. */
+function clampInt(v, lo, hi) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return lo;
+  return n < lo ? lo : n > hi ? hi : n;
+}
+
+/**
+ * Window state read back from disk is as untrusted as anything else on disk:
+ * a stale or hand-edited value must not be able to wedge the preview at 4000px.
+ */
+function sanitizeUI(raw) {
+  const out = { previewHeight: null };
+  if (raw && raw.previewHeight) {
+    out.previewHeight = clampInt(raw.previewHeight, PREVIEW_HEIGHT_MIN, 2000);
+  }
+  return out;
+}
+
 function padHexes(hexes, count) {
   const out = (hexes || []).slice(0, count);
   while (out.length < count) out.push(out.length ? out[out.length - 1] : "#808080");
@@ -11242,6 +11609,112 @@ function padHexes(hexes, count) {
 }
 
 module.exports = { Panel };
+
+});
+
+window.__define("src/ui/previewpanel.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * The detached preview panel.
+ *
+ * A second entrypoint whose entire job is to show the frame the controls panel
+ * is producing, as large as its own window allows. Float it, drag it to a second
+ * monitor, size it to taste - the docked panel keeps the sliders, this keeps the
+ * picture.
+ *
+ * It deliberately owns no state and drives no rendering. Everything arrives
+ * through the frame bus already rendered, which means it cannot disagree with
+ * the docked preview and cannot cost anything on a slider drag beyond setting
+ * one `src`.
+ *
+ * The size it displays at is its own: the docked panel renders at its own width,
+ * so on a wide float this image is being scaled up by the layer engine rather
+ * than re-rendered. `requestSize` tells the controls panel how big this window
+ * is so it can render for the larger of the two instead - which is what makes
+ * the detached view genuinely sharper rather than merely bigger.
+ */
+
+const BUS = require("./framebus.js");
+
+/** Never ask the controls panel for more than this on the long edge. */
+const MAX_REQUEST = 1600;
+
+class PreviewPanel {
+  constructor(root) {
+    this.root = root || document;
+    this._unsubscribe = null;
+    this._resizeTimer = null;
+  }
+
+  init() {
+    this.$ = (id) => this.root.getElementById(id);
+    BUS.setAttached(true);
+
+    this._unsubscribe = BUS.subscribe((frame) => this.show(frame));
+    if (!BUS.latest()) this.waiting();
+
+    // Ask for a render matched to this window whenever it changes size, so a
+    // large float shows a large render rather than a magnified small one.
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("resize", () => this.onResize());
+    }
+    this.onResize();
+  }
+
+  dispose() {
+    if (this._unsubscribe) this._unsubscribe();
+    this._unsubscribe = null;
+    BUS.setAttached(false);
+  }
+
+  onResize() {
+    // Debounced: a drag-resize fires continuously, and each request makes the
+    // controls panel re-rasterise.
+    if (this._resizeTimer) clearTimeout(this._resizeTimer);
+    this._resizeTimer = setTimeout(() => {
+      this._resizeTimer = null;
+      const wrap = this.$("detached-wrap");
+      if (!wrap) return;
+      const w = Math.min(MAX_REQUEST, Math.max(120, wrap.clientWidth || 0));
+      const h = Math.min(MAX_REQUEST, Math.max(120, wrap.clientHeight || 0));
+      BUS.requestSize({ width: w, height: h });
+    }, 120);
+  }
+
+  waiting() {
+    const empty = this.$("detached-empty");
+    const img = this.$("detached-img");
+    if (img) img.className = "detached-img";
+    if (empty) {
+      empty.className = "detached-empty";
+      empty.textContent =
+        "Waiting for Halftone Studio. Open that panel, select a layer and press Load Layer.";
+    }
+  }
+
+  /** @param {{url:string,width:number,height:number,badge:string}|null} frame */
+  show(frame) {
+    if (!frame || !frame.url) {
+      this.waiting();
+      return;
+    }
+    const img = this.$("detached-img");
+    const empty = this.$("detached-empty");
+    const badge = this.$("detached-badge");
+    if (img) {
+      img.src = frame.url;
+      img.className = "detached-img visible";
+    }
+    if (empty) empty.className = "detached-empty hidden";
+    if (badge) {
+      badge.textContent = frame.badge || "";
+      badge.className = "preview-badge" + (frame.badge ? " show" : "");
+    }
+  }
+}
+
+module.exports = { PreviewPanel };
 
 });
 

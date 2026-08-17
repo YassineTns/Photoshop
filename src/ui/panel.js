@@ -36,6 +36,7 @@ const META = require("../photoshop/metadata.js");
 const IM = require("../photoshop/imaging.js");
 const BATCH = require("../photoshop/batch.js");
 const SWATCH = require("../photoshop/swatches.js");
+const BUS = require("./framebus.js");
 const FILES = require("../photoshop/files.js");
 
 const PREVIEW_MAX = 460;
@@ -74,6 +75,13 @@ class Panel {
     this._sourceURL = null;
     this._renderedSrc = null;
     this._cancel = false;
+    /**
+     * Window state, as opposed to render parameters. It is persisted with the
+     * session but deliberately kept out of params.js and out of presets: how
+     * tall you like the preview box is a property of your panel, not of the
+     * halftone, and a preset that resized your panel would be obnoxious.
+     */
+    this.ui = { previewHeight: null };
   }
 
   /* ---------------------------------------------------------------- */
@@ -102,6 +110,7 @@ class Panel {
         this.params = sanitizeParams(session.params);
         this.rebuild();
       }
+      if (session && session.ui) this.ui = sanitizeUI(session.ui);
       this.userPresets = await META.loadUserPresets();
       this.renderPresetChips();
     } catch (e) {
@@ -109,6 +118,10 @@ class Panel {
     }
 
     this.showCancel(false);
+    this.bindPreviewGrip();
+    this.applyPreviewHeight();
+    // A detached preview panel resizing means we should re-rasterise for it.
+    BUS.onSizeRequest(() => this.schedulePreview());
     this.watchSelection();
     this.refreshContext();
   }
@@ -442,17 +455,12 @@ class Panel {
     });
   }
 
-  previewSize() {
+  /** The size the docked preview box can show, after the grip and the cap. */
+  dockedPreviewSize() {
     const src = this.engine.source;
     const wrap = this.$("preview-wrap");
     const availW = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
-
-    const app = this.$("app");
-    const panelH = (app && app.clientHeight) || 720;
-    const availH = Math.max(
-      PREVIEW_HEIGHT_MIN,
-      Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION))
-    );
+    const availH = this.previewBoxHeight();
 
     // Fit inside both, never upscale: an image smaller than the panel is shown
     // at its own size rather than blown up into a blur.
@@ -463,8 +471,45 @@ class Panel {
     };
   }
 
+  /** How tall the docked preview box is: the user's drag, or the default cap. */
+  previewBoxHeight() {
+    if (this.ui.previewHeight) return this.ui.previewHeight;
+    const app = this.$("app");
+    const panelH = (app && app.clientHeight) || 720;
+    return Math.max(
+      PREVIEW_HEIGHT_MIN,
+      Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION))
+    );
+  }
+
+  /**
+   * The size to actually rasterise at.
+   *
+   * Normally that is the docked box. But when the detached preview panel is
+   * open it asks for its own, larger size, and we render for whichever window
+   * is bigger - otherwise the detached view would only be *bigger*, showing a
+   * frame rasterised for a 360px panel and scaled up, rather than sharper.
+   * The docked <img> caps itself with max-width/max-height, so it simply
+   * displays the larger frame smaller.
+   */
+  previewSize() {
+    const docked = this.dockedPreviewSize();
+    const want = BUS.requestedSize();
+    if (!want) return docked;
+    const src = this.engine.source;
+    const s = Math.min(1, want.width / src.width, want.height / src.height);
+    const w = Math.max(1, Math.round(src.width * s));
+    if (w <= docked.width) return docked;
+    return { width: w, height: Math.max(1, Math.round(src.height * s)) };
+  }
+
   drawPreview() {
     if (!this.engine.hasSource()) return;
+    // drawPreview is now also driven by the frame bus, so it can be reached
+    // from another panel's callback. Confirm this document is still standing
+    // rather than throwing out of someone else's stack.
+    const img = this.$("preview");
+    if (!img) return;
     const t0 = Date.now();
     try {
       const size = this.previewSize();
@@ -472,8 +517,9 @@ class Panel {
         this.params,
         Object.assign({ maxDitherGrid: PREVIEW_DITHER_GRID }, size)
       );
-      this.$("preview").src = toDataURL(out.data, out.width, out.height);
-      this.$("preview").className = "preview visible";
+      const url = toDataURL(out.data, out.width, out.height);
+      img.src = url;
+      img.className = "preview visible";
       this.$("preview-empty").className = "preview-empty hidden";
       this.lastFrameMs = Date.now() - t0;
       const unit = this.params.mode === "dither" ? "px" : "cells";
@@ -482,6 +528,9 @@ class Panel {
         `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
         (out.exact ? "" : " · approx");
       this.badge(this._lastBadge);
+      // Hand the same frame to the detached panel, if one is open. One object
+      // and one callback: the data URL was built for the docked <img> anyway.
+      BUS.publish({ url, width: out.width, height: out.height, badge: this._lastBadge });
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
       this.notice(`Preview failed: ${e.message}`, "error");
@@ -601,6 +650,88 @@ class Panel {
     );
   }
 
+  /* ---------------------------------------------------- preview size */
+
+  /**
+   * Drag the bar under the preview to resize it; double-click to go back to
+   * the automatic size.
+   *
+   * Worth saying plainly, because it is the first thing anyone tries: in a
+   * 340px-wide panel a landscape image is limited by the panel's *width*, so
+   * making the box taller gains nothing. It helps for portrait artwork, and it
+   * is genuinely useful in the other direction - dragging it small buys back
+   * space for the controls. To see a halftone properly large, open the
+   * "Halftone Preview" panel and float it.
+   */
+  bindPreviewGrip() {
+    const grip = this.$("preview-grip");
+    if (!grip) return;
+    let dragging = false;
+    let startY = 0;
+    let startH = 0;
+
+    grip.addEventListener("pointerdown", (e) => {
+      if (!this.engine.hasSource()) return;
+      dragging = true;
+      startY = e.clientY;
+      startH = this.previewBoxHeight();
+      grip.className = "preview-grip dragging";
+      try {
+        grip.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* capture is an optimisation, not a requirement */
+      }
+      e.preventDefault();
+    });
+
+    grip.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const app = this.$("app");
+      const panelH = (app && app.clientHeight) || 720;
+      // Never more than 70% of the panel: past that there is nothing left to
+      // scroll and the pinned preview has eaten the thing it exists to serve.
+      const max = Math.max(PREVIEW_HEIGHT_MIN, Math.round(panelH * 0.7));
+      this.ui.previewHeight = clampInt(startH + (e.clientY - startY), PREVIEW_HEIGHT_MIN, max);
+      this.applyPreviewHeight();
+      this.drawPreview();
+    });
+
+    const end = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      grip.className = "preview-grip";
+      try {
+        grip.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        /* ignore */
+      }
+      this.persistSession();
+    };
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+
+    grip.addEventListener("dblclick", () => {
+      this.ui.previewHeight = null;
+      this.applyPreviewHeight();
+      this.drawPreview();
+      this.persistSession();
+    });
+  }
+
+  /**
+   * Pin the box to the height the user dragged it to - and only then.
+   *
+   * Left to itself the box shrink-wraps the frame, so a landscape image sits in
+   * a landscape box with no dead space. Forcing a height unconditionally put
+   * black bands above and below every render, which is a worse default than the
+   * one it was trying to stabilise.
+   */
+  applyPreviewHeight() {
+    const wrap = this.$("preview-wrap");
+    if (!wrap) return;
+    wrap.style.height = this.ui.previewHeight ? this.ui.previewHeight + "px" : "";
+  }
+
   /* ------------------------------------------------------ SVG export */
 
   /**
@@ -666,12 +797,14 @@ class Panel {
       this._renderedSrc = img.src;
       img.src = this.sourceDataURL();
       this.badge("original");
+      BUS.publish({ url: img.src, width: 0, height: 0, badge: "original" });
     };
     const hide = () => {
       if (!this._renderedSrc) return;
       // Restore rather than re-render: nothing can have changed while the
       // button was held, and a re-render would race a pending preview tick.
       this.$("preview").src = this._renderedSrc;
+      BUS.publish({ url: this._renderedSrc, width: 0, height: 0, badge: this._lastBadge });
       this._renderedSrc = null;
       this.badge(this._lastBadge);
     };
@@ -868,7 +1001,7 @@ class Panel {
 
   async persistSession() {
     try {
-      await META.saveSession(this.params);
+      await META.saveSession(this.params, this.ui);
     } catch (e) {
       /* best effort */
     }
@@ -1006,6 +1139,25 @@ const ALGORITHM_FAMILY_OF = {};
 for (const a of ALGORITHMS) {
   ALGORITHM_LABELS[a.id] = a.label;
   ALGORITHM_FAMILY_OF[a.id] = a.family;
+}
+
+/** Clamp to an integer inside [lo, hi]. */
+function clampInt(v, lo, hi) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return lo;
+  return n < lo ? lo : n > hi ? hi : n;
+}
+
+/**
+ * Window state read back from disk is as untrusted as anything else on disk:
+ * a stale or hand-edited value must not be able to wedge the preview at 4000px.
+ */
+function sanitizeUI(raw) {
+  const out = { previewHeight: null };
+  if (raw && raw.previewHeight) {
+    out.previewHeight = clampInt(raw.previewHeight, PREVIEW_HEIGHT_MIN, 2000);
+  }
+  return out;
 }
 
 function padHexes(hexes, count) {
