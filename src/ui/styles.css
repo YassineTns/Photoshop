@@ -111,8 +111,23 @@ body {
   padding: 8px;
 }
 
+/*
+ * Nothing in the scroll container may be compressed.
+ *
+ * `#app` is a column flex container with a definite height, so by default every
+ * child is shrinkable - and they were shrunk, squeezing each section down and
+ * clipping its rows against `overflow: hidden`. Worse, UXP paints native inputs
+ * in a layer that ignores that clip, so the sliders vanished while their number
+ * fields floated loose over the next section.
+ *
+ * A browser hides this: CSS gives flex items an automatic minimum size, so they
+ * refuse to shrink below their content. UXP does not implement that, so the
+ * floor has to be stated. With shrinking off, content simply overflows and the
+ * container scrolls, which is the whole point of it.
+ */
 #app > * {
   margin-bottom: 8px;
+  flex-shrink: 0;
 }
 
 /* ----------------------------------------------------------- status */
@@ -154,6 +169,7 @@ body {
 
 .preview-wrap {
   position: relative;
+  flex-shrink: 0;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -265,14 +281,15 @@ body {
 .sections {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .section {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
-  overflow: hidden;
   margin-bottom: 3px;
+  flex-shrink: 0;
 }
 
 .section-head {
@@ -317,6 +334,7 @@ body {
   flex-direction: row;
   align-items: center;
   min-height: 26px;
+  flex-shrink: 0;
 }
 
 .ctl > * {

@@ -163,11 +163,21 @@ class Panel {
         ctl = C.createChoice(def, this.params[def.key], commit);
         break;
       case "chips":
-        ctl = C.createChipChoice(def, this.params[def.key], commit, {
-          labels: ALGORITHM_LABELS,
-          groups: ALGORITHM_FAMILIES,
-          groupOf: (id) => ALGORITHM_FAMILY_OF[id],
-        });
+        // Only the dither algorithm list is grouped. Handing this grouping to
+        // every chips control blanked the Shape row entirely: none of its
+        // options belong to a dither family, so no group claimed them.
+        ctl = C.createChipChoice(
+          def,
+          this.params[def.key],
+          commit,
+          def.key === "ditherAlgorithm"
+            ? {
+                labels: ALGORITHM_LABELS,
+                groups: ALGORITHM_FAMILIES,
+                groupOf: (id) => ALGORITHM_FAMILY_OF[id],
+              }
+            : {}
+        );
         break;
       case "toggle":
         ctl = C.createToggle(def, this.params[def.key], commit);

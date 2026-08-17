@@ -245,6 +245,7 @@ function createChipChoice(def, value, onChange, meta = {}) {
     host.appendChild(b);
   };
 
+  let grouped = 0;
   if (groups) {
     for (const g of groups) {
       const members = def.options.filter((o) => meta.groupOf(o) === g.id);
@@ -253,11 +254,19 @@ function createChipChoice(def, value, onChange, meta = {}) {
       const row = el("div", "chip-row");
       for (const opt of members) addChip(opt, row);
       wrap.appendChild(row);
+      grouped += members.length;
     }
-  } else {
-    const row = el("div", "chip-row");
-    for (const opt of def.options) addChip(opt, row);
-    wrap.appendChild(row);
+  }
+  // Ungrouped, or grouping that claimed nothing: a control that renders no
+  // options at all is never the right answer, so fall back to a flat row.
+  if (!groups || grouped < def.options.length) {
+    const claimed = Object.keys(buttons);
+    const rest = def.options.filter((o) => claimed.indexOf(o) < 0);
+    if (rest.length) {
+      const row = el("div", "chip-row");
+      for (const opt of rest) addChip(opt, row);
+      wrap.appendChild(row);
+    }
   }
 
   function set(v) {

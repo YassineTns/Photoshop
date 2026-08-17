@@ -118,8 +118,23 @@ body {
   padding: 8px;
 }
 
+/*
+ * Nothing in the scroll container may be compressed.
+ *
+ * `#app` is a column flex container with a definite height, so by default every
+ * child is shrinkable - and they were shrunk, squeezing each section down and
+ * clipping its rows against `overflow: hidden`. Worse, UXP paints native inputs
+ * in a layer that ignores that clip, so the sliders vanished while their number
+ * fields floated loose over the next section.
+ *
+ * A browser hides this: CSS gives flex items an automatic minimum size, so they
+ * refuse to shrink below their content. UXP does not implement that, so the
+ * floor has to be stated. With shrinking off, content simply overflows and the
+ * container scrolls, which is the whole point of it.
+ */
 #app > * {
   margin-bottom: 8px;
+  flex-shrink: 0;
 }
 
 /* ----------------------------------------------------------- status */
@@ -161,6 +176,7 @@ body {
 
 .preview-wrap {
   position: relative;
+  flex-shrink: 0;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -272,14 +288,15 @@ body {
 .sections {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .section {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
-  overflow: hidden;
   margin-bottom: 3px;
+  flex-shrink: 0;
 }
 
 .section-head {
@@ -324,6 +341,7 @@ body {
   flex-direction: row;
   align-items: center;
   min-height: 26px;
+  flex-shrink: 0;
 }
 
 .ctl > * {
@@ -6123,6 +6141,7 @@ function createChipChoice(def, value, onChange, meta = {}) {
     host.appendChild(b);
   };
 
+  let grouped = 0;
   if (groups) {
     for (const g of groups) {
       const members = def.options.filter((o) => meta.groupOf(o) === g.id);
@@ -6131,11 +6150,19 @@ function createChipChoice(def, value, onChange, meta = {}) {
       const row = el("div", "chip-row");
       for (const opt of members) addChip(opt, row);
       wrap.appendChild(row);
+      grouped += members.length;
     }
-  } else {
-    const row = el("div", "chip-row");
-    for (const opt of def.options) addChip(opt, row);
-    wrap.appendChild(row);
+  }
+  // Ungrouped, or grouping that claimed nothing: a control that renders no
+  // options at all is never the right answer, so fall back to a flat row.
+  if (!groups || grouped < def.options.length) {
+    const claimed = Object.keys(buttons);
+    const rest = def.options.filter((o) => claimed.indexOf(o) < 0);
+    if (rest.length) {
+      const row = el("div", "chip-row");
+      for (const opt of rest) addChip(opt, row);
+      wrap.appendChild(row);
+    }
   }
 
   function set(v) {

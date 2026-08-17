@@ -12,6 +12,15 @@
  * It then shipped again unable to scroll: a UXP panel does not scroll its
  * document for you, so every section below the fold was simply unreachable.
  *
+ * And the fix for *that* broke it a third way: giving #app a definite height made
+ * its flex children shrinkable, so every section was squeezed and its rows
+ * clipped, with the native inputs floating loose because UXP paints them in a
+ * layer that ignores the clip. Chromium hides this bug entirely - CSS gives flex
+ * items an automatic minimum size so they refuse to shrink below their content,
+ * and UXP does not implement that. So this test runs a second pass with that
+ * automatic minimum removed, emulating the divergence, and asserts nothing
+ * clips. Without `flex-shrink: 0` in the stylesheet, that pass fails.
+ *
  * So this renders the real panel at real panel widths and asserts geometry: no
  * two siblings in a row may overlap, no row may overflow, no two stacked rows
  * may collide, nothing may collapse to zero, and the panel must scroll far
@@ -73,7 +82,15 @@ function ok(cond, msg) {
 
 /** Geometry probe, run inside the page. */
 const PROBE = () => {
-  const out = { overlaps: [], overflows: [], collisions: [], zeroWidth: [], scroll: null };
+  const out = {
+    overlaps: [],
+    overflows: [],
+    collisions: [],
+    zeroWidth: [],
+    clipped: [],
+    escaped: [],
+    scroll: null,
+  };
   const app = document.getElementById("app");
   const host = app.getBoundingClientRect();
 
@@ -119,6 +136,39 @@ const PROBE = () => {
         out.collisions.push((rows[i].textContent || "").trim().slice(0, 24));
       }
     }
+  });
+
+  // Nothing may be clipped by its own box. This is the failure that squeezed
+  // flex children produce, and it is invisible to an overlap check because the
+  // rows are hidden rather than displaced.
+  [".section", ".section-body", ".ctl"].forEach((sel) => {
+    document.querySelectorAll(sel).forEach((e) => {
+      if (e.scrollHeight > e.clientHeight + 1) {
+        out.clipped.push(sel + " " + (e.textContent || "").trim().slice(0, 18));
+      }
+    });
+  });
+
+  // And every row must sit inside the section body that owns it.
+  document.querySelectorAll(".section-body").forEach((body) => {
+    const b = body.getBoundingClientRect();
+    if (b.height < 1) return;
+    [...body.children].forEach((row) => {
+      const r = row.getBoundingClientRect();
+      if (r.height < 1) return;
+      if (r.top < b.top - 1 || r.bottom > b.bottom + 1) {
+        out.escaped.push((row.textContent || "").trim().slice(0, 18));
+      }
+    });
+  });
+
+  // A control that renders no options is worse than a misaligned one: it is
+  // simply absent. The Shape row shipped blank this way.
+  document.querySelectorAll(".section-body > div").forEach((wrap) => {
+    const label = wrap.querySelector(":scope > .ctl-label");
+    if (!label || wrap.className) return; // only the bare chip wrappers
+    if (!wrap.querySelector(".chip-row")) return;
+    if (!wrap.querySelector(".algo-chip")) out.zeroWidth.push("empty chips: " + label.textContent);
   });
 
   [".algo-chip", ".preset-chip", ".btn", ".swatch", ".seg"].forEach((sel) => {
@@ -179,35 +229,54 @@ for (const width of WIDTHS) {
       });
       await page.waitForTimeout(200);
 
-      const r = await page.evaluate(PROBE);
-      const tag = `${width}px ${mode} ${scheme}`;
+      // Pass 1: as a browser lays it out.
+      let r = await page.evaluate(PROBE);
+      let tag = `${width}px ${mode} ${scheme}`;
       ok(pageErrors.length === 0, `${tag}: the panel starts with no errors${fmt(pageErrors)}`);
-      ok(r.overlaps.length === 0, `${tag}: no sibling overlap${fmt(r.overlaps)}`);
-      ok(r.collisions.length === 0, `${tag}: no stacked-row collision${fmt(r.collisions)}`);
-      ok(r.overflows.length === 0, `${tag}: nothing overflows the panel${fmt(r.overflows)}`);
-      ok(r.zeroWidth.length === 0, `${tag}: nothing collapsed to zero${fmt(r.zeroWidth)}`);
-      ok(r.scroll.sections >= 8, `${tag}: the panel built its sections (${r.scroll.sections})`);
-      ok(
-        r.scroll.overflowY === "auto" || r.scroll.overflowY === "scroll",
-        `${tag}: the panel is a scroll container (overflow-y: ${r.scroll.overflowY})`
-      );
-      ok(
-        r.scroll.content > r.scroll.panel,
-        `${tag}: content exceeds the panel, so scrolling is the case that matters ` +
-          `(${r.scroll.content}px in ${r.scroll.panel}px)`
-      );
-      ok(
-        r.scroll.scrolled === r.scroll.maxScroll && r.scroll.maxScroll > 0,
-        `${tag}: scrolls to the bottom (${r.scroll.scrolled}/${r.scroll.maxScroll})`
-      );
-      ok(r.scroll.lastReachable, `${tag}: the last section is reachable`);
+      assertGeometry(r, tag);
 
+      // Pass 2: with the automatic minimum size of flex items removed, which is
+      // how UXP behaves. Anything relying on a browser refusing to shrink a flex
+      // item below its content collapses here.
+      await page.addStyleTag({
+        content:
+          "#app > *, .sections, .section, .section-body, .ctl, .toolbar, .preset-bar" +
+          " { min-height: 0 !important; }",
+      });
+      await page.waitForTimeout(150);
+      r = await page.evaluate(PROBE);
+      tag = `${width}px ${mode} ${scheme} [uxp flex]`;
+      assertGeometry(r, tag);
       await page.close();
     }
   }
 }
 
 await browser.close();
+
+function assertGeometry(r, tag) {
+  ok(r.overlaps.length === 0, `${tag}: no sibling overlap${fmt(r.overlaps)}`);
+  ok(r.collisions.length === 0, `${tag}: no stacked-row collision${fmt(r.collisions)}`);
+  ok(r.overflows.length === 0, `${tag}: nothing overflows the panel${fmt(r.overflows)}`);
+  ok(r.zeroWidth.length === 0, `${tag}: nothing collapsed to zero${fmt(r.zeroWidth)}`);
+  ok(r.clipped.length === 0, `${tag}: nothing is clipped by its own box${fmt(r.clipped)}`);
+  ok(r.escaped.length === 0, `${tag}: every row stays inside its section${fmt(r.escaped)}`);
+  ok(r.scroll.sections >= 8, `${tag}: the panel built its sections (${r.scroll.sections})`);
+  ok(
+    r.scroll.overflowY === "auto" || r.scroll.overflowY === "scroll",
+    `${tag}: the panel is a scroll container (overflow-y: ${r.scroll.overflowY})`
+  );
+  ok(
+    r.scroll.content > r.scroll.panel,
+    `${tag}: content exceeds the panel, so scrolling is the case that matters ` +
+      `(${r.scroll.content}px in ${r.scroll.panel}px)`
+  );
+  ok(
+    r.scroll.scrolled === r.scroll.maxScroll && r.scroll.maxScroll > 0,
+    `${tag}: scrolls to the bottom (${r.scroll.scrolled}/${r.scroll.maxScroll})`
+  );
+  ok(r.scroll.lastReachable, `${tag}: the last section is reachable`);
+}
 
 function fmt(list) {
   if (!list.length) return "";
