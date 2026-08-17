@@ -51,7 +51,23 @@ const PREVIEW_MAX = 460;
  * ceiling so it does not sprawl on a tall one.
  */
 const PREVIEW_HEIGHT_FRACTION = 0.42;
-const PREVIEW_HEIGHT_MIN = 110;
+/**
+ * The smallest the preview may be dragged.
+ *
+ * Raised from 110. 110 was picked as a floor that would survive a very short
+ * panel, and it does - but it is a letterbox, not a preview, and it turned out
+ * to be reachable by accident: the grip's drag limits were computed from a
+ * panel height this host does not report, so an ordinary upward drag could
+ * clamp straight to the floor and pin the preview there for good. A floor you
+ * can land on by accident has to be a size you can still work in.
+ */
+const PREVIEW_HEIGHT_MIN = 150;
+/**
+ * Below this, a *stored* height is treated as an accident rather than a choice
+ * and the preview goes back to automatic. Only heights at or under the old
+ * floor qualify, so a height anyone deliberately set is left alone.
+ */
+const PREVIEW_HEIGHT_STUCK = 110;
 const PREVIEW_HEIGHT_MAX = 380;
 /** Cap on the dither grid used for previews; above this the preview approximates. */
 const PREVIEW_DITHER_GRID = 700;
@@ -228,7 +244,14 @@ class Panel {
         GEO.describe(this.$("scroll"), "#scroll"),
         `window=${typeof window === "undefined" ? "absent" : `${window.innerWidth}x${window.innerHeight}`}`,
       ].join(" | ");
-      console.log("[Halftone Studio] geometry:", geometry);
+      /*
+       * warn, not log. Photoshop's own log file - the one a user can actually
+       * find and send - carries console.warn and console.error and drops
+       * console.log. The first version of this report was a console.log and
+       * did not appear in the log it was written for, which cost a round trip
+       * to discover.
+       */
+      console.warn("[Halftone Studio] geometry:", geometry);
     } catch (e) {
       /* diagnostics may never be the thing that breaks the panel */
     }
@@ -244,6 +267,10 @@ class Panel {
           `assuming ${box.width}x${box.height}. Zooming and panning work; the ` +
           `percentage and 1:1 are relative to that assumption, not to your screen`
       );
+      // On screen as well as in the log. The log is where a diagnosis gets
+      // made, but the user should not have to find a log to know what their
+      // panel is doing.
+      if (geometry) problems.push(`what this build reports: ${geometry}`);
     }
 
     const built = this.sections ? Object.keys(this.sections).length : 0;
@@ -1903,7 +1930,13 @@ function clampInt(v, lo, hi) {
 function sanitizeUI(raw) {
   const out = { previewHeight: null };
   if (raw && raw.previewHeight) {
-    out.previewHeight = clampInt(raw.previewHeight, PREVIEW_HEIGHT_MIN, 2000);
+    // A height at or below the old floor can only have come from a drag that
+    // clamped, on a host whose limits were computed from a size it never
+    // reported. Restoring it would hand the user back the letterbox they were
+    // stuck in, session after session, with no obvious way out.
+    if (raw.previewHeight > PREVIEW_HEIGHT_STUCK) {
+      out.previewHeight = clampInt(raw.previewHeight, PREVIEW_HEIGHT_MIN, 2000);
+    }
   }
   return out;
 }

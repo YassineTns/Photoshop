@@ -1380,6 +1380,12 @@ async function main() {
     const { Panel } = require("../src/ui/panel.js");
     const META = require("../src/photoshop/metadata.js");
 
+    // A panel tall enough for resizing to be a question. The mock's default
+    // 200px is shorter than the preview's own minimum, which would make every
+    // height in this group clamp to the same number and every assertion
+    // vacuous.
+    document.getElementById("app").clientHeight = 800;
+
     const panel = new Panel(document);
     await panel.init();
     document.getElementById("btn-load").emit("click");
@@ -1413,7 +1419,30 @@ async function main() {
     grip.emit("pointerdown", { clientY: 500, pointerId: 1 });
     grip.emit("pointermove", { clientY: -9000, pointerId: 1 });
     grip.emit("pointerup", { clientY: -9000, pointerId: 1 });
-    ok(panel.ui.previewHeight >= 110, `and floored (${panel.ui.previewHeight}px)`);
+    ok(panel.ui.previewHeight >= 150, `and floored at a size you can work in (${panel.ui.previewHeight}px)`);
+
+    /*
+     * A letterbox must not survive a restart.
+     *
+     * On a host that reports no panel size the grip's limits were computed
+     * from a height it never gave, so an ordinary upward drag could clamp
+     * straight to the old 110px floor - and then come back from the session
+     * every launch, with no visible way out. A Photoshop 2026 panel was found
+     * pinned there, reporting a preview box of 360x110.
+     */
+    {
+      resetModules();
+      const { document: doc2 } = install({ width: 800, height: 600, image: F.photo(800, 600) });
+      doc2.getElementById("app").clientHeight = 800;
+      const M2 = require("../src/photoshop/metadata.js");
+      await M2.saveSession({ params: {}, ui: { previewHeight: 110 } });
+      const { Panel: P2 } = require("../src/ui/panel.js");
+      const p2 = new P2(doc2);
+      await p2.init();
+      ok(p2.ui.previewHeight === null, "but a stored one is dropped, so the preview comes back");
+      ok(p2.previewBoxHeight() > 150, `at the automatic height (${p2.previewBoxHeight()}px)`);
+      uninstall();
+    }
 
     // Double-click restores the automatic size.
     grip.emit("dblclick", {});
