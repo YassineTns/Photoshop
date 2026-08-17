@@ -8,10 +8,10 @@
 /*
  * Halftone Studio panel styling.
  *
- * The look is Photoshop's own: flat surfaces, one accent, tight vertical rhythm,
- * so the panel reads as part of the application rather than as a web page
- * embedded in it. Colours are tokens, so the light theme is a token swap and not
- * a second stylesheet.
+ * The look is an instrument panel rather than a document: near-black surfaces, a
+ * cyan-to-violet accent that only ever marks *live* state, numeric readouts in
+ * monospace, and a hairline accent rail down any section you have opened. The
+ * discipline is that colour means something - if it glows, it is on.
  *
  * WRITTEN FOR UXP, NOT FOR A BROWSER
  * ----------------------------------
@@ -32,64 +32,79 @@
  *     across the panel.
  *
  *  4. NO `::before` / `::after`. Pseudo-elements do not render, so anything they
- *     would have drawn (the disclosure caret, the brand mark, the accent rail on
- *     an open section) is a real element with real content in it.
+ *     would have drawn (the disclosure caret, the brand mark, the tick beside a
+ *     bar label) is a real element with real content in it.
  *
  * Flex longhand is used throughout rather than the shorthand, for the same
  * reason: it is the form UXP handles predictably.
  *
  * DECORATION THAT IS ALLOWED TO FAIL
  * ----------------------------------
- * `box-shadow`, `linear-gradient` and `transition` are used only where being
- * ignored costs nothing: a shadow that does not paint leaves a flat box, a
- * transition that does not run snaps instead of sliding. Gradients are always
- * declared as `background-image` on top of a solid `background-color`, never as
- * the `background` shorthand - if UXP drops the gradient the solid colour is
- * still there, whereas a dropped shorthand would leave the element transparent.
+ * Everything decorative here is chosen so that UXP ignoring it costs nothing.
+ * A `box-shadow` that does not paint leaves a flat box; a `text-shadow` that
+ * does not paint leaves plain text; a `transition` that does not run snaps
+ * instead of sliding. Gradients are ALWAYS `background-image` layered over a
+ * solid `background-color`, never the `background` shorthand - if UXP drops the
+ * gradient the solid colour is still there, whereas a dropped shorthand would
+ * leave the element transparent. Every accent surface therefore has a flat
+ * fallback that is still legible and still the right colour.
  */
 
 :root {
-  --bg: #1a1a1c;
-  --bg-raised: #232327;
-  --bg-raised-hi: #2c2c32;
-  --bg-sunken: #121214;
-  --border: #303036;
-  --border-strong: #44444d;
-  --text: #e8e8ec;
-  --text-dim: #9d9da8;
-  --text-faint: #70707b;
-  --accent: #5b8cff;
-  --accent-hi: #7ba4ff;
-  --accent-soft: #2b3a5e;
-  --accent-text: #ffffff;
-  --track: #35353c;
-  --fill: #7b7f88;
-  --danger: #e0605c;
-  --warn: #d9a441;
-  --ok: #5cb264;
-  --radius: 4px;
+  --bg: #0b0d13;
+  --bg-raised: #13161f;
+  --bg-raised-hi: #1b1f2c;
+  --bg-sunken: #06070b;
+  --border: #212636;
+  --border-strong: #333a52;
+  --text: #e9ecf6;
+  --text-dim: #8b93ad;
+  --text-faint: #5c6482;
+  --accent: #00e0ff;
+  --accent-2: #8a63ff;
+  --accent-hi: #5cf0ff;
+  --accent-soft: #12283a;
+  --accent-text: #04070e;
+  --glow: rgba(0, 224, 255, 0.4);
+  --glow-soft: rgba(0, 224, 255, 0.16);
+  --track: #1f2434;
+  --fill: #465070;
+  --danger: #ff5f6d;
+  --warn: #ffb340;
+  --ok: #2fe08a;
+  --radius: 5px;
   --radius-sm: 3px;
+  --mono: "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
 }
 
+/*
+ * The light theme is the same instrument in daylight, not a different design:
+ * the accents keep their identity but darken enough to stay legible on white,
+ * and the glows shrink to almost nothing because a glow on white is just haze.
+ */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #eeeef1;
+    --bg: #eef0f5;
     --bg-raised: #ffffff;
-    --bg-raised-hi: #f6f6f9;
-    --bg-sunken: #e1e1e6;
-    --border: #d5d5dd;
-    --border-strong: #b6b6c1;
-    --text: #1b1b1f;
-    --text-dim: #5c5c66;
-    --text-faint: #8b8b95;
-    --accent: #3a6ff0;
-    --accent-hi: #2a5ad6;
-    --accent-soft: #d3e0ff;
-    --track: #cfcfd7;
-    --fill: #8a8e97;
-    --danger: #c8433f;
-    --warn: #a97b16;
-    --ok: #3f8a46;
+    --bg-raised-hi: #f5f7fb;
+    --bg-sunken: #e2e6ee;
+    --border: #d3d8e4;
+    --border-strong: #b0b8cb;
+    --text: #10131c;
+    --text-dim: #545c73;
+    --text-faint: #838ba3;
+    --accent: #0077a8;
+    --accent-2: #5a3fd6;
+    --accent-hi: #005c86;
+    --accent-soft: #d5ecf6;
+    --accent-text: #ffffff;
+    --glow: rgba(0, 119, 168, 0.22);
+    --glow-soft: rgba(0, 119, 168, 0.08);
+    --track: #cdd3e0;
+    --fill: #8992a8;
+    --danger: #c8353f;
+    --warn: #a4700d;
+    --ok: #16874f;
   }
 }
 
@@ -138,6 +153,9 @@ body {
   display: flex;
   flex-direction: column;
   padding: 9px;
+  background-color: var(--bg);
+  /* A cold pool of light at the top. Dropped by UXP, the flat colour remains. */
+  background-image: linear-gradient(180deg, var(--glow-soft), transparent 220px);
 }
 
 /*
@@ -165,61 +183,89 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  min-height: 22px;
-  margin-bottom: 9px;
+  min-height: 24px;
+  margin-bottom: 7px;
 }
 
-/* The mark is a four-dot halftone ramp: the plugin's whole idea in 18 pixels. */
+/*
+ * The mark is a four-dot halftone ramp: the plugin's whole idea in 20 pixels.
+ * Four real divs, because pseudo-elements do not render here.
+ */
 .brand-mark {
   position: relative;
-  width: 18px;
-  height: 18px;
-  min-width: 18px;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 7px;
+  margin-right: 9px;
   border-radius: var(--radius-sm);
   background-color: var(--accent-soft);
+  background-image: linear-gradient(135deg, var(--accent-soft), transparent);
+  box-shadow: 0 0 12px var(--glow-soft);
 }
 
 .brand-dot {
   position: absolute;
   border-radius: 50%;
-  background: var(--accent);
+  background-color: var(--accent);
 }
 
-.brand-dot-1 { width: 7px; height: 7px; left: 2px; top: 2px; }
-.brand-dot-2 { width: 5px; height: 5px; left: 11px; top: 3px; }
-.brand-dot-3 { width: 5px; height: 5px; left: 3px; top: 11px; }
-.brand-dot-4 { width: 3px; height: 3px; left: 12px; top: 12px; }
+.brand-dot-1 { width: 8px; height: 8px; left: 2px; top: 2px; box-shadow: 0 0 6px var(--glow); }
+.brand-dot-2 { width: 5px; height: 5px; left: 12px; top: 4px; }
+.brand-dot-3 { width: 5px; height: 5px; left: 4px; top: 12px; }
+.brand-dot-4 { width: 3px; height: 3px; left: 13px; top: 13px; background-color: var(--accent-2); }
 
 .brand-name {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--text);
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.brand-name-a {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+
+.brand-name-b {
+  font-size: 12px;
+  font-weight: 300;
+  letter-spacing: 0.16em;
+  color: var(--text-faint);
+  margin-left: 5px;
 }
 
 /* Says which engine is running without opening the Mode section. */
 .brand-mode {
   flex-grow: 0;
   flex-shrink: 0;
-  min-height: 16px;
-  padding: 1px 7px;
-  border-radius: 8px;
-  border: 1px solid var(--border-strong);
-  background-color: var(--bg-raised);
-  color: var(--text-dim);
+  min-height: 17px;
+  padding: 1px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--accent);
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--mono);
   font-size: 9px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   white-space: nowrap;
+  box-shadow: 0 0 10px var(--glow-soft);
+}
+
+/* A hairline that fades out: the accent leaking from under the header. */
+.rule {
+  min-height: 1px;
+  height: 1px;
+  margin-bottom: 9px;
+  background-color: var(--border);
+  background-image: linear-gradient(90deg, var(--accent), var(--border) 45%, transparent);
+  opacity: 0.75;
 }
 
 /* ----------------------------------------------------------- status */
@@ -239,15 +285,15 @@ body {
   height: 6px;
   min-width: 6px;
   border-radius: 50%;
-  background: var(--text-faint);
+  background-color: var(--text-faint);
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 6px;
+  margin-right: 7px;
 }
 
-.status-dot.ready { background: var(--ok); }
-.status-dot.busy { background: var(--accent); }
-.status-dot.error { background: var(--danger); }
+.status-dot.ready { background-color: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.status-dot.busy { background-color: var(--accent); box-shadow: 0 0 8px var(--glow); }
+.status-dot.error { background-color: var(--danger); box-shadow: 0 0 8px var(--danger); }
 
 #status-text {
   overflow: hidden;
@@ -264,15 +310,25 @@ body {
   position: relative;
   flex-shrink: 0;
   background-color: var(--bg-sunken);
-  border: 1px solid var(--border);
+  /*
+   * A faint engineering grid behind an empty preview. If UXP ignores
+   * background-size the gradients simply paint once across the box, which is a
+   * near-invisible hairline rather than anything broken - and the moment an
+   * image loads it covers this entirely.
+   */
+  background-image: linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 18px 18px;
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  min-height: 150px;
+  min-height: 152px;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   margin-bottom: 6px;
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.55);
 }
 
 .preview {
@@ -287,11 +343,15 @@ body {
   color: var(--text-faint);
   font-size: 10px;
   text-align: center;
-  padding: 28px 14px;
-  line-height: 1.7;
+  padding: 30px 16px;
+  line-height: 1.8;
+  letter-spacing: 0.02em;
 }
 
-.preview-empty b { color: var(--text-dim); }
+.preview-empty b {
+  color: var(--accent);
+  font-weight: 600;
+}
 
 .preview-empty.hidden { display: none; }
 
@@ -304,14 +364,16 @@ body {
 .preview-badge.show {
   display: block;
   position: absolute;
-  right: 5px;
-  bottom: 5px;
-  background-color: rgba(0, 0, 0, 0.72);
-  color: #e6e6e6;
+  right: 6px;
+  bottom: 6px;
+  background-color: rgba(4, 7, 14, 0.82);
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  font-family: var(--mono);
   font-size: 9px;
-  letter-spacing: 0.02em;
-  padding: 2px 6px;
-  border-radius: 7px;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 8px;
 }
 
 /* --------------------------------------------------------- controls */
@@ -319,10 +381,11 @@ body {
 .actions {
   display: flex;
   flex-direction: column;
-  padding: 7px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background-color: var(--bg-raised);
+  background-image: linear-gradient(180deg, var(--bg-raised-hi), var(--bg-raised));
 }
 
 .toolbar {
@@ -337,21 +400,22 @@ body {
 
 .toolbar > *:last-child { margin-right: 0; }
 
-.toolbar-tail { margin-top: 5px; }
+.toolbar-tail { margin-top: 6px; }
 
 .btn {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  min-height: 25px;
-  padding: 0 7px;
+  min-height: 26px;
+  padding: 0 8px;
   background-color: var(--bg-raised-hi);
-  background-image: linear-gradient(rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.05));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.18));
   color: var(--text);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   font-size: 11px;
   font-family: inherit;
+  letter-spacing: 0.02em;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -360,7 +424,8 @@ body {
 
 .btn:hover {
   border-color: var(--accent);
-  color: var(--text);
+  color: var(--accent);
+  box-shadow: 0 0 10px var(--glow-soft);
 }
 
 .btn:active {
@@ -369,28 +434,37 @@ body {
 }
 
 .btn[disabled] {
-  opacity: 0.38;
+  opacity: 0.32;
   cursor: default;
   border-color: var(--border);
 }
 
-.btn[disabled]:hover { border-color: var(--border); }
+.btn[disabled]:hover {
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: none;
+}
 
+/* The one place the two accents meet: the button that commits the render. */
 .btn-primary {
   background-color: var(--accent);
-  background-image: linear-gradient(rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.1));
+  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   border-color: var(--accent);
   color: var(--accent-text);
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  box-shadow: 0 0 14px var(--glow);
 }
 
 .btn-primary:hover {
   background-color: var(--accent-hi);
   border-color: var(--accent-hi);
+  color: var(--accent-text);
+  box-shadow: 0 0 20px var(--glow);
 }
 
 .btn-small {
-  min-height: 21px;
+  min-height: 22px;
   font-size: 10px;
   color: var(--text-dim);
 }
@@ -398,7 +472,7 @@ body {
 .progress {
   min-height: 3px;
   height: 3px;
-  background: var(--track);
+  background-color: var(--track);
   border-radius: 2px;
   overflow: hidden;
   opacity: 0;
@@ -410,7 +484,9 @@ body {
 .progress-bar {
   height: 3px;
   width: 0%;
-  background: var(--accent);
+  background-color: var(--accent);
+  background-image: linear-gradient(90deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 8px var(--glow);
 }
 
 /* --------------------------------------------------------- sections */
@@ -421,8 +497,14 @@ body {
   flex-shrink: 0;
 }
 
+/*
+ * The accent rail is the left border rather than an extra element: one property
+ * to light up, no absolute positioning, and `box-sizing: border-box` keeps the
+ * width identical open or closed so nothing shifts when a section expands.
+ */
 .section {
   border: 1px solid var(--border);
+  border-left: 2px solid var(--border);
   border-radius: var(--radius);
   background-color: var(--bg-raised);
   margin-bottom: 4px;
@@ -430,15 +512,19 @@ body {
   overflow: hidden;
 }
 
-.section.open { border-color: var(--border-strong); }
+.section.open {
+  border-color: var(--border-strong);
+  border-left-color: var(--accent);
+  box-shadow: 0 0 14px var(--glow-soft);
+}
 
 .section-head {
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 6px 8px;
+  padding: 7px 9px;
   cursor: pointer;
-  min-height: 22px;
+  min-height: 23px;
 }
 
 .section-head:hover { background-color: var(--bg-raised-hi); }
@@ -449,7 +535,7 @@ body {
   min-width: 10px;
   flex-grow: 0;
   flex-shrink: 0;
-  margin-right: 6px;
+  margin-right: 7px;
   font-size: 7px;
   line-height: 1;
   color: var(--text-faint);
@@ -463,7 +549,7 @@ body {
   min-width: 0;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);
   overflow: hidden;
@@ -475,16 +561,18 @@ body {
 .section-head:hover .section-title { color: var(--text); }
 
 /*
- * The collapsed section's readout. Right-aligned, dim, and allowed to be cut
- * off: it is a reminder, never the only way to see a value.
+ * The collapsed section's readout. Monospace, right-aligned, dim, and allowed
+ * to be cut off: it is a reminder, never the only way to see a value.
  */
 .section-summary {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  margin-left: 8px;
+  margin-left: 9px;
   text-align: right;
+  font-family: var(--mono);
   font-size: 9px;
+  letter-spacing: 0.02em;
   color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -496,8 +584,9 @@ body {
 
 .section-body {
   display: none;
-  padding: 2px 8px 8px;
+  padding: 3px 9px 9px;
   border-top: 1px solid var(--border);
+  background-color: var(--bg-raised);
 }
 
 .section.open .section-body { display: block; }
@@ -508,12 +597,12 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  min-height: 27px;
+  min-height: 28px;
   flex-shrink: 0;
 }
 
 .ctl > * {
-  margin-right: 7px;
+  margin-right: 8px;
 }
 
 .ctl > *:last-child { margin-right: 0; }
@@ -524,6 +613,7 @@ body {
   flex-grow: 0;
   flex-shrink: 0;
   color: var(--text-dim);
+  letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -548,7 +638,7 @@ body {
   width: 100%;
   height: 4px;
   min-height: 4px;
-  background: var(--track);
+  background-color: var(--track);
   border-radius: 2px;
 }
 
@@ -557,11 +647,16 @@ body {
   left: 0;
   top: 0;
   height: 4px;
-  background: var(--fill);
+  background-color: var(--fill);
   border-radius: 2px;
 }
 
-.ctl.modified .slider-fill { background: var(--accent); }
+/* Only a moved slider glows: the accent marks state, it does not decorate. */
+.ctl.modified .slider-fill {
+  background-color: var(--accent);
+  background-image: linear-gradient(90deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 8px var(--glow-soft);
+}
 
 .slider-thumb {
   position: absolute;
@@ -570,35 +665,54 @@ body {
   height: 10px;
   margin-left: -5px;
   border-radius: 50%;
-  background: var(--text);
+  background-color: var(--text);
   border: 1px solid var(--bg);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
-.slider:hover .slider-thumb { background: var(--accent-hi); }
-.slider.dragging .slider-thumb { background: var(--accent); }
+.slider:hover .slider-thumb {
+  background-color: var(--accent-hi);
+  box-shadow: 0 0 10px var(--glow);
+}
 
-/* Explicit width: a UXP input asserts its own and would eat the slider. */
+.slider.dragging .slider-thumb {
+  background-color: var(--accent);
+  box-shadow: 0 0 14px var(--glow);
+}
+
+/*
+ * Explicit width: a UXP input asserts its own and would eat the slider.
+ * Monospace, so the numbers stop dancing as they change - this is a readout.
+ */
 .ctl-value {
-  width: 52px;
-  min-width: 52px;
+  /*
+   * Wide enough for the longest readout the schema can produce ("400 cells"),
+   * because monospace does not shrink to fit and a clipped number is worse than
+   * a wide field.
+   */
+  width: 66px;
+  min-width: 66px;
   flex-grow: 0;
   flex-shrink: 0;
-  min-height: 21px;
+  min-height: 22px;
   background-color: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
+  font-family: var(--mono);
   font-size: 10px;
   text-align: right;
-  padding: 0 5px;
-  font-family: inherit;
+  padding: 0 6px;
   -webkit-user-select: text;
   user-select: text;
 }
 
+.ctl.modified .ctl-value { color: var(--accent); }
 .ctl-value:hover { border-color: var(--border-strong); }
-.ctl-value:focus { border-color: var(--accent); }
+.ctl-value:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--glow-soft);
+}
 
 .ctl-reset {
   width: 14px;
@@ -638,13 +752,14 @@ body {
   flex-grow: 1;
   flex-shrink: 1;
   min-width: 0;
-  min-height: 21px;
+  min-height: 22px;
   text-align: center;
   background-color: var(--bg-raised-hi);
   color: var(--text-dim);
   border: 0;
   border-right: 1px solid var(--border);
   font-size: 10px;
+  letter-spacing: 0.03em;
   cursor: pointer;
   padding: 0 3px;
   font-family: inherit;
@@ -654,13 +769,15 @@ body {
 }
 
 .seg-item:last-child { border-right: 0; }
+
 .seg-item.active {
   background-color: var(--accent);
-  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
+  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   color: var(--accent-text);
-  font-weight: 600;
+  font-weight: 700;
 }
-.seg-item:hover { color: var(--text); background-color: var(--bg-raised); }
+
+.seg-item:hover { color: var(--accent); background-color: var(--bg-raised); }
 .seg-item.active:hover { color: var(--accent-text); background-color: var(--accent-hi); }
 
 /* ------------------------------------------------------------ chips */
@@ -681,17 +798,17 @@ body {
   color: var(--text-faint);
   font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-top: 4px;
+  letter-spacing: 0.12em;
+  margin-top: 5px;
   margin-bottom: 3px;
 }
 
 .algo-chip {
-  min-height: 20px;
+  min-height: 21px;
   padding: 0 8px;
   background-color: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 11px;
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
@@ -699,22 +816,27 @@ body {
   white-space: nowrap;
 }
 
-.algo-chip:hover { color: var(--text); border-color: var(--border-strong); }
+.algo-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .algo-chip.active {
   background-color: var(--accent);
-  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
+  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   color: var(--accent-text);
   border-color: var(--accent);
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 0 12px var(--glow-soft);
 }
 
 /* --------------------------------------------------------- toggle */
 
 .toggle {
-  width: 32px;
-  min-width: 32px;
-  height: 17px;
-  min-height: 17px;
+  width: 34px;
+  min-width: 34px;
+  height: 18px;
+  min-height: 18px;
   flex-grow: 0;
   flex-shrink: 0;
   border-radius: 9px;
@@ -731,17 +853,23 @@ body {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   border-radius: 6px;
-  background: var(--text-dim);
+  background-color: var(--text-faint);
 }
 
 .toggle.on {
   background-color: var(--accent);
+  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   border-color: var(--accent);
+  box-shadow: 0 0 12px var(--glow-soft);
 }
-.toggle.on .toggle-knob { left: 17px; background: #ffffff; }
+
+.toggle.on .toggle-knob {
+  left: 18px;
+  background-color: #ffffff;
+}
 
 /* -------------------------------------------------------- palette */
 
@@ -749,7 +877,7 @@ body {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  padding: 5px 0 2px;
+  padding: 6px 0 2px;
 }
 
 .palette > * {
@@ -759,46 +887,50 @@ body {
 
 .swatch-wrap {
   position: relative;
-  width: 30px;
-  height: 24px;
+  width: 32px;
+  height: 26px;
 }
 
 /* A div, not a button: UXP gives buttons a native look that fights back. */
 .swatch {
-  width: 30px;
-  height: 24px;
+  width: 32px;
+  height: 26px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   cursor: pointer;
   padding: 0;
 }
 
-.swatch:hover { border-color: var(--accent); }
+.swatch:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px var(--glow-soft);
+}
 
 .swatch-input {
-  width: 68px;
-  min-width: 68px;
-  min-height: 21px;
+  width: 70px;
+  min-width: 70px;
+  min-height: 22px;
   background-color: var(--bg-sunken);
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
   color: var(--text);
+  font-family: var(--mono);
   font-size: 10px;
   padding: 0 4px;
-  font-family: inherit;
   -webkit-user-select: text;
   user-select: text;
 }
 
 .swatch-lock {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
+  right: 3px;
+  bottom: 3px;
   width: 7px;
   height: 7px;
   border-radius: 4px;
-  background: #ffffff;
-  border: 1px solid #000000;
+  background-color: var(--accent);
+  border: 1px solid var(--bg-sunken);
+  box-shadow: 0 0 6px var(--glow);
 }
 
 .palette-actions {
@@ -816,8 +948,8 @@ body {
 .hint {
   color: var(--text-faint);
   font-size: 9px;
-  line-height: 1.5;
-  padding: 4px 0 2px;
+  line-height: 1.6;
+  padding: 5px 0 2px;
 }
 
 /* --------------------------------------------------------- presets */
@@ -826,18 +958,35 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background-color: var(--bg-raised);
-  padding: 7px;
+  background-image: linear-gradient(180deg, var(--bg-raised-hi), var(--bg-raised));
+  padding: 8px;
   display: flex;
   flex-direction: column;
 }
 
 .bar-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-faint);
-  margin-bottom: 5px;
+  margin-bottom: 6px;
+}
+
+/* A real element: the accent tick a ::before would otherwise have drawn. */
+.bar-tick {
+  width: 3px;
+  height: 9px;
+  min-width: 3px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  margin-right: 7px;
+  border-radius: 2px;
+  background-color: var(--accent);
+  box-shadow: 0 0 6px var(--glow);
 }
 
 .preset-row { margin-bottom: 4px; }
@@ -854,9 +1003,9 @@ body {
 }
 
 .preset-chip {
-  min-height: 21px;
-  padding: 0 9px;
-  background-color: var(--bg-raised-hi);
+  min-height: 22px;
+  padding: 0 10px;
+  background-color: var(--bg-sunken);
   border: 1px solid var(--border-strong);
   border-radius: 11px;
   color: var(--text-dim);
@@ -866,27 +1015,34 @@ body {
   white-space: nowrap;
 }
 
-.preset-chip:hover { color: var(--text); border-color: var(--accent); }
+.preset-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px var(--glow-soft);
+}
+
 .preset-chip.active {
   background-color: var(--accent);
-  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08));
+  background-image: linear-gradient(115deg, var(--accent), var(--accent-2));
   color: var(--accent-text);
   border-color: var(--accent);
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 0 14px var(--glow-soft);
 }
+
 .preset-chip.user { border-style: dashed; }
 
 /* ---------------------------------------------------------- notice */
 
 .notice {
   display: none;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border-radius: var(--radius);
   font-size: 10px;
-  line-height: 1.55;
+  line-height: 1.6;
   border: 1px solid var(--border);
   border-left-width: 3px;
-  border-left-color: var(--border-strong);
+  border-left-color: var(--accent);
   background-color: var(--bg-raised);
   color: var(--text-dim);
   -webkit-user-select: text;
@@ -894,10 +1050,12 @@ body {
 }
 
 .notice.show { display: block; }
+
 .notice.error {
   border-left-color: var(--danger);
   color: var(--text);
 }
+
 .notice.warn {
   border-left-color: var(--warn);
   color: var(--text);
@@ -915,9 +1073,12 @@ body {
           <div class="brand-dot brand-dot-3"></div>
           <div class="brand-dot brand-dot-4"></div>
         </div>
-        <div class="brand-name">Halftone Studio</div>
+        <div class="brand-name">
+          <span class="brand-name-a">HALFTONE</span><span class="brand-name-b">STUDIO</span>
+        </div>
         <div id="brand-mode" class="brand-mode">Halftone</div>
       </div>
+      <div class="rule"></div>
 
       <div id="preview-wrap" class="preview-wrap">
         <div id="preview-empty" class="preview-empty">
@@ -950,7 +1111,7 @@ body {
       <div id="sections" class="sections"></div>
 
       <div class="preset-bar">
-        <div class="bar-label">Presets</div>
+        <div class="bar-label"><span class="bar-tick"></span>Presets</div>
         <div class="preset-row">
           <div id="preset-list" class="preset-list"></div>
         </div>
