@@ -97,8 +97,56 @@ function inkToRadius(ink, maxRadius, curve) {
   return r * maxRadius;
 }
 
+/**
+ * Apply a tone LUT to every channel of an image, the way a Curves or Levels
+ * adjustment would.
+ *
+ * The halftone path grades a single luminance value per cell, but the dither
+ * path has to grade the actual pixels: dithering decides colour per pixel, so
+ * the grade has to be in the data before quantisation happens.
+ *
+ * @param {{data: Uint8ClampedArray, width: number, height: number}} img
+ * @param {Float32Array} lut 256 entries, 0..1
+ * @param {boolean} [invert]
+ * @returns {{data: Uint8ClampedArray, width: number, height: number}}
+ */
+function applyToneToImage(img, lut, invert) {
+  // Collapse the LUT to bytes once, then it is a single lookup per channel.
+  const map = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    const v = invert ? 1 - lut[i] : lut[i];
+    map[i] = Math.round((v < 0 ? 0 : v > 1 ? 1 : v) * 255);
+  }
+  const src = img.data;
+  const out = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    out[i] = map[src[i]];
+    out[i + 1] = map[src[i + 1]];
+    out[i + 2] = map[src[i + 2]];
+    out[i + 3] = src[i + 3];
+  }
+  return { data: out, width: img.width, height: img.height };
+}
+
+/** True when the LUT would leave the image untouched. */
+function isIdentityLUT(lut, invert) {
+  if (invert) return false;
+  for (let i = 0; i < 256; i += 17) {
+    if (Math.abs(lut[i] - i / 255) > 0.004) return false;
+  }
+  return true;
+}
+
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
-module.exports = { buildToneLUT, sampleLUT, biasCurve, inkToRadius, clamp };
+module.exports = {
+  buildToneLUT,
+  sampleLUT,
+  biasCurve,
+  inkToRadius,
+  applyToneToImage,
+  isIdentityLUT,
+  clamp,
+};

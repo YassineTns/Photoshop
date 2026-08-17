@@ -6,15 +6,21 @@
  * The UI is generated from PARAM_DEFS, presets are validated against it, and
  * persisted renders are migrated through it. Adding a control means adding one
  * entry here.
+ *
+ * Two visibility mechanisms keep the panel from becoming a wall of sliders:
+ *   - `modes`  : which render mode(s) a parameter belongs to
+ *   - `showIf` : a predicate on the current parameters
  */
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+
+const MODES = ["halftone", "dither"];
 
 /**
  * @typedef {object} ParamDef
  * @property {string} key
  * @property {string} label
- * @property {"slider"|"choice"|"toggle"|"palette"|"color"} type
+ * @property {"slider"|"choice"|"chips"|"toggle"|"palette"|"color"} type
  * @property {*} def default value
  * @property {number} [min]
  * @property {number} [max]
@@ -23,16 +29,61 @@ const SCHEMA_VERSION = 1;
  * @property {string} [unit]
  * @property {string} [section]
  * @property {string[]} [options]
+ * @property {string[]} [modes]     restrict to these render modes
+ * @property {(p: object) => boolean} [showIf]
  * @property {string} [hint]
  */
 
+/** Populated lazily to avoid a require cycle with the engine. */
+let _ditherIds = null;
+function ditherAlgorithmIds() {
+  if (!_ditherIds) {
+    // eslint-disable-next-line global-require
+    _ditherIds = require("../engine/dither.js").ALGORITHM_IDS;
+  }
+  return _ditherIds;
+}
+
 /** @type {ParamDef[]} */
 const PARAM_DEFS = [
-  // ------------------------------------------------------------- Halftone
+  // ----------------------------------------------------------------- Mode
+  {
+    key: "mode",
+    label: "Mode",
+    section: "mode",
+    type: "choice",
+    def: "halftone",
+    options: MODES,
+    hint: "Halftone varies dot size on a grid. Dither picks one palette colour per pixel.",
+  },
+
+  // ---------------------------------------------------------------- Scale
+  {
+    key: "scaleMode",
+    label: "Scale by",
+    section: "scale",
+    type: "choice",
+    def: "relative",
+    options: ["relative", "dpi"],
+    hint: "Relative is resolution independent. DPI derives the grid from the document's own resolution.",
+  },
+  {
+    key: "dpi",
+    label: "DPI",
+    section: "scale",
+    type: "slider",
+    def: 150,
+    min: 5,
+    max: 300,
+    step: 1,
+    decimals: 0,
+    showIf: (p) => p.scaleMode === "dpi",
+    hint: "Target output density. The grid is docPixels x (dpi / documentResolution).",
+  },
   {
     key: "density",
     label: "Density",
-    section: "halftone",
+    section: "scale",
     type: "slider",
     def: 90,
     min: 8,
@@ -40,8 +91,40 @@ const PARAM_DEFS = [
     step: 1,
     decimals: 0,
     unit: " cells",
+    modes: ["halftone"],
+    showIf: (p) => p.scaleMode !== "dpi",
     hint: "Cells across the longest edge. Resolution independent, so the preview matches the full render.",
   },
+  {
+    key: "ditherResolution",
+    label: "Resolution",
+    section: "scale",
+    type: "slider",
+    def: 400,
+    min: 24,
+    max: 2400,
+    step: 1,
+    decimals: 0,
+    unit: " px",
+    modes: ["dither"],
+    showIf: (p) => p.scaleMode !== "dpi",
+    hint: "Dither pixels across the longest edge. Lower values give the chunky bitmap look.",
+  },
+  {
+    key: "angle",
+    label: "Angle",
+    section: "scale",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 90,
+    step: 1,
+    decimals: 0,
+    unit: "°",
+    modes: ["halftone"],
+  },
+
+  // ------------------------------------------------------------- Halftone
   {
     key: "radius",
     label: "Radius",
@@ -53,6 +136,7 @@ const PARAM_DEFS = [
     step: 1,
     decimals: 0,
     unit: "%",
+    modes: ["halftone"],
     hint: "Maximum dot size as a percentage of the cell half-size. Above 100% dots overlap.",
   },
   {
@@ -65,31 +149,8 @@ const PARAM_DEFS = [
     max: 1,
     step: 0.01,
     decimals: 2,
+    modes: ["halftone"],
     hint: "0 = dot area follows tone (classic AM screen). 1 = dot radius follows tone (harder).",
-  },
-  {
-    key: "angle",
-    label: "Angle",
-    section: "halftone",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 90,
-    step: 1,
-    decimals: 0,
-    unit: "°",
-  },
-  {
-    key: "blur",
-    label: "Blur",
-    section: "halftone",
-    type: "slider",
-    def: 0,
-    min: 0,
-    max: 40,
-    step: 0.1,
-    decimals: 1,
-    hint: "Pre-blur in resolution independent units (px per 1000px of the longest edge).",
   },
   {
     key: "shape",
@@ -98,6 +159,93 @@ const PARAM_DEFS = [
     type: "choice",
     def: "circle",
     options: ["circle", "square", "diamond", "cross", "line"],
+    modes: ["halftone"],
+  },
+
+  // --------------------------------------------------------------- Dither
+  {
+    key: "ditherAlgorithm",
+    label: "Algorithm",
+    section: "dither",
+    type: "chips",
+    def: "floydsteinberg",
+    get options() {
+      return ditherAlgorithmIds();
+    },
+    modes: ["dither"],
+  },
+  {
+    key: "ditherStrength",
+    label: "Amount",
+    section: "dither",
+    type: "slider",
+    def: 1,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    decimals: 2,
+    modes: ["dither"],
+    hint: "0 posterises with no pattern at all; 1 is the full dither.",
+  },
+  {
+    key: "serpentine",
+    label: "Serpentine",
+    section: "dither",
+    type: "toggle",
+    def: true,
+    modes: ["dither"],
+    hint: "Alternate the scan direction each row. Cancels most directional error-diffusion artefacts.",
+  },
+
+  // ---------------------------------------------------------- Pre-process
+  {
+    key: "blur",
+    label: "Blur",
+    section: "preprocess",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 40,
+    step: 0.1,
+    decimals: 1,
+    hint: "Resolution independent units (px per 1000px of the longest edge).",
+  },
+  {
+    key: "sharpen",
+    label: "Sharpen",
+    section: "preprocess",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 200,
+    step: 1,
+    decimals: 0,
+    unit: "%",
+    hint: "Unsharp mask. Worth using before a dither, which has no tonal resolution to spare.",
+  },
+  {
+    key: "sharpenRadius",
+    label: "Sharpen R",
+    section: "preprocess",
+    type: "slider",
+    def: 2,
+    min: 0.3,
+    max: 10,
+    step: 0.1,
+    decimals: 1,
+    showIf: (p) => p.sharpen > 0,
+  },
+  {
+    key: "noiseReduction",
+    label: "Noise Red.",
+    section: "preprocess",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 100,
+    step: 1,
+    decimals: 0,
+    hint: "Edge-preserving smoothing. Stops sensor noise turning into a field of stray dots.",
   },
 
   // --------------------------------------------------------------- Colors
@@ -153,7 +301,42 @@ const PARAM_DEFS = [
     section: "colors",
     type: "color",
     def: "auto",
+    modes: ["halftone"],
     hint: "auto = lightest palette colour (darkest when Invert is on).",
+  },
+
+  // ----------------------------------------------------------- Tonal zones
+  {
+    key: "tonalMapping",
+    label: "Tonal zones",
+    section: "tonal",
+    type: "toggle",
+    def: false,
+    hint: "Restrict shadows, midtones and highlights each to their own slice of the palette.",
+  },
+  {
+    key: "shadowSplit",
+    label: "Shadows",
+    section: "tonal",
+    type: "slider",
+    def: 0.33,
+    min: 0.05,
+    max: 0.6,
+    step: 0.01,
+    decimals: 2,
+    showIf: (p) => p.tonalMapping,
+  },
+  {
+    key: "highlightSplit",
+    label: "Highlights",
+    section: "tonal",
+    type: "slider",
+    def: 0.66,
+    min: 0.4,
+    max: 0.95,
+    step: 0.01,
+    decimals: 2,
+    showIf: (p) => p.tonalMapping,
   },
 
   // ---------------------------------------------------------------- Grade
@@ -223,6 +406,7 @@ const PARAM_DEFS = [
     max: 1,
     step: 0.01,
     decimals: 2,
+    modes: ["halftone"],
     hint: "Bends the tone -> dot size curve without moving pure black or pure white.",
   },
   {
@@ -275,15 +459,32 @@ const PARAM_DEFS = [
     section: "adjust",
     type: "toggle",
     def: false,
-    hint: "Dots grow in the highlights instead of the shadows, and the paper flips to the dark end.",
+    hint: "Halftone: dots grow in the highlights and the paper flips. Dither: the tone curve inverts.",
+  },
+
+  // --------------------------------------------------------------- Output
+  {
+    key: "output",
+    label: "Output",
+    section: "output",
+    type: "choice",
+    def: "flat",
+    options: ["flat", "separated"],
+    hint: "Separated writes one solid-colour fill layer per palette colour, each with its own mask.",
   },
 ];
 
 const SECTIONS = [
-  { id: "halftone", label: "Halftone" },
+  { id: "mode", label: "Mode" },
+  { id: "scale", label: "Scale" },
+  { id: "halftone", label: "Halftone", modes: ["halftone"] },
+  { id: "dither", label: "Dither", modes: ["dither"] },
+  { id: "preprocess", label: "Pre-process" },
   { id: "colors", label: "Colors" },
+  { id: "tonal", label: "Tonal Zones" },
   { id: "grade", label: "Grade" },
   { id: "adjust", label: "Color Adjustments" },
+  { id: "output", label: "Output" },
 ];
 
 const DEF_BY_KEY = Object.create(null);
@@ -296,6 +497,22 @@ function defaultParams() {
     p[d.key] = Array.isArray(d.def) ? d.def.slice() : d.def;
   }
   return p;
+}
+
+/**
+ * Should this parameter be shown for the current state?
+ * @param {ParamDef} def
+ * @param {object} params
+ */
+function isVisible(def, params) {
+  if (def.modes && def.modes.indexOf(params.mode) < 0) return false;
+  if (def.showIf && !def.showIf(params)) return false;
+  return true;
+}
+
+function sectionVisible(section, params) {
+  if (section.modes && section.modes.indexOf(params.mode) < 0) return false;
+  return PARAM_DEFS.some((d) => d.section === section.id && isVisible(d, params));
 }
 
 /**
@@ -319,6 +536,7 @@ function sanitizeParams(raw) {
         break;
       }
       case "choice":
+      case "chips":
         if (d.options.indexOf(v) >= 0) out[d.key] = v;
         break;
       case "toggle":
@@ -345,6 +563,9 @@ function sanitizeParams(raw) {
   // colorCount and the palette length must agree.
   out.colorCount = Math.min(8, Math.max(2, Math.round(out.colorCount)));
   if (out.whitePoint <= out.blackPoint) out.whitePoint = Math.min(255, out.blackPoint + 1);
+  if (out.highlightSplit <= out.shadowSplit) {
+    out.highlightSplit = Math.min(0.95, out.shadowSplit + 0.05);
+  }
   return out;
 }
 
@@ -374,8 +595,30 @@ function cloneParams(p) {
   return out;
 }
 
+/**
+ * Resolve the grid resolution (cells or dither pixels across the longest edge)
+ * for the current scale mode.
+ *
+ * DPI mode needs the document's own resolution to be meaningful: a 300 ppi
+ * document rendered at 150 dpi wants one output pixel per two document pixels.
+ *
+ * @param {object} params
+ * @param {number} sourceLongestPx longest edge of the document in pixels
+ * @param {number} [docPPI] document resolution; 72 is assumed when unknown
+ */
+function resolveResolution(params, sourceLongestPx, docPPI) {
+  const relative = params.mode === "dither" ? params.ditherResolution : params.density;
+  if (params.scaleMode !== "dpi") return relative;
+  const ppi = docPPI && docPPI > 1 ? docPPI : 72;
+  const inches = sourceLongestPx / ppi;
+  const cells = inches * params.dpi;
+  const def = DEF_BY_KEY[params.mode === "dither" ? "ditherResolution" : "density"];
+  return Math.min(def.max, Math.max(def.min, Math.round(cells)));
+}
+
 module.exports = {
   SCHEMA_VERSION,
+  MODES,
   PARAM_DEFS,
   SECTIONS,
   DEF_BY_KEY,
@@ -384,4 +627,7 @@ module.exports = {
   paramsEqual,
   cloneParams,
   normalizeHex,
+  isVisible,
+  sectionVisible,
+  resolveResolution,
 };

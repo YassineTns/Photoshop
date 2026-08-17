@@ -163,6 +163,7 @@ class FakePhotoshop {
   constructor(opts) {
     this.calls = [];
     this.putPixelsCalls = [];
+    this.putLayerMaskCalls = [];
     this.getPixelsCalls = [];
     this.disposed = 0;
     this.nextLayerId = 100;
@@ -209,6 +210,16 @@ class FakePhotoshop {
       putPixels: async (req) => this.putPixels(req),
       createImageDataFromBuffer: (buffer, options) => this.createImageData(buffer, options),
     };
+    // Mask support is optional in the real host, so it is optional here too:
+    // opts.noMasks exercises the documented fallback to flat output.
+    if (!opts.noMasks) {
+      this.imaging.putLayerMask = async (req) => {
+        this.putLayerMaskCalls.push(req);
+        const layer = this.findLayer(req.layerID);
+        if (layer) layer.maskWritten = true;
+        return {};
+      };
+    }
   }
 
   /* ---- layer tree helpers ---- */
@@ -257,6 +268,29 @@ class FakePhotoshop {
       }
       case "make": {
         const ref = (d._target && d._target[0] && d._target[0]._ref) || "";
+        if (d.new && d.new._class === "channel") {
+          // Adding a layer mask to the current selection.
+          const layer = this.doc.activeLayers[0];
+          if (layer) layer.hasMask = true;
+          return {};
+        }
+        if (ref === "contentLayer") {
+          const anchor = this.doc.activeLayers[0];
+          const parent = anchor ? anchor.parent : this.doc;
+          const list = parent && parent.layers ? parent.layers : this.doc.layers;
+          const using = d.using || {};
+          const colour = using.type && using.type.color ? using.type.color : {};
+          const layer = new FakeLayer(this.doc, {
+            id: this.nextLayerId++,
+            name: using.name || "Color Fill 1",
+            kind: "solidColor",
+            parent: parent === this.doc ? this.doc : parent,
+          });
+          layer.fillColor = [colour.red, colour.grain, colour.blue];
+          list.splice(Math.max(0, list.indexOf(anchor)), 0, layer);
+          this.doc.activeLayers = [layer];
+          return {};
+        }
         if (ref === "layerSection") {
           const members = this.doc.activeLayers.slice();
           const group = new FakeLayer(this.doc, {

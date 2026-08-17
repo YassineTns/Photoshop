@@ -130,6 +130,69 @@ async function deleteLayer(id) {
   await batchPlay([{ _obj: "delete", _target: [{ _ref: "layer", _id: id }] }], {});
 }
 
+/**
+ * Create a solid-colour fill layer above the current selection.
+ *
+ * `contentLayer` + `solidColorLayer` is the descriptor Photoshop records for
+ * Layer > New Fill Layer > Solid Color. Note the RGB descriptor spells green as
+ * `grain`; that is a genuine historical quirk of the Action Manager, not a typo.
+ *
+ * Fill layers are what make the separated output worth having: they stay
+ * editable (double-click to change the ink), they resample cleanly, and each one
+ * carries its own mask.
+ *
+ * @param {string} name
+ * @param {number[]} rgb 0..255
+ * @returns {Promise<object>} the new layer (DOM)
+ */
+async function createSolidFillLayer(name, rgb) {
+  await batchPlay(
+    [
+      {
+        _obj: "make",
+        _target: [{ _ref: "contentLayer" }],
+        using: {
+          _obj: "contentLayer",
+          name: name,
+          type: {
+            _obj: "solidColorLayer",
+            color: {
+              _obj: "RGBColor",
+              red: rgb[0],
+              grain: rgb[1],
+              blue: rgb[2],
+            },
+          },
+        },
+      },
+    ],
+    {}
+  );
+  const layer = app().activeDocument.activeLayers[0];
+  if (layer && name && layer.name !== name) await renameLayer(layer.id, name);
+  return app().activeDocument.activeLayers[0];
+}
+
+/**
+ * Add a layer mask to the given layer.
+ * @param {number} layerId
+ * @param {"revealAll"|"hideAll"} kind
+ */
+async function addLayerMask(layerId, kind = "revealAll") {
+  await selectLayers([layerId]);
+  await batchPlay(
+    [
+      {
+        _obj: "make",
+        new: { _class: "channel" },
+        at: { _ref: "channel", _enum: "channel", _value: "mask" },
+        using: { _enum: "userMaskEnabled", _value: kind },
+      },
+    ],
+    {}
+  );
+}
+
 /** Find a direct child of a group by name. @returns {object|null} DOM layer */
 function childByName(group, name) {
   if (!group || !group.layers) return null;
@@ -150,6 +213,8 @@ module.exports = {
   isSmartObject,
   groupLayers,
   createPixelLayer,
+  createSolidFillLayer,
+  addLayerMask,
   renameLayer,
   setVisible,
   deleteLayer,

@@ -21,6 +21,9 @@ const { gaussianBlurRGBA } = require("../src/engine/blur.js");
 const { quantize, extractSamples } = require("../src/engine/quantization.js");
 const { applySpread, padPalette, nearestIndex, paletteToLab } = require("../src/engine/palette.js");
 const { SHAPES, SHAPE_IDS } = require("../src/engine/shapes.js");
+const D = require("../src/engine/dither.js");
+const { zoneBands, makeZoneRange } = require("../src/engine/tonemap.js");
+const { unsharpMask, reduceNoise } = require("../src/engine/preprocess.js");
 const { hexToRgb, rgbToHex, luma709, adjustColor, rgbToOklab } = require("../src/engine/color.js");
 const { defaultParams, sanitizeParams, PARAM_DEFS } = require("../src/state/params.js");
 const { BUILTIN_PRESETS, presetToParams } = require("../src/presets/presets.js");
@@ -135,6 +138,16 @@ function cellRadii(engine, params) {
       line.push(inkToRadius(ink, maxRadius, params.radiusCurve));
     }
     out.push(line);
+  }
+  return out;
+}
+
+/** Render an 8-bit mask as a greyscale RGBA image, for visual inspection. */
+function maskToRGBA(mask, w, h) {
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = mask[i];
+    out[i * 4 + 3] = 255;
   }
   return out;
 }
@@ -665,6 +678,377 @@ group("Determinism");
 }
 
 /* ================================================================== *
+ * 2b. Dither mode
+ * ================================================================== */
+
+group("Dither: matrices");
+{
+  const b4 = D.bayerMatrix(2);
+  ok(b4.size === 4, "bayerMatrix(2) is 4x4");
+  const vals = Array.from(b4.data).map((v) => Math.floor(v * 16)).sort((a, b) => a - b);
+  ok(vals.join(",") === "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15", "Bayer 4x4 is a permutation of 0..15");
+  ok(Math.floor(b4.data[0] * 16) === 0 && Math.floor(b4.data[1] * 16) === 8, "Bayer 4x4 matches the canonical first row");
+  ok(b4.data[0] > 0 && b4.data[0] < 1 / 16, "thresholds are centred in their bin, not at its edge");
+
+  const b8 = D.bayerMatrix(3);
+  ok(b8.size === 8 && new Set(Array.from(b8.data)).size === 64, "Bayer 8x8 has 64 distinct thresholds");
+
+  const cl = D.clusteredMatrix(8, false);
+  const centre = cl.data[4 * 8 + 4];
+  const corner = cl.data[0];
+  ok(centre < corner, `clustered dots grow from the centre outward (${centre.toFixed(2)} < ${corner.toFixed(2)})`);
+
+  const t0 = Date.now();
+  const bn = D.blueNoiseMatrix(64);
+  const bnMs = Date.now() - t0;
+  ok(bn.size === 64, "blue noise is 64x64");
+  ok(bnMs < 1500, `blue noise builds once, quickly (${bnMs}ms)`);
+  ok(D.blueNoiseMatrix(64) === bn, "blue noise is cached after the first build");
+  let bnMin = 1, bnMax = 0, bnSum = 0;
+  for (const v of bn.data) {
+    bnMin = Math.min(bnMin, v);
+    bnMax = Math.max(bnMax, v);
+    bnSum += v;
+  }
+  ok(bnMin > 0 && bnMin < 0.001 && bnMax > 0.99, `blue noise spans the full range (${bnMin.toFixed(5)} .. ${bnMax.toFixed(3)})`);
+  near(bnSum / bn.data.length, 0.5, 0.01, "blue noise has a flat histogram");
+  // Blue noise must have far less low-frequency energy than white noise. Compare
+  // the mean absolute difference between neighbours: blue noise decorrelates.
+  const neighbourVariation = (m) => {
+    let sum = 0;
+    let n = 0;
+    for (let y = 0; y < m.size; y++) {
+      for (let x = 0; x < m.size - 1; x++) {
+        sum += Math.abs(m.data[y * m.size + x] - m.data[y * m.size + x + 1]);
+        n++;
+      }
+    }
+    return sum / n;
+  };
+  ok(
+    neighbourVariation(bn) > neighbourVariation(D.bayerMatrix(4)) * 0.8,
+    "blue noise neighbours are strongly decorrelated"
+  );
+
+  ok(D.ALGORITHM_IDS.length >= 20, `${D.ALGORITHM_IDS.length} dither algorithms registered`);
+  for (const a of D.ALGORITHMS) {
+    if (a.family === "diffusion") {
+      const k = D.DIFFUSION_KERNELS[a.kernel];
+      ok(!!k && k.length > 0, `${a.id} has a diffusion kernel`);
+      const bad = k.filter((e) => e[1] < 0 || (e[1] === 0 && e[0] <= 0));
+      ok(bad.length === 0, `${a.id} only pushes error onto unvisited pixels`);
+    }
+  }
+}
+
+group("Dither: tone reproduction");
+{
+  // The whole point of dithering: the local average must track the source.
+  const img = F.gradient(512, 96);
+  const pal = [[0, 0, 0], [255, 255, 255]];
+  const labPal = paletteToLab(pal);
+  const BANDS = 8;
+
+  const expected = [];
+  for (let b = 0; b < BANDS; b++) {
+    let sum = 0;
+    let n = 0;
+    for (let x = (b * 512) / BANDS; x < ((b + 1) * 512) / BANDS; x++) {
+      sum += 1 - (x * 255) / 511 / 255;
+      n++;
+    }
+    expected.push(sum / n);
+  }
+
+  // The tolerance is derived, not guessed. An ordered matrix with L distinct
+  // thresholds can only represent tone in steps of 1/L, so its best possible
+  // worst-case error is 1/(2L) once the thresholds are centred; asserting that
+  // bound checks each matrix achieves the best it structurally can, instead of
+  // hiding a real regression behind a loose constant.
+  //
+  // Two documented exceptions:
+  //   threshold  - no matrix at all, so it cannot reproduce tone by design
+  //   atkinson   - discards 25% of its error on purpose; that is what produces
+  //                the blown-out early-Macintosh look
+  const toleranceFor = (algo) => {
+    if (algo === "threshold") return 1;
+    if (algo === "atkinson") return 0.13;
+    const a = D.getAlgorithm(algo);
+    if (a.family === "diffusion") return 0.03;
+    const levels = new Set(Array.from(a.matrix().data)).size;
+    return 1 / (2 * levels) + 0.012;
+  };
+
+  for (const algo of D.ALGORITHM_IDS) {
+    const idx = D.ditherToIndices(img, {
+      labPal,
+      palette: pal,
+      algorithm: algo,
+      strength: 1,
+      serpentine: true,
+    });
+    let worst = 0;
+    for (let b = 0; b < BANDS; b++) {
+      let ink = 0;
+      let n = 0;
+      for (let y = 0; y < 96; y++) {
+        for (let x = Math.floor((b * 512) / BANDS); x < Math.floor(((b + 1) * 512) / BANDS); x++) {
+          if (idx[y * 512 + x] === 0) ink++;
+          n++;
+        }
+      }
+      worst = Math.max(worst, Math.abs(ink / n - expected[b]));
+    }
+    const tol = toleranceFor(algo);
+    ok(
+      worst <= tol,
+      `${algo} reproduces the ramp within the ${tol.toFixed(3)} its matrix allows (worst ${worst.toFixed(3)})`
+    );
+  }
+}
+
+group("Dither: through the pipeline");
+{
+  const e = mkEngine(F.photo(800, 600));
+  const base = {
+    mode: "dither",
+    ditherResolution: 300,
+    colorCount: 4,
+    paletteLocked: false,
+    spread: 0.2,
+  };
+
+  for (const algo of ["floydsteinberg", "bayer8", "bluenoise", "atkinson", "cluster45"]) {
+    const p = sanitizeParams(Object.assign({}, base, { ditherAlgorithm: algo }));
+    const out = e.render(p, { width: 800, height: 600 });
+    save(`21-dither-${algo}.png`, out);
+    ok(!hasNaN(out), `${algo} renders without NaN`);
+    // Every output pixel must be exactly a palette colour - that is what makes
+    // the separated output's masks lossless.
+    const allowed = new Set(out.palette);
+    let offPalette = 0;
+    for (let i = 0; i < out.data.length; i += 4 * 997) {
+      const hex = rgbToHex(out.data[i], out.data[i + 1], out.data[i + 2]);
+      if (!allowed.has(hex)) offPalette++;
+    }
+    ok(offPalette === 0, `${algo} emits only palette colours (${offPalette} strays)`);
+  }
+
+  // Resolution independence: the dither grid is fixed, so scaling the output
+  // must not change the pattern, only its size.
+  const p = sanitizeParams(Object.assign({}, base, { ditherAlgorithm: "bayer8" }));
+  const small = e.render(p, { width: 400, height: 300 });
+  const big = e.render(p, { width: 1600, height: 1200 });
+  const ms = meanRGB(small);
+  const mb = meanRGB(big);
+  for (let c = 0; c < 3; c++) near(ms[c], mb[c], 6, `dither mean is scale invariant on channel ${c}`);
+
+  // Amount 0 must remove the pattern entirely.
+  const flat = e.render(sanitizeParams(Object.assign({}, base, { ditherStrength: 0, ditherAlgorithm: "bayer8" })), {
+    width: 400,
+    height: 300,
+  });
+  const dithered = e.render(sanitizeParams(Object.assign({}, base, { ditherStrength: 1, ditherAlgorithm: "bayer8" })), {
+    width: 400,
+    height: 300,
+  });
+  const edginess = (img) => {
+    let sum = 0;
+    for (let i = 4; i < img.data.length; i += 4) sum += Math.abs(img.data[i] - img.data[i - 4]);
+    return sum / (img.data.length / 4);
+  };
+  ok(edginess(flat) < edginess(dithered) * 0.6, `Amount 0 posterises instead of dithering (${edginess(flat).toFixed(1)} vs ${edginess(dithered).toFixed(1)})`);
+  save("21-dither-amount0.png", flat);
+
+  // The preview cap must flag itself rather than lying.
+  const capped = e.render(sanitizeParams(Object.assign({}, base, { ditherResolution: 2000 })), {
+    width: 400,
+    height: 300,
+    maxDitherGrid: 500,
+  });
+  ok(capped.exact === false, "a capped preview reports itself as approximate");
+  const uncapped = e.render(sanitizeParams(Object.assign({}, base, { ditherResolution: 300 })), {
+    width: 400,
+    height: 300,
+    maxDitherGrid: 500,
+  });
+  ok(uncapped.exact === true, "a preview within the cap reports itself as exact");
+}
+
+group("Tonal zones");
+{
+  const z = zoneBands(6, 0.33, 0.66);
+  ok(!!z, "six colours can be split into three zones");
+  ok(z.bands.length === 3, "three bands");
+  ok(z.bands[0][0] === 0 && z.bands[2][1] === 6, "bands span the whole palette");
+  ok(z.bands[0][1] > z.bands[1][0], "adjacent bands overlap so error can cross the boundary");
+  ok(zoneBands(2, 0.33, 0.66) === null, "a two-colour palette is not split");
+
+  const range = makeZoneRange(6, { tonalMapping: true, shadowSplit: 0.33, highlightSplit: 0.66 });
+  const dark = range(0.1);
+  const light = range(0.9);
+  ok(dark[0] === 0, "shadows start at the darkest colour");
+  ok(light[1] === 6, "highlights end at the lightest colour");
+  ok(dark[1] <= light[0] + 2, "shadow and highlight bands are disjoint apart from the overlap");
+  ok(makeZoneRange(6, { tonalMapping: false }) === null, "mapping off returns no restriction");
+
+  // End to end: with zones on, dark areas must not borrow the lightest colour.
+  const e = mkEngine(F.gradient(600, 200));
+  const p = sanitizeParams({
+    mode: "dither",
+    ditherAlgorithm: "floydsteinberg",
+    ditherResolution: 200,
+    colorCount: 6,
+    palette: ["#000000", "#333333", "#666666", "#999999", "#CCCCCC", "#FFFFFF"],
+    paletteLocked: true,
+    spread: 0,
+    tonalMapping: true,
+    shadowSplit: 0.33,
+    highlightSplit: 0.66,
+  });
+  const out = e.render(p, { width: 600, height: 200 });
+  save("22-tonal-zones.png", out);
+  ok(!hasNaN(out), "tonal zones render without NaN");
+
+  // The darkest tenth of the ramp must stay dark.
+  let brightest = 0;
+  for (let y = 0; y < 200; y++) {
+    for (let x = 0; x < 40; x++) brightest = Math.max(brightest, out.data[(y * 600 + x) * 4]);
+  }
+  ok(brightest <= 160, `shadows are confined to the shadow band (brightest ${brightest})`);
+}
+
+group("Pre-processing");
+{
+  const flat = F.solid(64, 64, 128, 128, 128);
+  ok(unsharpMask(flat, 100, 2).data[0] === 128, "unsharp mask leaves a flat field alone");
+  ok(unsharpMask(flat, 0, 2) === flat, "zero amount is a passthrough");
+  ok(reduceNoise(flat, 0) === flat, "zero noise reduction is a passthrough");
+
+  // A step edge must get steeper, not blurrier.
+  const edge = F.makeImage(64, 16, (x, y, p) => {
+    const v = x < 32 ? 90 : 165;
+    p[0] = p[1] = p[2] = v;
+  });
+  const sharpened = unsharpMask(edge, 120, 2);
+  const contrastAt = (img) => img.data[(8 * 64 + 34) * 4] - img.data[(8 * 64 + 29) * 4];
+  ok(
+    contrastAt(sharpened) > contrastAt(edge),
+    `unsharp mask increases edge contrast (${contrastAt(edge)} -> ${contrastAt(sharpened)})`
+  );
+
+  // Noise reduction must flatten noise while preserving the edge.
+  const noisy = F.makeImage(96, 96, (x, y, p) => {
+    const base = x < 48 ? 80 : 180;
+    const n = ((x * 7 + y * 13) % 11) - 5;
+    p[0] = p[1] = p[2] = base + n * 2;
+  });
+  const cleaned = reduceNoise(noisy, 90);
+  const variation = (img, x0, x1) => {
+    let sum = 0;
+    let n = 0;
+    for (let y = 1; y < 95; y++) {
+      for (let x = x0; x < x1 - 1; x++) {
+        sum += Math.abs(img.data[(y * 96 + x) * 4] - img.data[(y * 96 + x + 1) * 4]);
+        n++;
+      }
+    }
+    return sum / n;
+  };
+  ok(
+    variation(cleaned, 2, 44) < variation(noisy, 2, 44) * 0.8,
+    `noise reduction flattens flat areas (${variation(noisy, 2, 44).toFixed(2)} -> ${variation(cleaned, 2, 44).toFixed(2)})`
+  );
+  const edgeStep = (img) => img.data[(48 * 96 + 50) * 4] - img.data[(48 * 96 + 45) * 4];
+  ok(
+    edgeStep(cleaned) > edgeStep(noisy) * 0.7,
+    `noise reduction preserves the edge (${edgeStep(noisy)} -> ${edgeStep(cleaned)})`
+  );
+}
+
+group("Colour separation");
+{
+  for (const mode of ["halftone", "dither"]) {
+    const e = mkEngine(F.photo(400, 300));
+    const p = sanitizeParams({
+      mode,
+      output: "separated",
+      density: 50,
+      ditherResolution: 200,
+      ditherAlgorithm: "floydsteinberg",
+      colorCount: 4,
+      paletteLocked: false,
+      spread: 0.2,
+    });
+    const sep = e.renderSeparated(p, { width: 400, height: 300 });
+    ok(sep.masks.length === sep.palette.length, `${mode}: one mask per palette colour (${sep.masks.length})`);
+    ok(sep.masks.every((m) => m.length === 400 * 300), `${mode}: masks are full size`);
+
+    // The defining property: masks are mutually exclusive and sum to full
+    // coverage, so the stack reproduces the composite whatever the layer order.
+    let worstSum = 0;
+    for (let i = 0; i < 400 * 300; i += 37) {
+      let sum = 0;
+      for (const m of sep.masks) sum += m[i];
+      worstSum = Math.max(worstSum, Math.abs(sum - 255));
+    }
+    ok(worstSum <= 3, `${mode}: masks sum to full coverage (worst deviation ${worstSum})`);
+
+    // And they must actually reconstruct the flat render.
+    const flatOut = e.render(p, { width: 400, height: 300 });
+    const pal = sep.palette.map(hexToRgb);
+    let worstErr = 0;
+    for (let i = 0; i < 400 * 300; i += 53) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let k = 0; k < sep.masks.length; k++) {
+        const a = sep.masks[k][i] / 255;
+        r += pal[k][0] * a;
+        g += pal[k][1] * a;
+        b += pal[k][2] * a;
+      }
+      worstErr = Math.max(
+        worstErr,
+        Math.abs(r - flatOut.data[i * 4]),
+        Math.abs(g - flatOut.data[i * 4 + 1]),
+        Math.abs(b - flatOut.data[i * 4 + 2])
+      );
+    }
+    ok(worstErr <= 4, `${mode}: compositing the masks reproduces the flat render (worst channel error ${worstErr.toFixed(1)})`);
+
+    if (mode === "halftone") {
+      save("23-separation-paper.png", {
+        data: maskToRGBA(sep.masks[sep.paperIndex], 400, 300),
+        width: 400,
+        height: 300,
+      });
+      const inkIdx = sep.masks.findIndex((m, i) => i !== sep.paperIndex);
+      save("23-separation-ink.png", {
+        data: maskToRGBA(sep.masks[inkIdx], 400, 300),
+        width: 400,
+        height: 300,
+      });
+    }
+  }
+}
+
+group("DPI scale mode");
+{
+  const { resolveResolution } = require("../src/state/params.js");
+  const p = sanitizeParams({ mode: "halftone", scaleMode: "dpi", dpi: 150 });
+  // A 3000px document at 300 ppi is 10 inches; at 150 dpi that is 1500 cells.
+  ok(resolveResolution(p, 3000, 300) === 400, `DPI is clamped to the parameter range (${resolveResolution(p, 3000, 300)})`);
+  const lowDpi = sanitizeParams({ mode: "halftone", scaleMode: "dpi", dpi: 20 });
+  ok(resolveResolution(lowDpi, 3000, 300) === 200, `20 dpi on a 10 inch document gives 200 cells (${resolveResolution(lowDpi, 3000, 300)})`);
+  const rel = sanitizeParams({ mode: "halftone", scaleMode: "relative", density: 123 });
+  ok(resolveResolution(rel, 3000, 300) === 123, "relative mode ignores DPI");
+  const dith = sanitizeParams({ mode: "dither", scaleMode: "dpi", dpi: 100 });
+  ok(resolveResolution(dith, 2000, 200) === 1000, `dither DPI resolves against ditherResolution (${resolveResolution(dith, 2000, 200)})`);
+  ok(resolveResolution(rel, 3000, 0) === 123, "a missing document resolution does not break relative mode");
+}
+
+/* ================================================================== *
  * 3. Performance
  * ================================================================== */
 
@@ -677,31 +1061,47 @@ group("Performance");
   ];
   if (HEAVY) sizes.push([6000, 4000]);
 
-  const params = presetToParams(BUILTIN_PRESETS.find((p) => p.id === "comic"));
-  for (const [w, h] of sizes) {
-    const img = F.photo(w, h);
-    const e = mkEngine(img);
+  const modes = [
+    { label: "halftone", params: presetToParams(BUILTIN_PRESETS.find((p) => p.id === "comic")) },
+    { label: "dither  ", params: presetToParams(BUILTIN_PRESETS.find((p) => p.id === "mac-classic")) },
+  ];
 
-    const t0 = Date.now();
-    const preview = e.render(params, { width: 640, height: Math.round((640 * h) / w) });
-    const tPreview = Date.now() - t0;
+  for (const { label, params } of modes) {
+    for (const [w, h] of sizes) {
+      const img = F.photo(w, h);
+      const e = mkEngine(img);
+      const previewOpts = {
+        width: 640,
+        height: Math.round((640 * h) / w),
+        maxDitherGrid: 700,
+      };
 
-    const t1 = Date.now();
-    const full = e.render(params);
-    const tFull = Date.now() - t1;
+      const t0 = Date.now();
+      const preview = e.render(params, previewOpts);
+      const tPreview = Date.now() - t0;
 
-    // Interactive re-render with the cells already measured.
-    const t2 = Date.now();
-    e.render(Object.assign({}, params, { hue: 45 }), { width: 640, height: Math.round((640 * h) / w) });
-    const tInteractive = Date.now() - t2;
+      const t1 = Date.now();
+      const full = e.render(params);
+      const tFull = Date.now() - t1;
 
-    console.log(
-      `    ${w}x${h}: first preview ${tPreview}ms, slider re-render ${tInteractive}ms, full render ${tFull}ms ` +
-        `(analysis ${e.stats.analysisSize}, ${e.stats.cells} cells)`
-    );
-    ok(tInteractive < 120, `${w}x${h} slider re-render stays interactive (${tInteractive}ms < 120ms)`);
-    ok(!hasNaN(full), `${w}x${h} full render is clean`);
-    if (w === 3000) save("12-3000-full.png", preview);
+      // Interactive re-render: Hue never invalidates the expensive stage in
+      // either mode, so this is the honest measure of slider latency.
+      const t2 = Date.now();
+      e.render(Object.assign({}, params, { hue: 45 }), previewOpts);
+      const tInteractive = Date.now() - t2;
+
+      console.log(
+        `    ${label} ${w}x${h}: first preview ${tPreview}ms, slider re-render ${tInteractive}ms, ` +
+          `full render ${tFull}ms (analysis ${e.stats.analysisSize})`
+      );
+      ok(
+        tInteractive < 120,
+        `${label.trim()} ${w}x${h} slider re-render stays interactive (${tInteractive}ms < 120ms)`
+      );
+      ok(!hasNaN(full), `${label.trim()} ${w}x${h} full render is clean`);
+      if (w === 3000 && label === "halftone") save("12-3000-full.png", preview);
+      if (w === 3000 && label !== "halftone") save("12-3000-dither.png", preview);
+    }
   }
   if (!HEAVY) console.log("    (run with --heavy to include 6000x4000)");
 }

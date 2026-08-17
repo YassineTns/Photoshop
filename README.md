@@ -1,11 +1,18 @@
 # Halftone Studio
 
-A Photoshop UXP plugin that turns a layer into a coloured halftone: a regular
-grid of dots whose size follows local luminance and whose colour comes from a
-quantised palette. The rendering is done by the plugin's own engine, not by a
-stack of Photoshop adjustment layers.
+A Photoshop UXP plugin for bitmapping artwork, with two rendering engines:
 
-![Comic preset](docs/sample-comic.png)
+- **Halftone** — a regular grid of dots whose size follows local luminance and
+  whose colour comes from a quantised palette.
+- **Dither** — 24 dithering algorithms (Bayer, clustered, blue noise, and ten
+  error-diffusion kernels) that pick one palette colour per pixel.
+
+Both are computed by the plugin's own engine, not by a stack of Photoshop
+adjustment layers, and both can output either a flat pixel layer or a
+**colour-separated stack of editable fill layers**.
+
+![Comic preset — halftone mode](docs/sample-comic.png)
+![Zone Poster preset — dither mode with tonal zones](docs/sample-dither.png)
 
 ---
 
@@ -13,42 +20,45 @@ stack of Photoshop adjustment layers.
 
 You need **Photoshop 24.0 or newer** (the imaging API the plugin reads and
 writes pixels with landed in 23.3; 24.0 is the floor declared in the manifest)
-and the [UXP Developer Tool](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/).
+and the [UXP Developer Tool](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/),
+which installs from the Creative Cloud Desktop app.
 
-1. Clone this repository.
-2. Open **UXP Developer Tool** and press **Add Plugin**.
-3. Select `manifest.json` at the root of the clone.
-4. Press **Load**. The panel appears under **Plugins ▸ Halftone Studio** in
-   Photoshop.
-5. While developing, **Watch** reloads the panel whenever a file changes.
+1. `git clone https://github.com/YassineTns/Photoshop.git halftone-studio`
+2. Open **UXP Developer Tool**, press **Add Plugin**, select `manifest.json`.
+3. Press **Load**. The panel appears under **Plugins ▸ Halftone Studio**.
+4. While developing, **Watch** reloads the panel whenever a file changes.
 
-There is no build step. The plugin is plain CommonJS modules loaded directly by
-UXP, so what you edit is what runs.
-
-To regenerate the panel icons after changing `tools/make-icons.js`:
-
-```bash
-npm run icons
-```
+There is no build step and no dependencies. The plugin is plain CommonJS modules
+loaded directly by UXP, so what you edit is what runs. `npm install` is only
+needed if you want to run the tests.
 
 ## Use
 
 1. Select a pixel or Smart Object layer.
 2. Press **Load Layer**. The panel reads the pixels and shows a live preview.
-3. Adjust anything. The preview follows every slider in real time.
-4. Press **Apply**. The plugin builds this structure:
+3. Pick a **Mode**, adjust anything. The preview follows every slider in real time.
+4. Press **Apply**. The plugin builds:
 
 ```
 Halftone ▸ HT-4f2a9c        ← group, carries the parameters
-   ├── Halftone Render       ← the generated pixels
+   ├── Halftone Render       ← the generated pixels (flat output)
    └── Halftone Source       ← your original, as a hidden Smart Object
 ```
 
-5. Later, select that group again and press **Load Layer**: every slider is
-   restored from the stored parameters. Change what you like and press
-   **Update** — the render is recomputed from the untouched source and written
-   back into the same layer, so any mask, opacity or blend mode you added to the
-   render survives.
+or, with **Output: separated**:
+
+```
+Halftone ▸ HT-4f2a9c
+   ├── Ink 3 #EC3E32         ← solid-colour fill layer + coverage mask
+   ├── Ink 2 #161616         ← "
+   ├── Ink 1 #8A7F6C         ← "
+   ├── Paper #F5EBD8         ← "
+   └── Halftone Source
+```
+
+5. Later, select that group and press **Load Layer**: every slider is restored
+   from the stored parameters. Change what you like and press **Update** — the
+   render is recomputed from the untouched source.
 
 Slider conventions: drag to scrub, hold **Shift** for fine control, **double
 click** (or the ↺ button) to restore the default, and type in the numeric field
@@ -63,110 +73,150 @@ manifest.json          UXP manifest (v5)
 index.html             panel markup
 src/
   main.js              bootstrap
-  engine/              the renderer - pure JS, zero UXP dependencies
+  engine/              the renderers - pure JS, zero UXP dependencies
     color.js           sRGB/linear, OKLab, HSL, luma
     blur.js            3-pass box blur approximating a Gaussian
+    preprocess.js      unsharp mask, edge-preserving noise reduction
     grade.js           tone LUT, Schlick bias, ink -> radius
     quantization.js    median cut, k-means, popularity
     palette.js         extraction, spread, matching, ink/paper split
+    tonemap.js         shadow / midtone / highlight palette bands
     shapes.js          dot shapes as signed distance functions
     resample.js        area-average downscaling
-    halftone.js        grid, cell sampling, antialiased rasteriser
-    pipeline.js        staged cache + async chunked rendering
+    halftone.js        grid, cell sampling, antialiased rasteriser, separation
+    dither.js          threshold matrices, diffusion kernels, dither pass
+    pipeline.js        staged cache, mode dispatch, async chunked rendering
   photoshop/           everything that touches the host
     host.js            module access, executeAsModal, capability probing
     document.js        document + selection queries (read only)
-    layers.js          layer operations (DOM first, batchPlay fallback)
-    imaging.js         getPixels / putPixels
+    layers.js          layer ops (DOM first, batchPlay fallback), fill layers
+    imaging.js         getPixels / putPixels / putLayerMask
     metadata.js        parameter persistence
-    render.js          Apply / Update orchestration
+    render.js          Apply / Update orchestration, output modes
   ui/
     panel.js           panel controller
-    controls.js        sliders, segmented pickers, toggles, palette editor
+    controls.js        sliders, segmented pickers, chips, toggles, palette
     styles.css
   state/params.js      the parameter schema - single source of truth
-  presets/presets.js   the six built-in presets
+  presets/presets.js   the eleven built-in presets
   util/                PNG encoder, UTF-8 base64
 test/                  engine suite + mocked-host integration suite
 tools/make-icons.js
 ```
 
-`src/state/params.js` is the spine: the UI builds itself from it, presets are
-validated against it, and persisted records migrate through it. Adding a control
-means adding one entry there.
+`src/state/params.js` is the spine: the UI builds itself from it (including
+which controls are visible in which mode), presets are validated against it, and
+persisted records migrate through it. Adding a control means adding one entry
+there.
 
-### The rendering pipeline
+### The two pipelines
 
 ```
-source pixels
-   ↓  area-average downscale to an "analysis" image (~500-3000px)
-   ↓  optional blur
-   ↓  one pass: assign every pixel to a grid cell, accumulate mean tone + colour
-cells (a few thousand entries)
-   ↓  tone LUT: levels → gamma → contrast → exposure
-   ↓  ink = invert ? tone : 1 - tone,  then Schlick bias
-   ↓  radius = maxRadius · √ink            (dot *area* tracks tone)
-   ↓  colour = nearest ink-palette entry to the cell's mean colour, in OKLab
-rasterise at the output resolution
+                       source pixels
+                             │
+              area-average downscale to an "analysis" image
+                             │
+          denoise → blur → sharpen  (resolution-independent units)
+                             │
+              ┌──────────────┴───────────────┐
+      HALFTONE│                              │DITHER
+              │                              │
+  assign every pixel to a grid       apply the tone LUT per channel
+  cell, accumulate tone + colour              │
+              │                        for each pixel: nearest palette
+   per cell:  grade → ink → bias         entry, then either a threshold
+   radius = maxRadius·√ink               matrix or error diffusion
+              │                              │
+  rasterise dots at output size     nearest-neighbour scale to output
 ```
 
-Two decisions do most of the work here.
+Two decisions do most of the work.
 
-**Only two operations touch pixels, and neither runs at document resolution.**
-Cell tone is a low frequency measurement, so measuring it on a downscaled image
-is very nearly identical to measuring it on the original — the cell sampler is
-performing the same area average the downscaler already did. Everything
-downstream (grading, bias, palette, spread, hue, saturation, radius, shape)
-operates on the cell array. Dragging a slider therefore never re-reads a source
-pixel, which is why a 6000×4000 document re-renders its preview in the same ~10ms
-as a 1080×1080 one.
+**In halftone mode, only two operations touch pixels and neither runs at
+document resolution.** Cell tone is a low-frequency measurement, so measuring it
+on a downscaled image is very nearly identical — the cell sampler performs the
+same area average the downscaler already did. Everything downstream operates on
+the cell array. Dragging a slider never re-reads a source pixel.
 
-**Density is "cells across the longest edge", not a pixel size.** Every
-parameter is resolution independent, so the preview and the full render are
-produced from *the same cells*, just rasterised at different sizes. They cannot
-drift apart, and the test suite asserts it (`ink density matches across
-resolutions`, `cell centres scale exactly`).
+**In dither mode, the grid itself is the parameter.** Dithering decides a colour
+per pixel, so it cannot be reduced to cell averages. Instead it runs on a grid of
+"dither pixels" whose count you set, then scales up with nearest-neighbour. That
+is what gives the chunky bitmap look, what DPI-based scaling means in practice,
+and it keeps the cost proportional to the grid rather than the document.
 
-Because of the staging, changing Hue or Contrast reuses the measured cells
-outright — asserted in the `Cache invalidation` group.
+In both modes the expensive stage is cached and keyed, so **slider latency is
+flat in document size** — 6 to 14 ms whether the document is 1080px or 6000px.
 
-### Dot quality
+### Dithering
+
+24 algorithms in three families:
+
+| Family | Algorithms |
+|---|---|
+| Ordered | Bayer 2/4/8/16, Clustered 4/6/8/45°, Line H/V/45°, Blue Noise, White Noise |
+| Diffusion | Floyd–Steinberg, False F–S, Jarvis, Stucki, Atkinson, Burkes, Sierra 3/2/Lite, Stevenson–Arce |
+| None | Threshold |
+
+Two details matter more than the list length.
+
+**Ordered dithering picks the best two-colour mix, not a perturbed nearest
+match.** The obvious implementation — add the threshold matrix to the pixel, then
+match in OKLab — does not reproduce the right average, because the perturbation
+is linear in sRGB while the decision boundary sits wherever OKLab puts it. A
+black-to-white ramp came out measurably light (0.84 ink where 0.94 was wanted)
+and ordered dithering disagreed with error diffusion about exposure. Instead the
+engine finds the nearest entry A, the entry B whose segment towards A best
+contains the pixel, and the ratio *t* along it; emitting B for a fraction *t* of
+pixels makes the average exactly the best two-colour approximation. Both families
+now agree on tone.
+
+**Thresholds sit at the centre of their bin.** A matrix with L levels can only
+represent tone in steps of 1/L; centring halves the worst-case error from 1/L to
+1/(2L) for free. It measurably improved every ordered algorithm (Bayer 2×2:
+0.188 → 0.063 worst-case ramp error; the line screens: 0.063 → 0.001).
+
+Blue noise is generated with void-and-cluster (Ulichney) at panel start, cached
+after the first build (~40 ms). Unlike Bayer it has no low-frequency energy, so
+it produces no visible grid — just an even, organic sparkle.
+
+Atkinson deliberately discards 25% of its error; that is what produces the
+blown-out early-Macintosh look, and the test suite exempts it by name rather than
+loosening the tolerance for everyone.
+
+### Halftone dot quality
 
 - **Antialiasing** is analytic: each shape is a signed distance function and
-  coverage is `clamp(0.5 − sdf, 0, 1)`, a 1px band straddling the true edge. No
-  supersampling, so no memory blow-up on large documents.
-- **Sub-pixel dots** (radius < 0.5px) abandon the SDF and splat their exact
-  analytic area bilinearly onto the four neighbouring pixels. Without this the
-  highlight end of a gradient clamps to a fixed half-covered pixel and the ramp
-  visibly stops being smooth.
+  coverage is `clamp(0.5 − sdf, 0, 1)`. No supersampling, so no memory blow-up.
+- **Sub-pixel dots** (radius < 0.5px) splat their exact analytic area bilinearly
+  onto four pixels. Without this the highlight end of a gradient clamps to a
+  fixed half-covered pixel and the ramp visibly stops being smooth.
 - **Dot area is proportional to tone** (radius ∝ √ink), which is how a real
-  amplitude-modulated screen behaves and what keeps a black→white ramp even
-  instead of bunching in the shadows. The `Dot Curve` slider blends towards
-  radius-proportional if you want a harder look.
-- **Shapes are area-matched**: a square, diamond or cross of a given "radius"
-  covers the same area as the circle would, so switching shape changes the
-  texture without changing the exposure. Verified to within 4%.
+  amplitude-modulated screen behaves.
+- **Shapes are area-matched** to within 4%, so switching shape changes the
+  texture without changing the exposure.
 - **The paper colour is never used as a dot colour.** If it were, every cell
   lighter than the mid point would draw an invisible paper-coloured dot and half
-  the tonal range would disappear. Tone is carried purely by dot size.
+  the tonal range would disappear.
 
 ### Colour
 
-Quantisation and colour matching happen in **OKLab**, which is why palettes stay
-clean instead of muddy. `kmeans` is the default: it is seeded by median cut
-(so it is deterministic — no random-initialisation lottery) and respawns dead
-centroids on the worst-represented sample, so it always returns the number of
+Quantisation and matching happen in **OKLab**, which is why palettes stay clean
+instead of muddy. `kmeans` is the default: seeded by median cut (so it is
+deterministic) and it respawns dead centroids, so it always returns the number of
 colours you asked for. On the flat-colour fixture it recovers all five source
 colours exactly, where median cut lands within ΔE 0.13.
 
-`Spread` pushes palette entries away from their centroid in OKLab, expanding
-lightness harder than chroma — the punchy separation of a screen print without
-tipping colours out of gamut.
+**Tonal zones** split the palette into shadow / midtone / highlight bands and
+restrict matching to the band a pixel's luminance falls in. The palette is
+already sorted dark to light, so each band owns a contiguous slice of indices —
+which makes this an index range, not a per-pixel subset search. Bands overlap by
+one entry: without that, error diffusion cannot carry error across a boundary and
+the boundary shows up as a hard contour.
 
-Hue/Saturation/Brightness are applied to the palette and to cell colours rather
-than per pixel. For these HSL operations that is exact (they are pointwise) and
-reduces the cost from O(width·height) to O(colours). Hue rotation deliberately
-preserves HSL lightness, so it never disturbs the dot geometry.
+`Spread` pushes palette entries away from their centroid in OKLab, expanding
+lightness harder than chroma. Hue/Saturation/Brightness are applied to the
+palette rather than per pixel — for these pointwise HSL operations that is
+equivalent, and it keeps Hue at O(colours) in both modes.
 
 ---
 
@@ -174,33 +224,49 @@ preserves HSL lightness, so it never disturbs the dot geometry.
 
 **Photoshop does not let a plugin register its own Smart Filter.** The filter
 list is closed to UXP and there is no API to install a re-editable filter entry
-on a Smart Object. A genuine "double-click the filter to reopen the dialog"
-experience is therefore not achievable, and this plugin does not pretend it is.
+on a Smart Object. A "double-click the filter to reopen the dialog" experience is
+therefore not achievable, and this plugin does not pretend it is.
 
 What it does instead:
 
 - your original pixels are **never modified** — they are sealed inside a Smart
   Object that stays in the document;
-- the render lives on **its own layer**, so masks, opacity and blend modes you
-  add to it survive an Update;
+- the render lives on **its own layer(s)**;
 - the parameters **ride along with the layer**, so selecting an old render
   restores every slider.
 
-That is re-editable in every practical sense. It just is not a Smart Filter.
+### Output modes
+
+**flat** writes one pixel layer holding the composite. Update writes back into
+the same layer, so any mask, opacity or blend mode you added survives.
+
+**separated** writes one solid-colour fill layer per palette colour, each
+carrying a mask with that colour's coverage. This is the better output for print
+and for editing: double-click a fill layer to change that ink everywhere at once,
+and the layers resample cleanly because only the mask is raster.
+
+The masks are **mutually exclusive and sum to full coverage**, produced by
+performing ordinary alpha compositing per channel (`mask_i = mask_i(1−a) + 255a`,
+`mask_j *= (1−a)`). That means the stack reproduces the flat render *exactly*
+and is independent of layer order — which matters, because dots of different
+colours overlap and layer order would otherwise decide the result. The test suite
+asserts both properties (worst deviation from full coverage: 0; worst channel
+error against the flat render: 0.8/255).
+
+Separation needs `imaging.putLayerMask`. Where that is missing the plugin falls
+back to flat output and says so, rather than building half a layer stack.
 
 ### Where the parameters are stored
 
-UXP exposes no "custom data" bag on a layer, so there is no single blessed
-place. The plugin writes the same record to three places and reads them back in
-order of reliability:
+UXP exposes no "custom data" bag on a layer, so there is no single blessed place.
+The plugin writes the same record to three places and reads them back in order of
+reliability:
 
 | # | Where | Travels in the .psd | Notes |
 |---|-------|---------------------|-------|
-| 1 | Layer XMP (`metadata`/`layerXMP` via batchPlay) | yes | Genuinely attached to the layer. This is an Action Manager property rather than a documented UXP surface, so **every write is verified by reading it straight back**; if the readback does not match, the plugin downgrades to (2) and tells you so in the status line. |
+| 1 | Layer XMP (`metadata`/`layerXMP` via batchPlay) | yes | Genuinely attached to the layer. An Action Manager property rather than a documented UXP surface, so **every write is verified by reading it straight back**; on mismatch the plugin downgrades to (2) and says so. |
 | 2 | `halftone-renders.json` in the plugin's data folder | no | Always written. Keyed by render id, so it survives reopening — but only on this machine. |
-| 3 | The render id in the group name (`Halftone ▸ HT-4f2a9c`) | yes | The locator that ties a selected layer back to (1) and (2). **Do not rename the group** — though a render whose XMP survived can still be recovered from the layer itself. |
-
-After every Apply/Update the panel states plainly which of these took.
+| 3 | The render id in the group name (`Halftone ▸ HT-4f2a9c`) | yes | The locator that ties a selected layer back to (1) and (2). **Do not rename the group.** |
 
 ---
 
@@ -208,127 +274,130 @@ After every Apply/Update the panel states plainly which of these took.
 
 Units are chosen so that nothing depends on document resolution.
 
-| Parameter | Range | Meaning |
-|---|---|---|
-| Density | 8–400 | Cells across the longest edge |
-| Radius | 0–200% | Max dot size as a % of the cell half-size; >100% overlaps |
-| Dot Curve | 0–1 | 0 = area tracks tone (classic), 1 = radius tracks tone (harder) |
-| Angle | 0–90° | Screen angle |
-| Blur | 0–40 | Pre-blur, in px per 1000px of the longest edge |
-| Shape | circle, square, diamond, cross, line | |
-| Colors | 2–8 | Palette size |
-| Spread | 0–1 | Palette separation in OKLab |
-| Method | kmeans, mediancut, popularity | Quantisation algorithm |
-| Palette | hex list | Click a swatch to type, alt-click for the foreground colour |
-| Lock palette | on/off | Off re-extracts from the image on every render |
-| Background | auto or hex | auto = lightest palette colour (darkest when inverted) |
-| Contrast | 0–3 | Multiplier around mid grey |
-| Gamma | 0.1–3 | |
-| Black / White | 0–255 | Input levels |
-| Exposure | ±100% | Additive lift |
-| Grade Bias | −1…1 | Bends tone → dot size; pure black and white stay pinned |
-| Luma | luma709, luma601, perceptual | How tone is measured |
-| Hue | ±180° | |
-| Saturation | 0–3 | |
-| Brightness | ±100 | |
-| Invert | on/off | Dots grow in highlights; paper flips to the dark end |
+| Section | Parameter | Range | Meaning |
+|---|---|---|---|
+| Mode | Mode | halftone / dither | Which engine renders |
+| Scale | Scale by | relative / dpi | DPI derives the grid from the document's own resolution |
+| | DPI | 5–300 | Target output density (DPI mode) |
+| | Density | 8–400 | Halftone cells across the longest edge |
+| | Resolution | 24–2400 | Dither pixels across the longest edge |
+| | Angle | 0–90° | Screen angle (halftone) |
+| Halftone | Radius | 0–200% | Max dot size as a % of the cell half-size; >100% overlaps |
+| | Dot Curve | 0–1 | 0 = area tracks tone (classic), 1 = radius tracks tone |
+| | Shape | circle, square, diamond, cross, line | |
+| Dither | Algorithm | 24 options | See the table above |
+| | Amount | 0–1 | 0 posterises with no pattern; 1 is the full dither |
+| | Serpentine | on/off | Alternate scan direction; cancels diffusion artefacts |
+| Pre-process | Blur | 0–40 | px per 1000px of the longest edge |
+| | Sharpen | 0–200% | Unsharp mask |
+| | Sharpen R | 0.3–10 | Unsharp radius |
+| | Noise Red. | 0–100 | Edge-preserving smoothing |
+| Colors | Colors | 2–8 | Palette size |
+| | Spread | 0–1 | Palette separation in OKLab |
+| | Method | kmeans, mediancut, popularity | Quantisation algorithm |
+| | Palette | hex list | Click to type, alt-click for the foreground colour |
+| | Lock palette | on/off | Off re-extracts from the image on every render |
+| | Background | auto or hex | Paper colour (halftone) |
+| Tonal Zones | Tonal zones | on/off | Restrict each tonal band to its own palette slice |
+| | Shadows / Highlights | 0.05–0.95 | Band boundaries |
+| Grade | Contrast / Gamma / Black / White / Exposure | | Standard grading chain |
+| | Grade Bias | −1…1 | Bends tone → dot size; endpoints stay pinned |
+| | Luma | luma709, luma601, perceptual | How tone is measured |
+| Adjust | Hue / Saturation / Brightness / Invert | | |
+| Output | Output | flat / separated | One pixel layer, or one fill layer per colour |
 
-Presets: **Classic B&W**, **Soft Print**, **Comic**, **Newspaper**, **RGB Pop**,
-**Retro Poster**. Save your own with **Save Preset**; they persist in the plugin
-data folder and appear as chips alongside the built-ins.
+**Presets.** Halftone: Classic B&W, Soft Print, Comic, Newspaper, RGB Pop, Retro
+Poster. Dither: Mac Classic, Newsprint Dither, Handheld Green, Blue Noise, Zone
+Poster. Save your own with **Save Preset**.
 
 ---
 
 ## Tests
 
-The engine has no UXP dependency, so it runs in plain Node:
-
 ```bash
-npm test              # engine (130 assertions) + mocked host (94 assertions)
+npm test              # engine (253 assertions) + mocked host (129 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 ```
 
-The engine suite covers the cases that matter for a halftone: a black image
-(every cell at max radius), a white image (no ink at all), a **black→white
-gradient** (radii strictly monotonic, dot *area* advancing in equal steps to
-within 6%, ink present in all ten bands, the sub-pixel path exercised), flat
-colours (every source colour recovered by quantisation), a synthetic photograph,
-all five shapes, transparency, all six presets, screen angles, resolution
-independence, cache invalidation and byte-level determinism.
+The engine suite covers a black image, a white image, a **black→white gradient**
+(radii strictly monotonic, dot *area* advancing in equal steps to within 6%, ink
+present in all ten bands, the sub-pixel path exercised), flat colours, a
+synthetic photograph, all five shapes, transparency, all eleven presets, screen
+angles, resolution independence, cache invalidation and byte-level determinism.
+
+For dithering it asserts **tone reproduction against a derived bound**: an
+ordered matrix with L distinct thresholds can only represent tone in steps of
+1/L, so the tolerance is 1/(2L), not a guessed constant. That checks each matrix
+achieves the best it structurally can, instead of hiding a regression behind a
+loose number. Threshold and Atkinson are exempted by name, with the reason.
 
 The integration suite runs the Photoshop and UI layers against a mocked host. It
-cannot prove the batchPlay descriptors are accepted by Photoshop — only
-Photoshop can — but it does prove the plugin's own logic: that the layer
-structure is built in the right order, that the original is never written to,
-that pixels of the right size reach `putPixels`, that parameters round-trip
-through XMP *and* through the sidecar fallback, and that every parameter in the
-schema gets a working control.
+cannot prove the batchPlay descriptors are accepted by Photoshop — only Photoshop
+can — but it does prove the plugin's own logic: layer structure and ordering, the
+original never being written to, mask writes reaching every fill layer, the
+documented fallback when masks are unavailable, parameters round-tripping through
+XMP *and* the sidecar, and that every parameter in the schema is reachable in
+some UI state and no control is built for a hidden one.
 
 ### Measured performance
 
-Synthetic photograph, Comic preset, Node 22 (Photoshop will differ, but the
-ratios hold):
+Synthetic photograph, Node 22 (Photoshop will differ, but the ratios hold):
 
-| Document | First preview | Slider re-render | Full-resolution render |
-|---|---|---|---|
-| 1080×1080 | 77 ms | 14 ms | 29 ms |
-| 1920×1080 | 34 ms | 7 ms | 69 ms |
-| 3000×3000 | 90 ms | 13 ms | 391 ms |
-| 6000×4000 | 149 ms | 9 ms | 1003 ms |
+| Mode | Document | First preview | Slider re-render | Full render |
+|---|---|---|---|---|
+| Halftone | 1080×1080 | 41 ms | 14 ms | 32 ms |
+| Halftone | 1920×1080 | 32 ms | 9 ms | 49 ms |
+| Halftone | 3000×3000 | 86 ms | 14 ms | 192 ms |
+| Halftone | 6000×4000 | 149 ms | 10 ms | 973 ms |
+| Dither | 1080×1080 | 49 ms | 5 ms | 14 ms |
+| Dither | 1920×1080 | 36 ms | 3 ms | 25 ms |
+| Dither | 3000×3000 | 99 ms | 7 ms | 119 ms |
+| Dither | 6000×4000 | 155 ms | 6 ms | 798 ms |
 
-Slider latency is flat in document size, which is the whole point of the staged
-cache. Full renders are chunked with yields between bands so Photoshop's UI keeps
-breathing, and reads from Photoshop are capped at 2600px on the longest edge —
-the render is still written at full resolution.
+Slider latency is flat in document size. Full renders are chunked with yields so
+Photoshop's UI keeps breathing, and reads from Photoshop are capped at 2600px on
+the longest edge while the render is still written at full resolution.
 
 ---
 
 ## Known limitations
 
-1. **Not a real Smart Filter.** Explained above. Update is a button, not a
-   double-click on a filter entry.
-2. **Layer XMP is not a documented UXP API.** It is an Action Manager property.
-   The plugin verifies every write by reading it back and falls back to the
-   sidecar file when it fails, so the worst case is that parameters do not travel
-   to another machine inside the .psd.
-3. **RGB documents only.** The engine works in sRGB. CMYK, Lab, Indexed and
-   Duotone documents are not converted; convert to RGB first.
-4. **The render is flattened pixels.** It is written into a normal pixel layer,
-   so it does not scale losslessly the way a vector or Smart Object would.
-   Re-run Update after resizing the document.
-5. **No dot-level randomisation.** The grid is strictly regular by design (that
-   is the look being targeted). There is no jitter or error-diffusion mode.
-6. **Colour management is assumed sRGB.** Pixels are requested and written with
-   an sRGB profile; documents in a wide-gamut working space will be rendered
-   through that assumption.
-7. **The plugin does not watch the Smart Object.** If you edit the source's
-   contents, press Update — the render does not refresh on its own.
-8. **Renaming the halftone group** breaks the sidecar lookup (record 3 above).
-   The layer XMP still works if it took.
+1. **Not a real Smart Filter.** Explained above. Update is a button.
+2. **No batch or video render.** There is no "apply across all layers or frames"
+   mode; each render is one layer at a time.
+3. **Layer XMP is not a documented UXP API.** Every write is verified by
+   readback, with a sidecar fallback, so the worst case is that parameters do not
+   travel to another machine inside the .psd.
+4. **RGB documents only.** CMYK, Lab, Indexed and Duotone are not converted.
+5. **Dither previews above 700 dither-pixels are approximate.** The preview
+   caps the grid so dragging stays responsive, and the badge says `approx` when
+   it does. Apply and Update always render the full grid. Halftone previews are
+   always exact.
+6. **Colour management is assumed sRGB.**
+7. **The plugin does not watch the Smart Object.** Edit its contents, then press
+   Update.
+8. **Renaming the halftone group** breaks the sidecar lookup. The layer XMP still
+   works if it took.
 
 ## Roadmap
 
-Ordered by how much each would improve fidelity to a professional halftone:
+Ordered by how much each would improve fidelity:
 
-1. **Per-channel screens with independent angles.** Real CMYK halftones give
-   each ink its own angle (15°/75°/0°/45°) to produce a rosette instead of a
-   moiré. The renderer is already generic over grids; this means running it once
-   per ink and compositing multiply. Biggest single win.
-2. **Dot gain / spot function shaping.** A configurable transfer curve on the
-   ink amount, plus elliptical dots that merge along one axis first — the
-   classic way midtones avoid a hard 50% checkerboard tone jump.
-3. **Edge-aware cell sampling.** Weight the cell average towards the dominant
-   region so dots stop straddling hard edges, which is the main source of the
-   slightly ragged contours at low density.
-4. **Optional supersampled rasterisation** (2×, downsampled) for the final
-   render only, for people who want maximum edge quality over speed.
-5. **A C++ (or WASM) rasteriser.** Only the rasteriser is worth moving — the
-   analysis stage is already negligible. The current JS path holds ~1s for
-   6000×4000, so this is an optimisation, not a necessity; the engine's staged
-   interface (`_ensureCells` → `rasterize`) is where a native module would slot
+1. **Per-channel screens with independent angles.** Real CMYK halftones give each
+   ink its own angle (15°/75°/0°/45°) to produce a rosette instead of a moiré.
+   The renderer is already generic over grids and the separated output already
+   produces per-ink masks, so this means running the grid once per ink.
+2. **Batch render across layers and video frames**, the main remaining feature
+   gap against comparable commercial plugins.
+3. **Dot gain / spot function shaping**: a configurable transfer curve on the ink
+   amount, plus elliptical dots that merge along one axis first.
+4. **Per-swatch locking** so extraction can refresh some palette colours while
+   preserving others, plus `.ase` / `.act` import and export.
+5. **Edge-aware cell sampling**, weighting the cell average towards the dominant
+   region so dots stop straddling hard edges.
+6. **A C++ or WASM rasteriser.** Only the rasteriser is worth moving — the
+   analysis stage is already negligible. The current JS path holds ~1 s for
+   6000×4000, so this is an optimisation, not a necessity; the staged interface
+   (`_ensureCells`/`_ensureDither` → `rasterize`) is where a native module slots
    in without touching anything else.
-6. **Live re-render on Smart Object edit,** by listening for the relevant
-   Photoshop notifications instead of requiring a manual Update.
-7. **Palette import/export** (.ase / .act) and per-swatch locking so extraction
-   can refresh some colours while preserving others.

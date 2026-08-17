@@ -253,6 +253,115 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   return buf;
 }
 
+/**
+ * Rasterise into one 8-bit coverage mask per palette entry instead of a
+ * composite, for the colour-separated output.
+ *
+ * The masks are mutually exclusive and sum to 255 everywhere: painting colour i
+ * with coverage a does `mask_i = mask_i(1-a) + 255a` and `mask_j *= (1-a)` for
+ * every other j. That is ordinary alpha compositing performed per channel, so
+ * the separation reproduces the flat render exactly *and* is independent of the
+ * order the fill layers end up stacked in - which matters, because dots of
+ * different colours overlap and layer order would otherwise decide the result.
+ *
+ * @param {CellData} cells
+ * @param {RasterParams} p    p.palette is the full palette; p.paperIndex is the
+ *                            entry the paper uses
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8ClampedArray[]} one mask per palette entry
+ */
+function rasterizeSeparated(cells, p, width, height) {
+  const grid = cells.grid;
+  // One mask per FULL palette entry (p.palette holds only the inks).
+  const n = p.fullPalette.length;
+  const masks = [];
+  for (let i = 0; i < n; i++) masks.push(new Uint8ClampedArray(width * height));
+  // The paper starts covering everything; ink eats into it.
+  const paper = masks[p.paperIndex];
+  paper.fill(255);
+
+  const shape = getShape(p.shape);
+  const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
+  const labPal = paletteToLab(p.inkPalette);
+  const centre = [0, 0];
+  const adj = p.colorAdjust || {};
+  const adjOut = [0, 0, 0];
+
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      const ci = row * grid.cols + col;
+      const cnt = cells.count[ci];
+      if (cnt === 0) continue;
+
+      const L = cells.lum[ci] / cnt;
+      const graded = sampleLUT(p.toneLUT, L);
+      let ink = p.invert ? graded : 1 - graded;
+      ink = biasCurve(ink, p.gradeBias);
+      const r = inkToRadius(ink, maxRadius, p.radiusCurve);
+      if (r <= 0.008) continue;
+
+      const q = ci * 3;
+      adjustColor(cells.rgb[q] / cnt, cells.rgb[q + 1] / cnt, cells.rgb[q + 2] / cnt, adj, adjOut);
+      const inkIdx = nearestIndex(labPal, adjOut[0], adjOut[1], adjOut[2]);
+      const target = p.inkToPaletteIndex[inkIdx];
+
+      cellCentre(grid, col, row, centre);
+      drawDotMasks(masks, width, height, centre[0], centre[1], r, grid.cell, shape, target);
+    }
+  }
+  return masks;
+}
+
+/**
+ * Mask-writing twin of drawDot. The traversal is duplicated rather than shared
+ * behind a callback because a per-pixel indirect call costs more than the whole
+ * coverage computation.
+ */
+function drawDotMasks(masks, w, h, cx, cy, r, cell, shape, target) {
+  const n = masks.length;
+
+  const paint = (x, y, a) => {
+    if (x < 0 || y < 0 || x >= w || y >= h || a <= 0) return;
+    const i = y * w + x;
+    const ia = 1 - a;
+    for (let m = 0; m < n; m++) {
+      masks[m][i] = m === target ? masks[m][i] * ia + 255 * a : masks[m][i] * ia;
+    }
+  };
+
+  if (r < 0.5) {
+    const area = Math.min(1, shape.area(r, cell));
+    if (area <= 0.0005) return;
+    const fx = cx - 0.5;
+    const fy = cy - 0.5;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const tx = fx - x0;
+    const ty = fy - y0;
+    paint(x0, y0, area * (1 - tx) * (1 - ty));
+    paint(x0 + 1, y0, area * tx * (1 - ty));
+    paint(x0, y0 + 1, area * (1 - tx) * ty);
+    paint(x0 + 1, y0 + 1, area * tx * ty);
+    return;
+  }
+
+  const ext = shape.extent(r, cell) + 1;
+  let x0 = Math.max(0, Math.floor(cx - ext));
+  let x1 = Math.min(w, Math.ceil(cx + ext));
+  let y0 = Math.max(0, Math.floor(cy - ext));
+  let y1 = Math.min(h, Math.ceil(cy + ext));
+  const sdf = shape.sdf;
+  for (let y = y0; y < y1; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = x0; x < x1; x++) {
+      const d = sdf(x + 0.5 - cx, dy, r, cell);
+      if (d >= 0.5) continue;
+      paint(x, y, d <= -0.5 ? 1 : 0.5 - d);
+    }
+  }
+}
+
 function fillBackground(buf, bg) {
   const r = bg[0], g = bg[1], b = bg[2];
   for (let i = 0; i < buf.length; i += 4) {
@@ -342,6 +451,7 @@ module.exports = {
   computeGrid,
   scaleGrid,
   cellCentre,
+  rasterizeSeparated,
   sampleCells,
   rasterize,
   drawDot,

@@ -16,7 +16,15 @@
  */
 
 const C = require("./controls.js");
-const { PARAM_DEFS, SECTIONS, defaultParams, sanitizeParams } = require("../state/params.js");
+const {
+  PARAM_DEFS,
+  SECTIONS,
+  defaultParams,
+  sanitizeParams,
+  isVisible,
+  sectionVisible,
+} = require("../state/params.js");
+const { ALGORITHMS, ALGORITHM_FAMILIES } = require("../engine/dither.js");
 const { BUILTIN_PRESETS, presetToParams, makeUserPreset } = require("../presets/presets.js");
 const { HalftoneEngine } = require("../engine/pipeline.js");
 const { toDataURL } = require("../util/png.js");
@@ -26,6 +34,8 @@ const META = require("../photoshop/metadata.js");
 const IM = require("../photoshop/imaging.js");
 
 const PREVIEW_MAX = 460;
+/** Cap on the dither grid used for previews; above this the preview approximates. */
+const PREVIEW_DITHER_GRID = 700;
 const SLOW_FRAME_MS = 45;
 const DEBOUNCE_MS = 90;
 
@@ -43,6 +53,7 @@ class Panel {
     this._raf = null;
     this._busy = false;
     this._selectionTimer = null;
+    this.sectionOpen = {};
   }
 
   /* ---------------------------------------------------------------- */
@@ -69,7 +80,7 @@ class Panel {
       const session = await META.loadSession();
       if (session && session.params) {
         this.params = sanitizeParams(session.params);
-        this.syncControls();
+        this.rebuild();
       }
       this.userPresets = await META.loadUserPresets();
       this.renderPresetChips();
@@ -83,25 +94,53 @@ class Panel {
 
   /* ------------------------------------------------------- UI build */
 
+  /**
+   * Build every section from the schema, showing only what applies to the
+   * current mode and state. Called again whenever a parameter changes something
+   * another parameter's visibility depends on (the mode, mainly), so the panel
+   * never shows a control that does nothing.
+   */
   buildSections() {
     const host = this.$("sections");
     host.textContent = "";
+    this.controls = {};
+
     for (const sec of SECTIONS) {
-      const s = C.createSection(sec.id, sec.label, true);
-      for (const def of PARAM_DEFS.filter((d) => d.section === sec.id)) {
+      if (!sectionVisible(sec, this.params)) continue;
+      const open = this.sectionOpen[sec.id] !== false;
+      const s = C.createSection(sec.id, sec.label, open);
+      s.onToggle = (isOpen) => {
+        this.sectionOpen[sec.id] = isOpen;
+      };
+      for (const def of PARAM_DEFS) {
+        if (def.section !== sec.id) continue;
+        if (!isVisible(def, this.params)) continue;
         s.body.appendChild(this.buildControl(def));
       }
       if (sec.id === "colors") {
-        const hint = C.el(
-          "div",
-          "hint",
-          "Click a swatch to type a hex value, alt-click to take Photoshop's foreground colour. " +
-            "The paper colour is never used as a dot colour."
+        s.body.appendChild(
+          C.el(
+            "div",
+            "hint",
+            "Click a swatch to type a hex value, alt-click to take Photoshop's foreground colour." +
+              (this.params.mode === "halftone"
+                ? " The paper colour is never used as a dot colour."
+                : "")
+          )
         );
-        s.body.appendChild(hint);
       }
       host.appendChild(s.el);
     }
+  }
+
+  /** Does changing `key` alter which controls should be on screen? */
+  affectsLayout(key) {
+    return (
+      key === "mode" ||
+      key === "scaleMode" ||
+      key === "tonalMapping" ||
+      key === "sharpen"
+    );
   }
 
   buildControl(def) {
@@ -116,6 +155,13 @@ class Panel {
         break;
       case "choice":
         ctl = C.createChoice(def, this.params[def.key], commit);
+        break;
+      case "chips":
+        ctl = C.createChipChoice(def, this.params[def.key], commit, {
+          labels: ALGORITHM_LABELS,
+          groups: ALGORITHM_FAMILIES,
+          groupOf: (id) => ALGORITHM_FAMILY_OF[id],
+        });
         break;
       case "toggle":
         ctl = C.createToggle(def, this.params[def.key], commit);
@@ -167,6 +213,10 @@ class Panel {
     // Changing the colour count only means something if the palette follows it.
     if (key === "colorCount" && this.params.paletteLocked) this.syncPaletteToCount();
     if (key === "paletteLocked" && !value) this.syncPaletteFromImage();
+    if (this.affectsLayout(key)) {
+      this.buildSections();
+      this.syncControls();
+    }
 
     this.onParamsChanged(committed);
   }
@@ -221,11 +271,17 @@ class Panel {
     }
   }
 
+  /** Rebuild the whole panel from `this.params` (after a preset or a recall). */
+  rebuild() {
+    this.buildSections();
+    this.syncControls();
+    this.renderPresetChips();
+  }
+
   resetAll() {
     this.params = defaultParams();
     this.activePresetId = null;
-    this.syncControls();
-    this.renderPresetChips();
+    this.rebuild();
     this.schedulePreview();
     this.persistSession();
     this.notice("All parameters reset to defaults.");
@@ -269,13 +325,18 @@ class Panel {
     const t0 = Date.now();
     try {
       const size = this.previewSize();
-      const out = this.engine.render(this.params, size);
+      const out = this.engine.render(
+        this.params,
+        Object.assign({ maxDitherGrid: PREVIEW_DITHER_GRID }, size)
+      );
       this.$("preview").src = toDataURL(out.data, out.width, out.height);
       this.$("preview").className = "preview visible";
       this.$("preview-empty").className = "preview-empty hidden";
       this.lastFrameMs = Date.now() - t0;
+      const unit = this.params.mode === "dither" ? "px" : "cells";
       this.$("preview-badge").textContent =
-        `${this.engine.stats.cells || 0} cells · ${this.lastFrameMs}ms`;
+        `${this.engine.stats.cells || 0} ${unit} · ${this.lastFrameMs}ms` +
+        (out.exact ? "" : " · approx");
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
       this.notice(`Preview failed: ${e.message}`, "error");
@@ -289,6 +350,7 @@ class Panel {
       const src = await RENDER.readSource();
       this.engine.setSource(src.image);
       this.engine.sourceLayerId = src.layerId;
+      this.engine.docPPI = src.docPPI || 72;
       this.sourceInfo = src;
       if (!this.params.paletteLocked) this.syncPaletteFromImage();
       this.drawPreview();
@@ -297,7 +359,7 @@ class Panel {
       const recalled = await RENDER.recallParams();
       if (recalled) {
         this.params = sanitizeParams(recalled.params);
-        this.syncControls();
+        this.rebuild();
         this.drawPreview();
         this.notice(
           `Loaded "${src.layerName}" and restored the settings of ${recalled.renderId} (from ${recalled.source}).`
@@ -343,9 +405,12 @@ class Panel {
         ? "in the plugin's data folder (this Photoshop install only)"
         : "nowhere - persistence failed";
     const verb = res.updated ? "Updated" : "Created";
+    const fellBack = this.params.output === "separated" && res.outputMode !== "separated";
     this.notice(
-      `${verb} ${res.renderId} at ${res.width}x${res.height}. Settings saved ${where}.`,
-      res.persistence.xmp || res.persistence.sidecar ? "" : "warn"
+      `${verb} ${res.renderId} at ${res.width}x${res.height} (${res.outputMode}). ` +
+        `Settings saved ${where}.` +
+        (res.note ? ` ${res.note}` : ""),
+      fellBack || !(res.persistence.xmp || res.persistence.sidecar) ? "warn" : ""
     );
   }
 
@@ -415,8 +480,7 @@ class Panel {
     this.params = presetToParams(preset);
     this.activePresetId = preset.id;
     if (!this.params.paletteLocked) this.syncPaletteFromImage();
-    this.syncControls();
-    this.renderPresetChips();
+    this.rebuild();
     this.schedulePreview();
     this.persistSession();
     this.notice(`Preset "${preset.name}" loaded.`);
@@ -556,6 +620,13 @@ class Panel {
     n.textContent = text;
     n.className = "notice show" + (kind ? " " + kind : "");
   }
+}
+
+const ALGORITHM_LABELS = {};
+const ALGORITHM_FAMILY_OF = {};
+for (const a of ALGORITHMS) {
+  ALGORITHM_LABELS[a.id] = a.label;
+  ALGORITHM_FAMILY_OF[a.id] = a.family;
 }
 
 function padHexes(hexes, count) {

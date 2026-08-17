@@ -213,6 +213,63 @@ function titleCase(s) {
     .replace(/^./, (c) => c.toUpperCase());
 }
 
+/**
+ * A wrapping list of chips, for choices with too many options to fit a
+ * segmented bar (the dither algorithm list has two dozen).
+ *
+ * @param {object} def
+ * @param {string} value
+ * @param {(v:string, committed:boolean)=>void} onChange
+ * @param {{labels?: object, groups?: {id:string,label:string}[],
+ *          groupOf?: (id:string)=>string}} [meta]
+ */
+function createChipChoice(def, value, onChange, meta = {}) {
+  const wrap = el("div");
+  const label = el("div", "ctl-label", def.label);
+  label.style.marginBottom = "3px";
+  if (def.hint) label.title = def.hint;
+  wrap.appendChild(label);
+
+  const buttons = {};
+  const groups = meta.groups && meta.groupOf ? meta.groups : null;
+
+  const addChip = (opt, host) => {
+    const text = (meta.labels && meta.labels[opt]) || titleCase(opt);
+    const b = el("button", "algo-chip", text);
+    b.title = text;
+    b.addEventListener("click", () => {
+      set(opt);
+      onChange(opt, true);
+    });
+    buttons[opt] = b;
+    host.appendChild(b);
+  };
+
+  if (groups) {
+    for (const g of groups) {
+      const members = def.options.filter((o) => meta.groupOf(o) === g.id);
+      if (!members.length) continue;
+      wrap.appendChild(el("div", "chip-group-label", g.label));
+      const row = el("div", "chip-row");
+      for (const opt of members) addChip(opt, row);
+      wrap.appendChild(row);
+    }
+  } else {
+    const row = el("div", "chip-row");
+    for (const opt of def.options) addChip(opt, row);
+    wrap.appendChild(row);
+  }
+
+  function set(v) {
+    for (const opt of def.options) {
+      if (buttons[opt]) buttons[opt].className = "algo-chip" + (opt === v ? " active" : "");
+    }
+  }
+
+  set(value);
+  return { el: wrap, set };
+}
+
 /** An on/off switch. */
 function createToggle(def, value, onChange) {
   const row = el("div", "ctl");
@@ -416,19 +473,23 @@ function createSection(id, label, open) {
   head.appendChild(el("div", "section-caret"));
   head.appendChild(el("div", null, label));
   const body = el("div", "section-body");
+  const api = { el: section, body, onToggle: null };
   head.addEventListener("click", () => {
     const isOpen = section.className.indexOf("open") >= 0;
     section.className = "section" + (isOpen ? "" : " open");
+    // Collapse state is owned by the caller so it survives a rebuild.
+    if (api.onToggle) api.onToggle(!isOpen);
   });
   section.appendChild(head);
   section.appendChild(body);
-  return { el: section, body };
+  return api;
 }
 
 module.exports = {
   el,
   createSlider,
   createChoice,
+  createChipChoice,
   createToggle,
   createPalette,
   createColorField,

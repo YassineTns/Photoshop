@@ -354,23 +354,208 @@ async function main() {
   }
 
   /* ================================================================ */
+  group("Separated output: fill layers + masks");
+  {
+    resetModules();
+    const image = F.photo(500, 400);
+    const { ps } = install({ width: 500, height: 400, image });
+    const RENDER = require("../src/photoshop/render.js");
+    const META = require("../src/photoshop/metadata.js");
+    const { HalftoneEngine } = require("../src/engine/pipeline.js");
+    const { sanitizeParams: sane, defaultParams: defs } = require("../src/state/params.js");
+
+    const engine = new HalftoneEngine();
+    engine.setSource((await RENDER.readSource()).image);
+    const params = sane(
+      Object.assign(defs(), {
+        output: "separated",
+        colorCount: 4,
+        paletteLocked: false,
+        density: 50,
+      })
+    );
+
+    const res = await RENDER.applyNew(engine, params, {});
+    ok(res.outputMode === "separated", `apply used the separated output (${res.outputMode})`);
+
+    const group = ps.doc.layers.find((l) => l.kind === "group");
+    const fills = group.layers.filter((l) => l.kind === "solidColor");
+    const source = group.layers.find((l) => l.name === META.SOURCE_LAYER_NAME);
+
+    ok(fills.length >= 4, `one fill layer per palette colour (${fills.length})`);
+    ok(fills.every((l) => l.hasMask), "every fill layer got a mask");
+    ok(fills.every((l) => l.maskWritten), "every mask received pixels");
+    ok(ps.putPixelsCalls.length === 0, "no flattened pixel layer was written");
+    ok(
+      ps.putLayerMaskCalls.length === fills.length,
+      `one mask write per fill layer (${ps.putLayerMaskCalls.length})`
+    );
+    ok(
+      ps.putLayerMaskCalls.every((c) => c.imageData.components === 1),
+      "masks are written as single-channel data"
+    );
+    ok(
+      ps.putLayerMaskCalls.every(
+        (c) => c.targetBounds.right === 500 && c.targetBounds.bottom === 400
+      ),
+      "masks are written at full document size"
+    );
+    ok(!!source && source.kind === "smartObject", "the original is still a hidden Smart Object");
+    ok(source.visible === false, "the source stays hidden");
+
+    // The paper must sit underneath every ink.
+    const paperIdx = group.layers.findIndex((l) => /^Paper /.test(l.name));
+    const inkIdxs = group.layers
+      .map((l, i) => (/^Ink /.test(l.name) ? i : -1))
+      .filter((i) => i >= 0);
+    ok(paperIdx >= 0, "there is a paper layer");
+    ok(inkIdxs.every((i) => i < paperIdx), "every ink layer sits above the paper");
+
+    // Fill colours must match the palette that was reported.
+    const fillHexes = fills
+      .map((l) => "#" + l.fillColor.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase())
+      .sort();
+    ok(new Set(fillHexes).size === fills.length, "each fill layer carries a distinct colour");
+
+    // Params round-trip, including the output mode.
+    ps.doc.activeLayers = [group];
+    const recalled = await RENDER.recallParams();
+    ok(!!recalled, "parameters recall from a separated render");
+    ok(recalled.params.output === "separated", "the output mode round-trips");
+
+    // Update must rebuild the stack rather than stacking a second set.
+    const before = countLayers(ps.doc.layers);
+    await RENDER.updateExisting(engine, params, {});
+    ok(countLayers(ps.doc.layers) === before, `update rebuilds in place (${countLayers(ps.doc.layers)} layers)`);
+
+    // Switching back to flat must clear the fill layers.
+    const flatParams = Object.assign({}, params, { output: "flat" });
+    await RENDER.updateExisting(engine, flatParams, {});
+    const g2 = ps.doc.layers.find((l) => l.kind === "group");
+    ok(
+      g2.layers.filter((l) => l.kind === "solidColor").length === 0,
+      "switching to flat removes the fill layers"
+    );
+    ok(
+      !!g2.layers.find((l) => l.name === META.RENDER_LAYER_NAME),
+      "switching to flat creates the pixel render layer"
+    );
+    ok(ps.putPixelsCalls.length === 1, "the flat render wrote pixels once");
+
+    uninstall();
+  }
+
+  /* ================================================================ */
+  group("Separated output falls back when masks are unavailable");
+  {
+    resetModules();
+    const { ps } = install({ width: 300, height: 200, noMasks: true });
+    const RENDER = require("../src/photoshop/render.js");
+    const { HalftoneEngine } = require("../src/engine/pipeline.js");
+    const { sanitizeParams: sane, defaultParams: defs } = require("../src/state/params.js");
+
+    const engine = new HalftoneEngine();
+    engine.setSource((await RENDER.readSource()).image);
+    const res = await RENDER.applyNew(
+      engine,
+      sane(Object.assign(defs(), { output: "separated" })),
+      {}
+    );
+
+    ok(res.outputMode === "flat", "falls back to flat output rather than failing");
+    ok(/putLayerMask/.test(res.note), `the reason is reported to the user ("${res.note.slice(0, 60)}...")`);
+    ok(ps.putPixelsCalls.length === 1, "a usable flat render was still produced");
+    const group = ps.doc.layers.find((l) => l.kind === "group");
+    ok(
+      group.layers.filter((l) => l.kind === "solidColor").length === 0,
+      "no half-built fill layers were left behind"
+    );
+
+    uninstall();
+  }
+
+  /* ================================================================ */
+  group("Dither mode end to end");
+  {
+    resetModules();
+    const image = F.photo(600, 400);
+    const { ps } = install({ width: 600, height: 400, image });
+    const RENDER = require("../src/photoshop/render.js");
+    const { HalftoneEngine } = require("../src/engine/pipeline.js");
+    const { presetToParams, BUILTIN_PRESETS } = require("../src/presets/presets.js");
+
+    const engine = new HalftoneEngine();
+    engine.setSource((await RENDER.readSource()).image);
+
+    const preset = BUILTIN_PRESETS.find((p) => p.id === "mac-classic");
+    const params = presetToParams(preset);
+    ok(params.mode === "dither", "the Mac Classic preset is a dither preset");
+
+    const res = await RENDER.applyNew(engine, params, {});
+    ok(!!res.renderId, "dither mode applies");
+    ok(ps.putPixelsCalls.length === 1, "one pixel write");
+    ok(
+      ps.putPixelsCalls[0].imageData.byteLength === 600 * 400 * 4,
+      "the dither render is written at full document size"
+    );
+
+    const group = ps.doc.layers.find((l) => l.kind === "group");
+    ps.doc.activeLayers = [group];
+    const recalled = await RENDER.recallParams();
+    ok(recalled.params.mode === "dither", "the render mode round-trips through metadata");
+    ok(
+      recalled.params.ditherAlgorithm === "atkinson",
+      `the algorithm round-trips (${recalled.params.ditherAlgorithm})`
+    );
+
+    uninstall();
+  }
+
+  /* ================================================================ */
   group("Panel wiring");
   {
     resetModules();
     const image = F.photo(800, 600);
     const { ps, document } = install({ width: 800, height: 600, image });
     const { Panel } = require("../src/ui/panel.js");
-    const { PARAM_DEFS } = require("../src/state/params.js");
+    const { PARAM_DEFS, defaultParams: mkDefaults, sanitizeParams: sanitize } = require("../src/state/params.js");
     const { BUILTIN_PRESETS } = require("../src/presets/presets.js");
+    const sanitizeAll = (over) => sanitize(Object.assign(mkDefaults(), over));
 
     const panel = new Panel(document);
     await panel.init();
 
-    ok(Object.keys(panel.controls).length === PARAM_DEFS.length, `every parameter got a control (${Object.keys(panel.controls).length}/${PARAM_DEFS.length})`);
-    for (const def of PARAM_DEFS) {
-      if (!panel.controls[def.key]) ok(false, `control missing for "${def.key}"`);
-    }
+    // Controls are built conditionally (per mode, and per showIf), so the
+    // invariant is "every currently visible parameter has a control", plus
+    // "every parameter becomes visible in some reachable state".
+    const { isVisible } = require("../src/state/params.js");
+    const missingNow = PARAM_DEFS.filter(
+      (d) => isVisible(d, panel.params) && !panel.controls[d.key]
+    ).map((d) => d.key);
+    ok(missingNow.length === 0, `every visible parameter has a control (${missingNow.join(", ") || "none missing"})`);
+    const extraNow = Object.keys(panel.controls).filter(
+      (k) => !isVisible(require("../src/state/params.js").DEF_BY_KEY[k], panel.params)
+    );
+    ok(extraNow.length === 0, `no control is built for a hidden parameter (${extraNow.join(", ") || "none"})`);
     ok(!!panel.controls.radius && !!panel.controls.palette, "sliders and the palette editor exist");
+
+    // Walk every reachable state and confirm nothing in the schema is orphaned.
+    const everSeen = new Set(Object.keys(panel.controls));
+    const savedParams = Object.assign({}, panel.params);
+    for (const mode of ["halftone", "dither"]) {
+      for (const scaleMode of ["relative", "dpi"]) {
+        for (const tonal of [false, true]) {
+          panel.params = sanitizeAll({ mode, scaleMode, tonalMapping: tonal, sharpen: 50 });
+          panel.buildSections();
+          Object.keys(panel.controls).forEach((k) => everSeen.add(k));
+        }
+      }
+    }
+    const orphans = PARAM_DEFS.filter((d) => !everSeen.has(d.key)).map((d) => d.key);
+    ok(orphans.length === 0, `every parameter is reachable in some state (${orphans.join(", ") || "none orphaned"})`);
+    panel.params = savedParams;
+    panel.buildSections();
+    panel.syncControls();
 
     const chips = document.getElementById("preset-list").children;
     ok(chips.length === BUILTIN_PRESETS.length, `preset chips rendered (${chips.length})`);

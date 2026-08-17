@@ -159,6 +159,65 @@ async function writeLayerPixels(opts) {
   }
 }
 
+/**
+ * Write a single-channel buffer into a layer's mask.
+ *
+ * The imaging API exposes putLayerMask separately from putPixels. Its presence
+ * is probed rather than assumed, because the colour-separated output depends on
+ * it entirely and the caller needs to be able to fall back cleanly (and say so)
+ * rather than half-build a broken layer stack.
+ *
+ * @param {object} opts
+ * @param {number} opts.documentID
+ * @param {number} opts.layerID
+ * @param {Uint8ClampedArray} opts.data one byte per pixel
+ * @param {number} opts.width
+ * @param {number} opts.height
+ * @param {{left:number, top:number, right:number, bottom:number}} opts.targetBounds
+ */
+async function writeLayerMask(opts) {
+  const im = imaging();
+  if (!canWriteMasks()) {
+    throw new Error("This Photoshop build has no imaging.putLayerMask, so masks cannot be written.");
+  }
+  const bytes =
+    opts.data instanceof Uint8Array
+      ? opts.data
+      : new Uint8Array(opts.data.buffer, opts.data.byteOffset, opts.data.length);
+
+  const imageData = await im.createImageDataFromBuffer(bytes, {
+    width: opts.width,
+    height: opts.height,
+    components: 1,
+    componentSize: 8,
+    chunky: true,
+    colorProfile: "Gray Gamma 2.2",
+    colorSpace: "Grayscale",
+  });
+
+  try {
+    await im.putLayerMask({
+      documentID: opts.documentID,
+      layerID: opts.layerID,
+      imageData,
+      replace: true,
+      targetBounds: opts.targetBounds,
+    });
+  } finally {
+    if (imageData && typeof imageData.dispose === "function") imageData.dispose();
+  }
+}
+
+/** @returns {boolean} whether the colour-separated output is possible here. */
+function canWriteMasks() {
+  try {
+    const im = imaging();
+    return typeof im.putLayerMask === "function" && typeof im.createImageDataFromBuffer === "function";
+  } catch (e) {
+    return false;
+  }
+}
+
 /** Whole-canvas bounds for the active document. */
 function canvasBounds(doc) {
   return { left: 0, top: 0, right: Math.round(doc.width), bottom: Math.round(doc.height) };
@@ -178,4 +237,13 @@ function foregroundRGB() {
   return null;
 }
 
-module.exports = { readLayerPixels, writeLayerPixels, canvasBounds, foregroundRGB, toRGBA, READ_MAX_LONGEST };
+module.exports = {
+  readLayerPixels,
+  writeLayerPixels,
+  writeLayerMask,
+  canWriteMasks,
+  canvasBounds,
+  foregroundRGB,
+  toRGBA,
+  READ_MAX_LONGEST,
+};

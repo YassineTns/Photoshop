@@ -362,6 +362,43 @@ body {
 .seg-item.active { background: var(--accent); color: var(--accent-text); }
 .seg-item:hover:not(.active) { color: var(--text); }
 
+/* ------------------------------------------------------------ chips */
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.chip-group-label {
+  color: var(--text-faint);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 3px 0 2px;
+}
+
+.algo-chip {
+  height: 18px;
+  padding: 0 6px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.algo-chip:hover { color: var(--text); border-color: var(--border-strong); }
+.algo-chip.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
 /* --------------------------------------------------------- toggle */
 
 .toggle {
