@@ -113,6 +113,26 @@ class Panel {
 
   async init() {
     this.$ = (id) => this.root.getElementById(id);
+    this.missingElements = [];
+    /**
+     * Bind a handler, tolerating a missing element.
+     *
+     * Every binding used to dereference its element directly, so one id that
+     * did not exist threw out of init() and took the entire panel down - a
+     * blank panel with "Failed to start", for a button. That is the wrong
+     * failure: a missing control should cost that control. What is missing is
+     * collected and reported once, so the next time something is wrong it says
+     * *what* instead of dying.
+     */
+    this.on = (id, event, handler) => {
+      const node = this.$(id);
+      if (!node || typeof node.addEventListener !== "function") {
+        if (this.missingElements.indexOf(id) < 0) this.missingElements.push(id);
+        return null;
+      }
+      node.addEventListener(event, handler);
+      return node;
+    };
     this.buildSections();
     this.bindButtons();
     this.renderPresetChips();
@@ -148,6 +168,70 @@ class Panel {
     this.applyPreviewHeight();
     this.watchSelection();
     this.refreshContext();
+    this.selfCheck();
+  }
+
+  /**
+   * Say what is wrong, rather than leaving the user to say "everything is
+   * broken".
+   *
+   * Three rounds of this plugin have shipped a fault that only appeared inside
+   * Photoshop - flex layout, a panel entrypoint that could not load, a
+   * stylesheet feature UXP does not implement - and in each case what came back
+   * was that it did not work, with nothing to act on. None of that is the
+   * user's job. So the panel checks what it can about itself at start-up and
+   * puts anything it finds on screen, where it can be read out.
+   *
+   * Everything here is cheap and cannot itself fail: missing markup, a preview
+   * box with no size, and the host capabilities the render depends on.
+   */
+  selfCheck() {
+    const problems = [];
+
+    if (this.missingElements && this.missingElements.length) {
+      problems.push(`markup is missing: ${this.missingElements.join(", ")}`);
+    }
+
+    /*
+     * Only report a size that was actually measured. An undefined reading means
+     * "cannot measure here", which is not the same as "has no size" - reporting
+     * it as a fault would make the check cry wolf, and a check that cries wolf
+     * is worse than none, because it teaches people to ignore the one that
+     * matters.
+     */
+    const tooSmall = (v) => Number.isFinite(v) && v < 40;
+    const wrap = this.$("preview-wrap");
+    if (wrap && tooSmall(wrap.clientWidth)) {
+      problems.push(`the preview area has no width (${wrap.clientWidth}px)`);
+    }
+    if (wrap && tooSmall(wrap.clientHeight)) {
+      problems.push(`the preview area has no height (${wrap.clientHeight}px)`);
+    }
+    const scroll = this.$("scroll");
+    if (scroll && tooSmall(scroll.clientHeight)) {
+      problems.push(`the controls area has no height (${scroll.clientHeight}px)`);
+    }
+
+    const built = this.sections ? Object.keys(this.sections).length : 0;
+    if (built < 4) problems.push(`only ${built} sections were built`);
+
+    if (!IM.canWriteMasks()) {
+      problems.push("this build has no imaging.putLayerMask, so separated output falls back to flat");
+    }
+
+    if (problems.length) {
+      this.notice(
+        "Halftone Studio started with problems — please send this text:\n• " +
+          problems.join("\n• "),
+        "warn"
+      );
+      try {
+        console.warn("[Halftone Studio] self-check:", problems.join(" | "));
+      } catch (e) {
+        /* the notice is the important half */
+      }
+    }
+    return problems;
   }
 
   /* ------------------------------------------------------- UI build */
@@ -319,17 +403,17 @@ class Panel {
   }
 
   bindButtons() {
-    this.$("btn-load").addEventListener("click", () => this.loadLayer());
-    this.$("btn-apply").addEventListener("click", () => this.apply());
-    this.$("btn-update").addEventListener("click", () => this.update());
-    this.$("btn-reset").addEventListener("click", () => this.resetAll());
-    this.$("btn-batch").addEventListener("click", () => this.batchApply());
-    this.$("btn-svg").addEventListener("click", () => this.exportSVG());
-    this.$("btn-plates").addEventListener("click", () => this.exportPlates());
-    this.$("btn-cancel").addEventListener("click", () => this.requestCancel());
+    this.on("btn-load", "click", () => this.loadLayer());
+    this.on("btn-apply", "click", () => this.apply());
+    this.on("btn-update", "click", () => this.update());
+    this.on("btn-reset", "click", () => this.resetAll());
+    this.on("btn-batch", "click", () => this.batchApply());
+    this.on("btn-svg", "click", () => this.exportSVG());
+    this.on("btn-plates", "click", () => this.exportPlates());
+    this.on("btn-cancel", "click", () => this.requestCancel());
     this.bindCompare();
-    this.$("btn-save-preset").addEventListener("click", () => this.savePreset());
-    this.$("btn-load-preset").addEventListener("click", () => this.promptLoadPreset());
+    this.on("btn-save-preset", "click", () => this.savePreset());
+    this.on("btn-load-preset", "click", () => this.promptLoadPreset());
   }
 
   /* --------------------------------------------------- state changes */
@@ -511,20 +595,27 @@ class Panel {
 
   /** How tall the preview box is: the whole panel when full, else the cap. */
   previewBoxHeight() {
+    /*
+     * Floored in every branch, on purpose. In full-preview mode this reads the
+     * height of a flex-grown element, and UXP's flex layout has already
+     * diverged from a browser's twice in this panel. A zero or near-zero
+     * reading would divide through the fit calculation and render a 1px
+     * preview - which reads as "the preview is broken" rather than as a
+     * layout quirk. The floor turns the worst case into a small preview.
+     */
+    let h;
     if (this.theatre) {
       const wrap = this.$("preview-wrap");
-      const h = wrap && wrap.clientHeight;
-      if (h) return h;
       const app = this.$("app");
-      return Math.max(PREVIEW_HEIGHT_MIN, ((app && app.clientHeight) || 720) - 70);
+      h = (wrap && wrap.clientHeight) || ((app && app.clientHeight) || 720) - 70;
+    } else if (this.ui.previewHeight) {
+      h = this.ui.previewHeight;
+    } else {
+      const app = this.$("app");
+      const panelH = (app && app.clientHeight) || 720;
+      h = Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION));
     }
-    if (this.ui.previewHeight) return this.ui.previewHeight;
-    const app = this.$("app");
-    const panelH = (app && app.clientHeight) || 720;
-    return Math.max(
-      PREVIEW_HEIGHT_MIN,
-      Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION))
-    );
+    return Number.isFinite(h) && h > PREVIEW_HEIGHT_MIN ? h : PREVIEW_HEIGHT_MIN;
   }
 
   /* ------------------------------------------------------- viewport */
@@ -571,7 +662,13 @@ class Panel {
   renderPlan(box) {
     const doc = this.documentSize();
     const fit = this.fitZoom(box);
-    const zoom = this.view.zoom === null ? fit : this.view.zoom;
+    let zoom = this.view.zoom === null ? fit : this.view.zoom;
+    // A view that has gone non-finite - a zero-sized box, a bad document
+    // rectangle - would render a 1px frame and look like a dead preview. Fall
+    // back to fit rather than showing nothing.
+    if (!Number.isFinite(zoom) || zoom <= 0) zoom = Number.isFinite(fit) && fit > 0 ? fit : 1;
+    if (!Number.isFinite(this.view.cx)) this.view.cx = 0.5;
+    if (!Number.isFinite(this.view.cy)) this.view.cy = 0.5;
 
     const vw = Math.max(1, Math.round(doc.width * zoom));
     const vh = Math.max(1, Math.round(doc.height * zoom));
@@ -593,19 +690,28 @@ class Panel {
 
   bindZoom() {
     const wrap = this.$("preview-wrap");
-    this.$("btn-zoom-in").addEventListener("click", () => this.zoomBy(ZOOM_STEP));
-    this.$("btn-zoom-out").addEventListener("click", () => this.zoomBy(1 / ZOOM_STEP));
-    this.$("btn-zoom-fit").addEventListener("click", () => this.setZoom(null));
-    this.$("btn-zoom-1").addEventListener("click", () => this.setZoom(1));
-    this.$("btn-theatre").addEventListener("click", () => this.toggleTheatre());
+    this.on("btn-zoom-in", "click", () => this.zoomBy(ZOOM_STEP));
+    this.on("btn-zoom-out", "click", () => this.zoomBy(1 / ZOOM_STEP));
+    this.on("btn-zoom-fit", "click", () => this.setZoom(null));
+    this.on("btn-zoom-1", "click", () => this.setZoom(1));
+    this.on("btn-theatre", "click", () => this.toggleTheatre());
     if (!wrap) return;
 
-    // The wheel is the natural gesture and costs nothing if UXP does not deliver
-    // the event: the buttons do the same job.
+    /*
+     * The wheel is the natural gesture, and costs nothing where it is not
+     * delivered: the buttons do the same job.
+     *
+     * It insists on a real, non-zero deltaY. `(e.deltaY || 0) > 0` was wrong in
+     * a way that matters: a host that reports no deltaY would have taken every
+     * wheel event as "zoom in", so scrolling the panel with the pointer over the
+     * preview would have zoomed it, repeatedly, while preventDefault stopped the
+     * scroll. Nothing is done unless the direction is actually known.
+     */
     wrap.addEventListener("wheel", (e) => {
       if (!this.engine.hasSource()) return;
-      const dir = (e.deltaY || 0) > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
-      this.zoomBy(dir, this.pointerInView(e));
+      const dy = Number(e.deltaY);
+      if (!Number.isFinite(dy) || dy === 0) return;
+      this.zoomBy(dy > 0 ? 1 / ZOOM_STEP : ZOOM_STEP, this.pointerInView(e));
       if (e.preventDefault) e.preventDefault();
     });
 
@@ -652,10 +758,12 @@ class Panel {
     wrap.addEventListener("pointerup", endPan);
     wrap.addEventListener("pointercancel", endPan);
 
-    // Double-click toggles between fit and 1:1, which is the gesture people try.
-    wrap.addEventListener("dblclick", () => {
-      this.setZoom(this.view.zoom === null ? 1 : null);
-    });
+    /*
+     * Deliberately no double-click-to-zoom on the preview. It is a gesture
+     * people make by accident, and its result - the whole picture replaced by a
+     * small crop at 100% - looks exactly like the panel breaking. The two
+     * buttons say what they do and cannot be triggered by a stray double tap.
+     */
   }
 
   /** Where the pointer is inside the preview box, in 0..1, or null. */
@@ -712,6 +820,7 @@ class Panel {
 
   setZoom(zoom) {
     if (!this.engine.hasSource() && zoom !== null) return;
+    if (zoom !== null && !Number.isFinite(zoom)) zoom = null;
     this.view.zoom = zoom;
     if (zoom === null) {
       this.view.cx = 0.5;
@@ -1182,8 +1291,7 @@ class Panel {
    * dot size or colour shows up right at the edge where the eye is good at it.
    */
   bindCompare() {
-    const btn = this.$("btn-compare");
-    if (btn) btn.addEventListener("click", () => this.toggleCompare());
+    this.on("btn-compare", "click", () => this.toggleCompare());
 
     const handle = this.$("split-handle");
     if (!handle) return;

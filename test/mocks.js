@@ -33,6 +33,7 @@ class FakeElement {
     this.title = "";
     this.src = "";
     this.clientWidth = 360;
+    this.clientHeight = 200;
   }
 
   get textContent() {

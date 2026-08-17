@@ -1015,6 +1015,81 @@ async function main() {
   }
 
   /* ================================================================ */
+  group("Survives broken markup");
+  {
+    /*
+     * Every binding used to dereference its element directly, so one id that did
+     * not exist threw out of init() and the user got a blank panel saying
+     * "Failed to start" - because of a button. This asserts the failure is now
+     * proportionate: the missing control is lost, everything else works, and the
+     * panel says what is missing instead of leaving the user to report that
+     * everything is broken.
+     */
+    resetModules();
+    const { document } = install({ width: 400, height: 300, image: F.photo(400, 300) });
+    const { Panel } = require("../src/ui/panel.js");
+
+    // Take an element away by making getElementById miss it.
+    const panel = new Panel(document);
+    const real = document.getElementById;
+    document.getElementById = (id) => (id === "btn-svg" || id === "btn-theatre" ? null : real.call(document, id));
+
+    let threw = null;
+    try {
+      await panel.init();
+    } catch (e) {
+      threw = e;
+    }
+    document.getElementById = real;
+
+    ok(threw === null, `init survives missing markup (${threw ? threw.message : "no throw"})`);
+    ok(
+      panel.missingElements.indexOf("btn-svg") >= 0 && panel.missingElements.indexOf("btn-theatre") >= 0,
+      `and records exactly what was missing (${panel.missingElements.join(", ")})`
+    );
+    ok(Object.keys(panel.controls).length > 5, "the controls still built");
+
+    // The rest of the panel still works: loading a layer still previews.
+    document.getElementById("btn-load").emit("click");
+    ok(await waitFor(() => panel.engine.hasSource()), "and Load Layer still works");
+
+    uninstall();
+  }
+
+  /* ================================================================ */
+  group("Start-up self-check");
+  {
+    resetModules();
+    const { document } = install({ width: 400, height: 300, image: F.photo(400, 300) });
+    const { Panel } = require("../src/ui/panel.js");
+
+    const panel = new Panel(document);
+    await panel.init();
+    const clean = panel.selfCheck();
+    ok(Array.isArray(clean), "the self-check returns what it found");
+    // The mock reports a real size for every element, so a healthy panel is quiet
+    // apart from anything the fake host genuinely lacks.
+    ok(
+      clean.every((m) => !/missing:|no width|no height|sections/.test(m)),
+      `a healthy panel reports no structural problem (${clean.join(" | ") || "nothing"})`
+    );
+
+    // Now break it and check the message names the cause.
+    panel.missingElements = ["btn-apply"];
+    const broken = panel.selfCheck();
+    ok(
+      broken.some((m) => /markup is missing: btn-apply/.test(m)),
+      `a broken panel names what is wrong (${broken.join(" | ")})`
+    );
+    ok(
+      /please send this text/i.test(document.getElementById("notice").textContent),
+      "and puts it on screen where it can be read out"
+    );
+
+    uninstall();
+  }
+
+  /* ================================================================ */
   group("Tone curve editor");
   {
     resetModules();

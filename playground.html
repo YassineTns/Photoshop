@@ -8326,26 +8326,43 @@ function createCurve(def, value, onChange, opts = {}) {
     return Math.round((1 - v) * (CURVE_H - 3)) + "px";
   }
 
-  function paint() {
-    // The line.
-    line.textContent = "";
-    for (let i = 0; i < CURVE_SAMPLES; i++) {
-      const x = i / (CURVE_SAMPLES - 1);
-      const seg = el("div", "curve-seg");
-      seg.style.left = pct(x);
-      seg.style.top = yPx(evalCurve(points, x));
-      line.appendChild(seg);
-    }
+  /*
+   * Repaint by moving what already exists.
+   *
+   * This used to rebuild every segment and every control point on each
+   * pointermove - seventy-odd elements per frame, including the very dot being
+   * dragged, which was therefore destroyed and recreated under the pointer.
+   * The segments are a fixed count so they are built once; the dots are only
+   * rebuilt when their number actually changes.
+   */
+  const segs = [];
+  for (let i = 0; i < CURVE_SAMPLES; i++) {
+    const seg = el("div", "curve-seg");
+    seg.style.left = pct(i / (CURVE_SAMPLES - 1));
+    segs.push(seg);
+    line.appendChild(seg);
+  }
+  let dotNodes = [];
 
-    // The control points.
+  function rebuildDots() {
     dots.textContent = "";
-    points.forEach((p, i) => {
+    dotNodes = points.map((p, i) => {
       const dot = el("div", "curve-dot");
-      dot.style.left = pct(p[0]);
-      dot.style.top = yPx(p[1]);
       dot.addEventListener("pointerdown", (e) => beginDrag(e, i));
       dots.appendChild(dot);
+      return dot;
     });
+  }
+
+  function paint() {
+    for (let i = 0; i < CURVE_SAMPLES; i++) {
+      segs[i].style.top = yPx(evalCurve(points, i / (CURVE_SAMPLES - 1)));
+    }
+    if (dotNodes.length !== points.length) rebuildDots();
+    for (let i = 0; i < points.length; i++) {
+      dotNodes[i].style.left = pct(points[i][0]);
+      dotNodes[i].style.top = yPx(points[i][1]);
+    }
 
     const changed = !isIdentityCurve(points);
     wrap.className = "curve" + (changed ? " modified" : "");

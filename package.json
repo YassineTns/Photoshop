@@ -13,7 +13,9 @@
     "icons": "node tools/make-icons.js",
     "playground": "node tools/build-playground.js",
     "test:layout": "node tools/build-playground.js && node test/layout.test.mjs",
-    "shoot": "node tools/shoot.mjs"
+    "shoot": "node tools/shoot.mjs",
+    "test:soak": "node tools/build-playground.js && node test/soak.mjs",
+    "test:ui": "npm run test:layout && npm run test:soak"
   },
   "engines": {
     "node": ">=18"

@@ -491,10 +491,12 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (415 assertions) + mocked host (227 assertions)
+npm test              # engine (415 assertions) + mocked host (235 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)
+npm run test:soak     # drives the real panel through a full session
+npm run test:ui       # both of the above
 ```
 
 The engine suite covers a black image, a white image, a **black→white gradient**
@@ -564,6 +566,23 @@ alpha while the frame still covers the layer (with all three "no selection" case
 layer rather than failing), SVG export reaching a real file, and that every
 parameter in the schema is reachable in some UI state while no control is built
 for a hidden one.
+
+### When something is wrong
+
+The panel runs a **self-check at start-up** and puts anything it finds on screen:
+missing markup, a preview area with no size, too few sections, a host without
+`imaging.putLayerMask`. Three faults have reached a user through a completely
+green test suite — a layout that only broke under UXP's flex rules, a panel
+entrypoint that could not load, a stylesheet feature UXP does not implement —
+and in each case the report that came back was that it did not work. That is not
+the user's job to diagnose. The check reports only what it can actually measure:
+an unreadable size is "cannot measure", not "has no size", because a check that
+cries wolf is worse than none.
+
+A missing element also no longer takes the panel down. Every handler is bound
+through a helper that records what is absent and carries on, so a button that
+does not exist costs that button rather than producing a blank panel that says
+"Failed to start".
 
 ### Measured performance
 
