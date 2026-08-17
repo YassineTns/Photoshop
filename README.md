@@ -158,7 +158,7 @@ src/
     color.js           sRGB/linear, OKLab, HSL, luma
     blur.js            3-pass box blur approximating a Gaussian
     preprocess.js      unsharp mask, edge-preserving noise reduction
-    grade.js           tone LUT, Schlick bias, ink -> radius
+    grade.js           tone LUT, monotone curve, Schlick bias, ink -> radius
     quantization.js    median cut, k-means, popularity
     palette.js         extraction, spread, matching, ink/paper split
     tonemap.js         shadow / midtone / highlight palette bands
@@ -456,7 +456,8 @@ Units are chosen so that nothing depends on document resolution.
 | | Background | auto or hex | Paper colour (halftone) |
 | Tonal Zones | Tonal zones | on/off | Restrict each tonal band to its own palette slice |
 | | Shadows / Highlights | 0.05–0.95 | Band boundaries |
-| Grade | Contrast / Gamma / Black / White / Exposure | | Standard grading chain |
+| Grade | Curve | control points | Shape the tone directly, applied after the sliders |
+| | Contrast / Gamma / Black / White / Exposure | | Standard grading chain |
 | | Grade Bias | −1…1 | Bends tone → dot size; endpoints stay pinned |
 | | Luma | luma709, luma601, perceptual | How tone is measured |
 | Adjust | Hue / Saturation / Brightness / Invert | | |
@@ -464,6 +465,24 @@ Units are chosen so that nothing depends on document resolution.
 | | Respect selection | on/off | Confine the render to the active selection |
 | Batch | Scope | selection / group / document | Which layers Batch Apply covers |
 | | Shared palette | on/off | Extract one palette and pin it across the batch |
+
+**The tone curve** sits at the top of Grade, over a histogram of the loaded
+layer — a curve without one is guesswork, since you cannot place a point on the
+shadows if you cannot see where the shadows are. Click to add a point, drag to
+shape, alt-click to remove. It is applied *after* the sliders, as Curves is
+after Levels in an image editor: they set the range, it shapes what is inside.
+
+Interpolation is **monotone cubic (Fritsch–Carlson), not a natural spline**, and
+that is not a detail. A natural spline through hand-placed points overshoots
+between them, and an overshoot in a tone curve is a *reversal* — a patch that
+gets darker as the source gets lighter, which prints as a false edge running
+through a gradient. Fritsch–Carlson limits the tangents so the curve can never
+turn back on itself. The test suite asserts exactly that, on eight shapes
+including deliberately nasty ones: the rendered curve may change direction only
+as often as its own control points do.
+
+It is drawn from positioned elements rather than a canvas, because UXP's canvas
+support varies by host version and the rest of the panel does not depend on it.
 
 **Engraving.** The `engrave` shape is a line whose thickness carries tone, plus a
 second line crossing it once the first is thick enough that a darker tone could
@@ -481,7 +500,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (400 assertions) + mocked host (211 assertions)
+npm test              # engine (420 assertions) + mocked host (227 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)

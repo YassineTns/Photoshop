@@ -1156,6 +1156,123 @@ body {
   margin-top: 6px;
 }
 
+/* ------------------------------------------------------ tone curve */
+
+/*
+ * Drawn from positioned elements, not a canvas: UXP's canvas support varies by
+ * host version. The box height is stated here AND in controls.js, because the
+ * curve needs a number to position against before the box exists to measure.
+ * If the two drift, the curve leaves its box - which the layout test catches.
+ */
+.curve {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0 0;
+}
+
+.curve-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 22px;
+  margin-bottom: 5px;
+}
+
+.curve-head > * { margin-right: 8px; }
+.curve-head > *:last-child { margin-right: 0; }
+
+.curve-readout {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-faint);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.curve.modified .curve-readout { color: var(--text-dim); }
+.curve .ctl-reset { visibility: hidden; }
+.curve.modified .ctl-reset { visibility: visible; }
+
+.curve-box {
+  position: relative;
+  height: 132px;
+  min-height: 132px;
+  background-color: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.curve-hist,
+.curve-grid,
+.curve-diag,
+.curve-line,
+.curve-dots {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* The histogram of the loaded layer: a curve without one is guesswork. */
+.curve-bar {
+  position: absolute;
+  bottom: 0;
+  background-color: var(--bg-raised-hi);
+}
+
+.curve-gridline {
+  position: absolute;
+  background-color: var(--border);
+}
+
+.curve-gridline.h { left: 0; right: 0; height: 1px; }
+.curve-gridline.v { top: 0; bottom: 0; width: 1px; }
+
+/* The identity, dotted, so "no change" reads as a shape rather than nothing. */
+.curve-diagdot {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  margin-left: -1px;
+  background-color: var(--border-strong);
+}
+
+.curve-seg {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background-color: var(--text-dim);
+}
+
+.curve.modified .curve-seg { background-color: var(--accent-on-dark-text); }
+
+.curve-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin-left: -5px;
+  margin-top: -5px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-sunken);
+  border: 1px solid var(--text);
+  cursor: move;
+}
+
+.curve-dot:hover {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* --------------------------------------------------------- presets */
 
 .preset-bar {

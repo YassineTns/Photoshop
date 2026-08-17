@@ -29,6 +29,7 @@ const { ALGORITHMS, ALGORITHM_FAMILIES } = require("../engine/dither.js");
 const { BUILTIN_PRESETS, presetToParams, makeUserPreset } = require("../presets/presets.js");
 const { HalftoneEngine } = require("../engine/pipeline.js");
 const { toDataURL, encodePNG } = require("../util/png.js");
+const { isIdentityCurve } = require("../engine/grade.js");
 const { downscaleBox: downscale } = require("../engine/resample.js");
 const HOST = require("../photoshop/host.js");
 const RENDER = require("../photoshop/render.js");
@@ -232,6 +233,8 @@ class Panel {
         }
       } else if (def.type === "palette") {
         parts.push(`${(v || []).length} colours`);
+      } else if (def.type === "curve") {
+        if (!isIdentityCurve(v)) parts.push(`curve ${v.length}pt`);
       }
       if (parts.length >= 3) break;
     }
@@ -284,6 +287,11 @@ class Panel {
         break;
       case "color":
         ctl = C.createColorField(def, this.params[def.key], commit, () => IM.foregroundRGB());
+        break;
+      case "curve":
+        ctl = C.createCurve(def, this.params[def.key], commit, {
+          getHistogram: () => this.previewHistogram(),
+        });
         break;
       case "palette":
         ctl = C.createPalette({
@@ -444,10 +452,17 @@ class Panel {
     }
   }
 
+  /** Push a fresh histogram into the curve editor, if one is on screen. */
+  refreshHistogram() {
+    const c = this.controls.toneCurve;
+    if (c && c.setHistogram) c.setHistogram(this.previewHistogram());
+  }
+
   /** Rebuild the whole panel from `this.params` (after a preset or a recall). */
   rebuild() {
     this.buildSections();
     this.syncControls();
+    this.refreshHistogram();
     this.renderPresetChips();
   }
 
@@ -514,6 +529,16 @@ class Panel {
   }
 
   /* ------------------------------------------------------- viewport */
+
+  /** The source's tone distribution, for the curve editor's backdrop. */
+  previewHistogram() {
+    if (!this.engine.hasSource()) return null;
+    try {
+      return this.engine.histogram(this.params);
+    } catch (e) {
+      return null;
+    }
+  }
 
   /** The document's own pixel dimensions, which is what 1:1 is relative to. */
   documentSize() {
@@ -816,6 +841,7 @@ class Panel {
       this.view = { zoom: null, cx: 0.5, cy: 0.5 };
       if (!this.params.paletteLocked) this.syncPaletteFromImage();
       this.updateZoomBar();
+      this.refreshHistogram();
       this.drawPreview();
 
       // If this layer is an existing render, bring its settings back.
@@ -1575,7 +1601,7 @@ const SECTION_SUMMARY = {
   preprocess: ["blur", "sharpen", "noiseReduction"],
   colors: ["colorCount", "quantMethod", "spread"],
   tonal: ["tonalMapping"],
-  grade: ["contrast", "gamma", "exposure", "gradeBias"],
+  grade: ["toneCurve", "contrast", "gamma", "exposure", "gradeBias"],
   adjust: ["invert", "hue", "saturation", "brightness"],
   output: ["output", "useSelection"],
   batch: ["batchScope", "batchSharedPalette"],

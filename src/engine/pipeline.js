@@ -54,7 +54,7 @@ const {
   nearestIndex,
   pickBackgroundIndex,
 } = require("./palette.js");
-const { hexToRgb, adjustColor } = require("./color.js");
+const { hexToRgb, adjustColor, getLumaFn } = require("./color.js");
 const { resolveResolution } = require("../state/params.js");
 
 /** Samples along a cell edge in the analysis image. 8 -> 64 samples per cell. */
@@ -78,6 +78,7 @@ class HalftoneEngine {
     this._screens = null;
     this._basePalette = null;
     this._cellColors = null;
+    this._hist = null;
     this.stats = {};
   }
 
@@ -90,6 +91,7 @@ class HalftoneEngine {
     this._screens = null;
     this._basePalette = null;
     this._cellColors = null;
+    this._hist = null;
   }
 
   hasSource() {
@@ -232,6 +234,41 @@ class HalftoneEngine {
 
     this.stats.colorMs = now() - t0;
     this._cellColors = { key, index: out };
+    return out;
+  }
+
+  /**
+   * A luminance histogram of the analysis image, for the curve editor.
+   *
+   * Deliberately of the *source*, before any grading: the curve editor shows
+   * where the tones are so you can decide where to put a point, and a histogram
+   * that already had the curve applied would move under your hand as you drew.
+   *
+   * @param {object} params
+   * @param {number} [bins]
+   * @returns {number[]|null}
+   */
+  histogram(params, bins = 64) {
+    if (!this.source) return null;
+    const key = `${this.sourceId}|${bins}|${params.lumaMode}`;
+    if (this._hist && this._hist.key === key) return this._hist.bins;
+
+    // The analysis image is already downscaled and pre-processed, which is both
+    // fast and the right signal: it is what the cells are measured from.
+    const img = this._ensureAnalysis(params).img;
+    const lumaFn = getLumaFn(params.lumaMode);
+    const out = new Array(bins).fill(0);
+    const data = img.data;
+    const last = bins - 1;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 8) continue;
+      const v = lumaFn(data[i], data[i + 1], data[i + 2]);
+      let b = (v * bins) | 0;
+      if (b < 0) b = 0;
+      else if (b > last) b = last;
+      out[b]++;
+    }
+    this._hist = { key, bins: out };
     return out;
   }
 

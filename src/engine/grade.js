@@ -13,12 +13,137 @@
  * @property {number} whitePoint  input white, 0..255
  * @property {number} gamma       0.1..3 (1 = none)
  * @property {number} exposure    -100..100 additive lift, in %
+ * @property {number[][]} [toneCurve] control points [[x,y], ...] in 0..1
  */
+
+/** The identity curve: two endpoints, nothing bent. */
+const IDENTITY_CURVE = [
+  [0, 0],
+  [1, 1],
+];
+
+/**
+ * Is this curve the identity, to within a pixel of 8-bit precision?
+ * @param {number[][]} pts
+ */
+function isIdentityCurve(pts) {
+  if (!pts || pts.length < 2) return true;
+  for (const p of pts) {
+    if (Math.abs(p[1] - p[0]) > 0.002) return false;
+  }
+  return true;
+}
+
+/**
+ * Sort by x, clamp into range, and drop points that share an x.
+ *
+ * Two points at the same x would make the slope infinite and the interpolation
+ * meaningless, and they are easy to produce by dragging one point onto another.
+ *
+ * @param {number[][]} pts
+ * @returns {number[][]} at least two points, strictly increasing in x
+ */
+function normaliseCurve(pts) {
+  const list = (Array.isArray(pts) ? pts : [])
+    .filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1])))
+    .map((p) => [clamp(Number(p[0]), 0, 1), clamp(Number(p[1]), 0, 1)])
+    .sort((a, b) => a[0] - b[0]);
+
+  const out = [];
+  for (const p of list) {
+    if (out.length && p[0] - out[out.length - 1][0] < 1e-4) continue;
+    out.push(p);
+  }
+  if (out.length < 2) return IDENTITY_CURVE.map((p) => p.slice());
+  return out;
+}
+
+/**
+ * Evaluate a curve through its control points.
+ *
+ * Monotone cubic interpolation (Fritsch-Carlson), not a plain natural spline.
+ * The difference matters here: a natural spline through hand-placed points
+ * overshoots between them, and an overshoot in a tone curve is a *reversal* -
+ * a patch that gets darker as the source gets lighter, which shows up as a
+ * false edge running through a gradient. Fritsch-Carlson limits the tangents so
+ * the result can never turn back on itself, at the cost of being slightly less
+ * smooth at the control points. That is the right trade for tone.
+ *
+ * @param {number[][]} pts normalised: sorted, distinct x
+ * @param {number} x 0..1
+ * @returns {number} 0..1
+ */
+function evalCurve(pts, x) {
+  const n = pts.length;
+  if (n < 2) return x;
+  if (x <= pts[0][0]) return pts[0][1];
+  if (x >= pts[n - 1][0]) return pts[n - 1][1];
+
+  // Secant slopes, then tangents limited so no segment can overshoot.
+  const d = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) {
+    d[i] = (pts[i + 1][1] - pts[i][1]) / (pts[i + 1][0] - pts[i][0]);
+  }
+  const m = new Array(n);
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    // A local extremum: the tangent must be flat, or the curve bulges past it.
+    m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / d[i];
+    const b = m[i + 1] / d[i];
+    const h = Math.hypot(a, b);
+    if (h > 3) {
+      const t = 3 / h;
+      m[i] = t * a * d[i];
+      m[i + 1] = t * b * d[i];
+    }
+  }
+
+  let i = 0;
+  while (i < n - 2 && x > pts[i + 1][0]) i++;
+  const h = pts[i + 1][0] - pts[i][0];
+  const t = (x - pts[i][0]) / h;
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const h00 = 2 * t3 - 3 * t2 + 1;
+  const h10 = t3 - 2 * t2 + t;
+  const h01 = -2 * t3 + 3 * t2;
+  const h11 = t3 - t2;
+  const y = h00 * pts[i][1] + h10 * h * m[i] + h01 * pts[i + 1][1] + h11 * h * m[i + 1];
+  return y < 0 ? 0 : y > 1 ? 1 : y;
+}
+
+/**
+ * A curve as a 256 entry table.
+ * @param {number[][]} pts
+ * @returns {Float32Array}
+ */
+function curveLUT(pts) {
+  const norm = normaliseCurve(pts);
+  const lut = new Float32Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = evalCurve(norm, i / 255);
+  return lut;
+}
 
 /**
  * Build a lookup table mapping an 8 bit luminance to a graded 0..1 value.
+ *
  * Order of operations mirrors a classic grading chain:
- *   levels (black/white point) -> gamma -> contrast -> exposure
+ *   levels (black/white point) -> gamma -> contrast -> exposure -> curve
+ *
+ * The curve comes last, as it does in an image editor: the sliders set the
+ * overall range and the curve shapes what is inside it. Doing it the other way
+ * round would mean every slider move silently re-interpreted the points you had
+ * placed.
+ *
  * @param {GradeParams} p
  * @returns {Float32Array} 256 entries, 0..1
  */
@@ -39,6 +164,14 @@ function buildToneLUT(p) {
     if (contrast !== 1) v = (v - 0.5) * contrast + 0.5;
     if (exposure !== 0) v += exposure;
     lut[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+  }
+
+  // Named for the parameter, like every other field this reads. It was `curve`
+  // for one revision and silently did nothing, which is the whole argument for
+  // checking a feature end to end rather than trusting that it is wired.
+  if (p.toneCurve && !isIdentityCurve(p.toneCurve)) {
+    const pts = normaliseCurve(p.toneCurve);
+    for (let i = 0; i < 256; i++) lut[i] = evalCurve(pts, lut[i]);
   }
   return lut;
 }
@@ -142,6 +275,11 @@ function clamp(v, lo, hi) {
 }
 
 module.exports = {
+  IDENTITY_CURVE,
+  isIdentityCurve,
+  normaliseCurve,
+  evalCurve,
+  curveLUT,
   buildToneLUT,
   sampleLUT,
   biasCurve,

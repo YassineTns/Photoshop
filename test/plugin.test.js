@@ -1018,6 +1018,87 @@ async function main() {
   }
 
   /* ================================================================ */
+  group("Tone curve editor");
+  {
+    resetModules();
+    const { ps, document } = install({ width: 800, height: 600, image: F.photo(800, 600) });
+    const { Panel } = require("../src/ui/panel.js");
+    const META = require("../src/photoshop/metadata.js");
+    const { isIdentityCurve } = require("../src/engine/grade.js");
+
+    const panel = new Panel(document);
+    await panel.init();
+    document.getElementById("btn-load").emit("click");
+    ok(await waitFor(() => panel.engine.hasSource()), "a layer is loaded");
+
+    const ctl = panel.controls.toneCurve;
+    ok(!!ctl, "the Grade section builds a curve editor");
+    ok(isIdentityCurve(panel.params.toneCurve), "which starts straight");
+
+    const box = ctl.el.find((e) => e.className === "curve-box");
+    ok(!!box, "with an editable box");
+    const bars = ctl.el.findAll((e) => e.className === "curve-bar");
+    ok(bars.length > 0, `and a histogram of the layer behind it (${bars.length} bins)`);
+    const dotsBefore = ctl.el.findAll((e) => e.className === "curve-dot").length;
+    ok(dotsBefore === 2, `two control points to begin with (${dotsBefore})`);
+
+    // Click in the box to add a point. The mock's getBoundingClientRect is
+    // 200x20 at the origin, so a click maps predictably into 0..1.
+    box.emit("pointerdown", { clientX: 100, clientY: 5, pointerId: 1 });
+    box.emit("pointermove", { clientX: 100, clientY: 2, pointerId: 1 });
+    box.emit("pointerup", { clientX: 100, clientY: 2, pointerId: 1 });
+
+    ok(panel.params.toneCurve.length === 3, `clicking adds a point (${panel.params.toneCurve.length})`);
+    ok(!isIdentityCurve(panel.params.toneCurve), "and the curve is no longer straight");
+    ok(
+      ctl.el.findAll((e) => e.className === "curve-dot").length === 3,
+      "the editor draws the new point"
+    );
+    ok(ctl.el.className.indexOf("modified") >= 0, "and marks itself as changed");
+    ok(/curve 3pt/.test(panel.summaryFor("grade")), `the section head reports it ("${panel.summaryFor("grade")}")`);
+
+    // A curve that does nothing is worse than no curve: check it reaches the
+    // render rather than only the editor.
+    const bent = panel.engine.render(panel.params, { width: 120, height: 90 });
+    const straightParams = Object.assign({}, panel.params, { toneCurve: [[0, 0], [1, 1]] });
+    const fresh = new (require("../src/engine/pipeline.js").HalftoneEngine)();
+    fresh.setSource(panel.engine.source);
+    const straight = fresh.render(straightParams, { width: 120, height: 90 });
+    let moved = 0;
+    for (let i = 0; i < bent.data.length; i += 4) {
+      if (Math.abs(bent.data[i] - straight.data[i]) > 8) moved++;
+    }
+    ok(moved > 0, `the drawn curve changes the render (${moved} pixels)`);
+
+    // Alt-click removes, but never below two points.
+    const dot = ctl.el.findAll((e) => e.className === "curve-dot")[1];
+    dot.emit("pointerdown", { altKey: true, pointerId: 1 });
+    ok(panel.params.toneCurve.length === 2, `alt-click removes a point (${panel.params.toneCurve.length})`);
+    const last = ctl.el.findAll((e) => e.className === "curve-dot")[0];
+    last.emit("pointerdown", { altKey: true, pointerId: 1 });
+    ok(panel.params.toneCurve.length === 2, "and refuses to go below two");
+
+    // Persistence: an array of pairs is exactly the shape a careless encoder
+    // flattens, so check it survives the layer's own metadata.
+    panel.params.toneCurve = [[0, 0], [0.3, 0.12], [0.7, 0.88], [1, 1]];
+    const rec = META.makeRecord("HT-000000ff", panel.params, { docName: "Test.psd" });
+    const decoded = META.parseXMP(META.buildXMP(rec));
+    ok(
+      JSON.stringify(decoded.params.toneCurve) === JSON.stringify(panel.params.toneCurve),
+      `the curve survives the XMP round trip (${JSON.stringify(decoded.params.toneCurve)})`
+    );
+
+    // The reset arrow straightens it.
+    const resetBtn = ctl.el.find((e) => e.className === "ctl-reset");
+    ctl.set(panel.params.toneCurve);
+    resetBtn.emit("click", {});
+    ok(isIdentityCurve(panel.params.toneCurve), "the reset arrow straightens the curve");
+
+    void ps;
+    uninstall();
+  }
+
+  /* ================================================================ */
   group("Full preview mode");
   {
     // This replaced a second panel entrypoint that opened empty: UXP loads one

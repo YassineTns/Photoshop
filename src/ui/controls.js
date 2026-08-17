@@ -14,6 +14,8 @@
  *   - the numeric field next to each slider is editable
  */
 
+const { normaliseCurve, evalCurve, isIdentityCurve } = require("../engine/grade.js");
+
 /** @param {string} tag @param {string} [cls] @param {string} [text] */
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -521,6 +523,258 @@ function createColorField(def, value, onChange, getForeground) {
   return { el: row, set };
 }
 
+/* ------------------------------------------------------------------ *
+ * Tone curve
+ * ------------------------------------------------------------------ */
+
+/**
+ * The editor's height in pixels.
+ *
+ * Stated here and in the stylesheet, because the curve is drawn by positioning
+ * elements and that needs a number, while the box needs a height before any of
+ * them exist to measure. The two must agree; the layout test would catch them
+ * drifting, since the curve would leave its box.
+ */
+const CURVE_H = 132;
+/** How many segments the curve is drawn with. Enough to read as a line. */
+const CURVE_SAMPLES = 64;
+/** How close a click has to be, in fractions of the box, to grab a point. */
+const CURVE_GRAB = 0.055;
+
+/**
+ * A tone curve editor.
+ *
+ * Built from positioned divs rather than a canvas: UXP's canvas support varies
+ * by host version, and this needs to work everywhere the rest of the panel does.
+ * The curve is drawn as a run of short segments and the control points are real
+ * elements, which also means they can carry their own pointer handlers instead
+ * of the editor doing hit-testing on every move.
+ *
+ * A histogram of the loaded layer sits behind it, because a curve without one is
+ * guesswork - you cannot place a point on the shadows if you cannot see where
+ * the shadows are.
+ *
+ * @param {object} def ParamDef
+ * @param {number[][]} value control points
+ * @param {(v:number[][], committed:boolean)=>void} onChange
+ * @param {{getHistogram?: () => number[]|null}} [opts]
+ */
+function createCurve(def, value, onChange, opts = {}) {
+  const wrap = el("div", "curve");
+
+  const head = el("div", "curve-head");
+  const label = el("div", "ctl-label", def.label);
+  if (def.hint) label.title = def.hint;
+  const readout = el("div", "curve-readout", "");
+  const reset = el("button", "ctl-reset", "↺");
+  reset.title = "Straighten the curve";
+  head.appendChild(label);
+  head.appendChild(readout);
+  head.appendChild(reset);
+  wrap.appendChild(head);
+
+  const box = el("div", "curve-box");
+  const hist = el("div", "curve-hist");
+  const grid = el("div", "curve-grid");
+  const diag = el("div", "curve-diag");
+  const line = el("div", "curve-line");
+  const dots = el("div", "curve-dots");
+  box.appendChild(hist);
+  box.appendChild(grid);
+  box.appendChild(diag);
+  box.appendChild(line);
+  box.appendChild(dots);
+  wrap.appendChild(box);
+  wrap.appendChild(el("div", "hint", "Click to add a point · drag to shape · alt-click a point to remove"));
+
+  // Quarter grid, and a dotted diagonal so "no change" is visible as a shape.
+  for (let i = 1; i < 4; i++) {
+    const h = el("div", "curve-gridline h");
+    h.style.top = pct(i / 4);
+    grid.appendChild(h);
+    const v = el("div", "curve-gridline v");
+    v.style.left = pct(i / 4);
+    grid.appendChild(v);
+  }
+  for (let i = 0; i < 22; i++) {
+    const d = el("div", "curve-diagdot");
+    const t = i / 21;
+    d.style.left = pct(t);
+    d.style.top = yPx(t);
+    diag.appendChild(d);
+  }
+
+  let points = normaliseCurve(value);
+
+  function pct(t) {
+    return (t * 100).toFixed(3) + "%";
+  }
+
+  /** Curve value -> pixel offset from the top of the box. */
+  function yPx(v) {
+    return Math.round((1 - v) * (CURVE_H - 3)) + "px";
+  }
+
+  function paint() {
+    // The line.
+    line.textContent = "";
+    for (let i = 0; i < CURVE_SAMPLES; i++) {
+      const x = i / (CURVE_SAMPLES - 1);
+      const seg = el("div", "curve-seg");
+      seg.style.left = pct(x);
+      seg.style.top = yPx(evalCurve(points, x));
+      line.appendChild(seg);
+    }
+
+    // The control points.
+    dots.textContent = "";
+    points.forEach((p, i) => {
+      const dot = el("div", "curve-dot");
+      dot.style.left = pct(p[0]);
+      dot.style.top = yPx(p[1]);
+      dot.addEventListener("pointerdown", (e) => beginDrag(e, i));
+      dots.appendChild(dot);
+    });
+
+    const changed = !isIdentityCurve(points);
+    wrap.className = "curve" + (changed ? " modified" : "");
+    readout.textContent = changed ? `${points.length} points` : "linear";
+  }
+
+  function setHistogram(bins) {
+    hist.textContent = "";
+    if (!bins || !bins.length) return;
+    let peak = 0;
+    for (const b of bins) if (b > peak) peak = b;
+    if (peak <= 0) return;
+    const w = 100 / bins.length;
+    bins.forEach((b, i) => {
+      const bar = el("div", "curve-bar");
+      bar.style.left = (i * w).toFixed(3) + "%";
+      bar.style.width = (w + 0.2).toFixed(3) + "%";
+      // Square root, so a single dominant bin does not flatten everything else
+      // into invisibility - this is a shape to read, not a measurement.
+      bar.style.height = Math.round(Math.sqrt(b / peak) * (CURVE_H - 4)) + "px";
+      hist.appendChild(bar);
+    });
+  }
+
+  /** Pointer position as a 0..1 point in the box. */
+  function at(e) {
+    const r = box.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return [
+      clampUnit((e.clientX - r.left) / r.width),
+      clampUnit(1 - (e.clientY - r.top) / r.height),
+    ];
+  }
+
+  let dragIndex = -1;
+
+  function beginDrag(e, index) {
+    if (e.altKey) {
+      // Removing needs two points left over, or there is no curve.
+      if (points.length > 2) {
+        points.splice(index, 1);
+        paint();
+        onChange(copy(points), true);
+      }
+      if (e.preventDefault) e.preventDefault();
+      return;
+    }
+    dragIndex = index;
+    try {
+      box.setPointerCapture(e.pointerId);
+    } catch (err) {
+      /* capture is an optimisation, not a requirement */
+    }
+    if (e.preventDefault) e.preventDefault();
+  }
+
+  box.addEventListener("pointerdown", (e) => {
+    if (dragIndex >= 0) return; // a point handled it first
+    const p = at(e);
+    if (!p) return;
+    // Near an existing point, grab it rather than stacking a new one on top.
+    let near = -1;
+    let best = CURVE_GRAB;
+    points.forEach((q, i) => {
+      const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (d < best) {
+        best = d;
+        near = i;
+      }
+    });
+    if (near >= 0) {
+      beginDrag(e, near);
+      return;
+    }
+    points.push(p);
+    points = normaliseCurve(points);
+    dragIndex = points.findIndex((q) => q[0] === p[0] && q[1] === p[1]);
+    paint();
+    try {
+      box.setPointerCapture(e.pointerId);
+    } catch (err) {
+      /* ignore */
+    }
+    if (e.preventDefault) e.preventDefault();
+  });
+
+  box.addEventListener("pointermove", (e) => {
+    if (dragIndex < 0) return;
+    const p = at(e);
+    if (!p) return;
+    const moved = points[dragIndex];
+    // Keep the point between its neighbours: crossing one would reorder the
+    // list under the drag and the point would jump out from under the pointer.
+    const lo = dragIndex > 0 ? points[dragIndex - 1][0] + 0.01 : 0;
+    const hi = dragIndex < points.length - 1 ? points[dragIndex + 1][0] - 0.01 : 1;
+    moved[0] = clampUnit(Math.min(Math.max(p[0], lo), hi));
+    moved[1] = p[1];
+    paint();
+    onChange(copy(points), false);
+  });
+
+  const endDrag = (e) => {
+    if (dragIndex < 0) return;
+    dragIndex = -1;
+    try {
+      box.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      /* ignore */
+    }
+    points = normaliseCurve(points);
+    paint();
+    onChange(copy(points), true);
+  };
+  box.addEventListener("pointerup", endDrag);
+  box.addEventListener("pointercancel", endDrag);
+
+  reset.addEventListener("click", () => {
+    points = normaliseCurve(def.def);
+    paint();
+    onChange(copy(points), true);
+  });
+
+  function set(v) {
+    points = normaliseCurve(v);
+    paint();
+  }
+
+  set(value);
+  if (opts.getHistogram) setHistogram(opts.getHistogram());
+  return { el: wrap, set, setHistogram };
+}
+
+function copy(pts) {
+  return pts.map((p) => [p[0], p[1]]);
+}
+
+function clampUnit(v) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
 /**
  * A collapsible section.
  *
@@ -569,6 +823,7 @@ module.exports = {
   createToggle,
   createPalette,
   createColorField,
+  createCurve,
   createSection,
   normalizeHex,
   titleCase,

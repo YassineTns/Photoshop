@@ -1163,6 +1163,123 @@ body {
   margin-top: 6px;
 }
 
+/* ------------------------------------------------------ tone curve */
+
+/*
+ * Drawn from positioned elements, not a canvas: UXP's canvas support varies by
+ * host version. The box height is stated here AND in controls.js, because the
+ * curve needs a number to position against before the box exists to measure.
+ * If the two drift, the curve leaves its box - which the layout test catches.
+ */
+.curve {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0 0;
+}
+
+.curve-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 22px;
+  margin-bottom: 5px;
+}
+
+.curve-head > * { margin-right: 8px; }
+.curve-head > *:last-child { margin-right: 0; }
+
+.curve-readout {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-faint);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.curve.modified .curve-readout { color: var(--text-dim); }
+.curve .ctl-reset { visibility: hidden; }
+.curve.modified .ctl-reset { visibility: visible; }
+
+.curve-box {
+  position: relative;
+  height: 132px;
+  min-height: 132px;
+  background-color: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.curve-hist,
+.curve-grid,
+.curve-diag,
+.curve-line,
+.curve-dots {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* The histogram of the loaded layer: a curve without one is guesswork. */
+.curve-bar {
+  position: absolute;
+  bottom: 0;
+  background-color: var(--bg-raised-hi);
+}
+
+.curve-gridline {
+  position: absolute;
+  background-color: var(--border);
+}
+
+.curve-gridline.h { left: 0; right: 0; height: 1px; }
+.curve-gridline.v { top: 0; bottom: 0; width: 1px; }
+
+/* The identity, dotted, so "no change" reads as a shape rather than nothing. */
+.curve-diagdot {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  margin-left: -1px;
+  background-color: var(--border-strong);
+}
+
+.curve-seg {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background-color: var(--text-dim);
+}
+
+.curve.modified .curve-seg { background-color: var(--accent-on-dark-text); }
+
+.curve-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin-left: -5px;
+  margin-top: -5px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-sunken);
+  border: 1px solid var(--text);
+  cursor: move;
+}
+
+.curve-dot:hover {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* --------------------------------------------------------- presets */
 
 .preset-bar {
@@ -2262,12 +2379,137 @@ window.__define("src/engine/grade.js", function (module, exports, require) {
  * @property {number} whitePoint  input white, 0..255
  * @property {number} gamma       0.1..3 (1 = none)
  * @property {number} exposure    -100..100 additive lift, in %
+ * @property {number[][]} [toneCurve] control points [[x,y], ...] in 0..1
  */
+
+/** The identity curve: two endpoints, nothing bent. */
+const IDENTITY_CURVE = [
+  [0, 0],
+  [1, 1],
+];
+
+/**
+ * Is this curve the identity, to within a pixel of 8-bit precision?
+ * @param {number[][]} pts
+ */
+function isIdentityCurve(pts) {
+  if (!pts || pts.length < 2) return true;
+  for (const p of pts) {
+    if (Math.abs(p[1] - p[0]) > 0.002) return false;
+  }
+  return true;
+}
+
+/**
+ * Sort by x, clamp into range, and drop points that share an x.
+ *
+ * Two points at the same x would make the slope infinite and the interpolation
+ * meaningless, and they are easy to produce by dragging one point onto another.
+ *
+ * @param {number[][]} pts
+ * @returns {number[][]} at least two points, strictly increasing in x
+ */
+function normaliseCurve(pts) {
+  const list = (Array.isArray(pts) ? pts : [])
+    .filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1])))
+    .map((p) => [clamp(Number(p[0]), 0, 1), clamp(Number(p[1]), 0, 1)])
+    .sort((a, b) => a[0] - b[0]);
+
+  const out = [];
+  for (const p of list) {
+    if (out.length && p[0] - out[out.length - 1][0] < 1e-4) continue;
+    out.push(p);
+  }
+  if (out.length < 2) return IDENTITY_CURVE.map((p) => p.slice());
+  return out;
+}
+
+/**
+ * Evaluate a curve through its control points.
+ *
+ * Monotone cubic interpolation (Fritsch-Carlson), not a plain natural spline.
+ * The difference matters here: a natural spline through hand-placed points
+ * overshoots between them, and an overshoot in a tone curve is a *reversal* -
+ * a patch that gets darker as the source gets lighter, which shows up as a
+ * false edge running through a gradient. Fritsch-Carlson limits the tangents so
+ * the result can never turn back on itself, at the cost of being slightly less
+ * smooth at the control points. That is the right trade for tone.
+ *
+ * @param {number[][]} pts normalised: sorted, distinct x
+ * @param {number} x 0..1
+ * @returns {number} 0..1
+ */
+function evalCurve(pts, x) {
+  const n = pts.length;
+  if (n < 2) return x;
+  if (x <= pts[0][0]) return pts[0][1];
+  if (x >= pts[n - 1][0]) return pts[n - 1][1];
+
+  // Secant slopes, then tangents limited so no segment can overshoot.
+  const d = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) {
+    d[i] = (pts[i + 1][1] - pts[i][1]) / (pts[i + 1][0] - pts[i][0]);
+  }
+  const m = new Array(n);
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    // A local extremum: the tangent must be flat, or the curve bulges past it.
+    m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / d[i];
+    const b = m[i + 1] / d[i];
+    const h = Math.hypot(a, b);
+    if (h > 3) {
+      const t = 3 / h;
+      m[i] = t * a * d[i];
+      m[i + 1] = t * b * d[i];
+    }
+  }
+
+  let i = 0;
+  while (i < n - 2 && x > pts[i + 1][0]) i++;
+  const h = pts[i + 1][0] - pts[i][0];
+  const t = (x - pts[i][0]) / h;
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const h00 = 2 * t3 - 3 * t2 + 1;
+  const h10 = t3 - 2 * t2 + t;
+  const h01 = -2 * t3 + 3 * t2;
+  const h11 = t3 - t2;
+  const y = h00 * pts[i][1] + h10 * h * m[i] + h01 * pts[i + 1][1] + h11 * h * m[i + 1];
+  return y < 0 ? 0 : y > 1 ? 1 : y;
+}
+
+/**
+ * A curve as a 256 entry table.
+ * @param {number[][]} pts
+ * @returns {Float32Array}
+ */
+function curveLUT(pts) {
+  const norm = normaliseCurve(pts);
+  const lut = new Float32Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = evalCurve(norm, i / 255);
+  return lut;
+}
 
 /**
  * Build a lookup table mapping an 8 bit luminance to a graded 0..1 value.
+ *
  * Order of operations mirrors a classic grading chain:
- *   levels (black/white point) -> gamma -> contrast -> exposure
+ *   levels (black/white point) -> gamma -> contrast -> exposure -> curve
+ *
+ * The curve comes last, as it does in an image editor: the sliders set the
+ * overall range and the curve shapes what is inside it. Doing it the other way
+ * round would mean every slider move silently re-interpreted the points you had
+ * placed.
+ *
  * @param {GradeParams} p
  * @returns {Float32Array} 256 entries, 0..1
  */
@@ -2288,6 +2530,14 @@ function buildToneLUT(p) {
     if (contrast !== 1) v = (v - 0.5) * contrast + 0.5;
     if (exposure !== 0) v += exposure;
     lut[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+  }
+
+  // Named for the parameter, like every other field this reads. It was `curve`
+  // for one revision and silently did nothing, which is the whole argument for
+  // checking a feature end to end rather than trusting that it is wired.
+  if (p.toneCurve && !isIdentityCurve(p.toneCurve)) {
+    const pts = normaliseCurve(p.toneCurve);
+    for (let i = 0; i < 256; i++) lut[i] = evalCurve(pts, lut[i]);
   }
   return lut;
 }
@@ -2391,6 +2641,11 @@ function clamp(v, lo, hi) {
 }
 
 module.exports = {
+  IDENTITY_CURVE,
+  isIdentityCurve,
+  normaliseCurve,
+  evalCurve,
+  curveLUT,
   buildToneLUT,
   sampleLUT,
   biasCurve,
@@ -6007,6 +6262,20 @@ const PARAM_DEFS = [
 
   // ---------------------------------------------------------------- Grade
   {
+    key: "toneCurve",
+    label: "Curve",
+    section: "grade",
+    type: "curve",
+    def: [
+      [0, 0],
+      [1, 1],
+    ],
+    hint:
+      "Shape the tone directly. Applied after the sliders above, as Curves is " +
+      "in an image editor: they set the range, this shapes what is inside it. " +
+      "Drag a point, click the grid to add one, alt-click a point to remove it.",
+  },
+  {
     key: "contrast",
     label: "Contrast",
     section: "grade",
@@ -6190,7 +6459,9 @@ for (const d of PARAM_DEFS) DEF_BY_KEY[d.key] = d;
 function defaultParams() {
   const p = { version: SCHEMA_VERSION };
   for (const d of PARAM_DEFS) {
-    p[d.key] = Array.isArray(d.def) ? d.def.slice() : d.def;
+    p[d.key] = Array.isArray(d.def)
+      ? d.def.map((e) => (Array.isArray(e) ? e.slice() : e))
+      : d.def;
   }
   return p;
 }
@@ -6240,6 +6511,11 @@ function sanitizeParams(raw) {
       case "toggle":
         out[d.key] = !!v;
         break;
+      case "curve":
+        // Untrusted like everything else read back from disk: the normaliser
+        // sorts, clamps, drops duplicate x values and guarantees two points.
+        if (Array.isArray(v)) out[d.key] = normaliseCurve(v);
+        break;
       case "internal":
         if (Array.isArray(v)) {
           out[d.key] = v
@@ -6274,6 +6550,13 @@ function sanitizeParams(raw) {
   return out;
 }
 
+/**
+ * A curve as stored: sorted, clamped, at least two points, no duplicate x.
+ * Shared with the engine so the panel and the renderer can never disagree
+ * about what a given set of points means.
+ */
+const { normaliseCurve } = require("../engine/grade.js");
+
 function normalizeHex(c) {
   let h = String(c).trim().replace(/^#/, "");
   if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
@@ -6288,7 +6571,13 @@ function paramsEqual(a, b) {
     const vb = b[d.key];
     if (Array.isArray(va) || Array.isArray(vb)) {
       if (!Array.isArray(va) || !Array.isArray(vb) || va.length !== vb.length) return false;
-      for (let i = 0; i < va.length; i++) if (va[i] !== vb[i]) return false;
+      for (let i = 0; i < va.length; i++) {
+        // The curve is an array of pairs, so equality is one level deeper.
+        if (Array.isArray(va[i]) || Array.isArray(vb[i])) {
+          if (!Array.isArray(va[i]) || !Array.isArray(vb[i])) return false;
+          if (va[i][0] !== vb[i][0] || va[i][1] !== vb[i][1]) return false;
+        } else if (va[i] !== vb[i]) return false;
+      }
     } else if (va !== vb) return false;
   }
   return true;
@@ -6296,7 +6585,11 @@ function paramsEqual(a, b) {
 
 function cloneParams(p) {
   const out = {};
-  for (const k of Object.keys(p)) out[k] = Array.isArray(p[k]) ? p[k].slice() : p[k];
+  for (const k of Object.keys(p)) {
+    const v = p[k];
+    // Deep enough for the curve's array of pairs; nothing here nests further.
+    out[k] = Array.isArray(v) ? v.map((e) => (Array.isArray(e) ? e.slice() : e)) : v;
+  }
   return out;
 }
 
@@ -6396,7 +6689,7 @@ const {
   nearestIndex,
   pickBackgroundIndex,
 } = require("./palette.js");
-const { hexToRgb, adjustColor } = require("./color.js");
+const { hexToRgb, adjustColor, getLumaFn } = require("./color.js");
 const { resolveResolution } = require("../state/params.js");
 
 /** Samples along a cell edge in the analysis image. 8 -> 64 samples per cell. */
@@ -6420,6 +6713,7 @@ class HalftoneEngine {
     this._screens = null;
     this._basePalette = null;
     this._cellColors = null;
+    this._hist = null;
     this.stats = {};
   }
 
@@ -6432,6 +6726,7 @@ class HalftoneEngine {
     this._screens = null;
     this._basePalette = null;
     this._cellColors = null;
+    this._hist = null;
   }
 
   hasSource() {
@@ -6574,6 +6869,41 @@ class HalftoneEngine {
 
     this.stats.colorMs = now() - t0;
     this._cellColors = { key, index: out };
+    return out;
+  }
+
+  /**
+   * A luminance histogram of the analysis image, for the curve editor.
+   *
+   * Deliberately of the *source*, before any grading: the curve editor shows
+   * where the tones are so you can decide where to put a point, and a histogram
+   * that already had the curve applied would move under your hand as you drew.
+   *
+   * @param {object} params
+   * @param {number} [bins]
+   * @returns {number[]|null}
+   */
+  histogram(params, bins = 64) {
+    if (!this.source) return null;
+    const key = `${this.sourceId}|${bins}|${params.lumaMode}`;
+    if (this._hist && this._hist.key === key) return this._hist.bins;
+
+    // The analysis image is already downscaled and pre-processed, which is both
+    // fast and the right signal: it is what the cells are measured from.
+    const img = this._ensureAnalysis(params).img;
+    const lumaFn = getLumaFn(params.lumaMode);
+    const out = new Array(bins).fill(0);
+    const data = img.data;
+    const last = bins - 1;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 8) continue;
+      const v = lumaFn(data[i], data[i + 1], data[i + 2]);
+      let b = (v * bins) | 0;
+      if (b < 0) b = 0;
+      else if (b > last) b = last;
+      out[b]++;
+    }
+    this._hist = { key, bins: out };
     return out;
   }
 
@@ -7661,6 +7991,8 @@ window.__define("src/ui/controls.js", function (module, exports, require) {
  *   - the numeric field next to each slider is editable
  */
 
+const { normaliseCurve, evalCurve, isIdentityCurve } = require("../engine/grade.js");
+
 /** @param {string} tag @param {string} [cls] @param {string} [text] */
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -8168,6 +8500,258 @@ function createColorField(def, value, onChange, getForeground) {
   return { el: row, set };
 }
 
+/* ------------------------------------------------------------------ *
+ * Tone curve
+ * ------------------------------------------------------------------ */
+
+/**
+ * The editor's height in pixels.
+ *
+ * Stated here and in the stylesheet, because the curve is drawn by positioning
+ * elements and that needs a number, while the box needs a height before any of
+ * them exist to measure. The two must agree; the layout test would catch them
+ * drifting, since the curve would leave its box.
+ */
+const CURVE_H = 132;
+/** How many segments the curve is drawn with. Enough to read as a line. */
+const CURVE_SAMPLES = 64;
+/** How close a click has to be, in fractions of the box, to grab a point. */
+const CURVE_GRAB = 0.055;
+
+/**
+ * A tone curve editor.
+ *
+ * Built from positioned divs rather than a canvas: UXP's canvas support varies
+ * by host version, and this needs to work everywhere the rest of the panel does.
+ * The curve is drawn as a run of short segments and the control points are real
+ * elements, which also means they can carry their own pointer handlers instead
+ * of the editor doing hit-testing on every move.
+ *
+ * A histogram of the loaded layer sits behind it, because a curve without one is
+ * guesswork - you cannot place a point on the shadows if you cannot see where
+ * the shadows are.
+ *
+ * @param {object} def ParamDef
+ * @param {number[][]} value control points
+ * @param {(v:number[][], committed:boolean)=>void} onChange
+ * @param {{getHistogram?: () => number[]|null}} [opts]
+ */
+function createCurve(def, value, onChange, opts = {}) {
+  const wrap = el("div", "curve");
+
+  const head = el("div", "curve-head");
+  const label = el("div", "ctl-label", def.label);
+  if (def.hint) label.title = def.hint;
+  const readout = el("div", "curve-readout", "");
+  const reset = el("button", "ctl-reset", "↺");
+  reset.title = "Straighten the curve";
+  head.appendChild(label);
+  head.appendChild(readout);
+  head.appendChild(reset);
+  wrap.appendChild(head);
+
+  const box = el("div", "curve-box");
+  const hist = el("div", "curve-hist");
+  const grid = el("div", "curve-grid");
+  const diag = el("div", "curve-diag");
+  const line = el("div", "curve-line");
+  const dots = el("div", "curve-dots");
+  box.appendChild(hist);
+  box.appendChild(grid);
+  box.appendChild(diag);
+  box.appendChild(line);
+  box.appendChild(dots);
+  wrap.appendChild(box);
+  wrap.appendChild(el("div", "hint", "Click to add a point · drag to shape · alt-click a point to remove"));
+
+  // Quarter grid, and a dotted diagonal so "no change" is visible as a shape.
+  for (let i = 1; i < 4; i++) {
+    const h = el("div", "curve-gridline h");
+    h.style.top = pct(i / 4);
+    grid.appendChild(h);
+    const v = el("div", "curve-gridline v");
+    v.style.left = pct(i / 4);
+    grid.appendChild(v);
+  }
+  for (let i = 0; i < 22; i++) {
+    const d = el("div", "curve-diagdot");
+    const t = i / 21;
+    d.style.left = pct(t);
+    d.style.top = yPx(t);
+    diag.appendChild(d);
+  }
+
+  let points = normaliseCurve(value);
+
+  function pct(t) {
+    return (t * 100).toFixed(3) + "%";
+  }
+
+  /** Curve value -> pixel offset from the top of the box. */
+  function yPx(v) {
+    return Math.round((1 - v) * (CURVE_H - 3)) + "px";
+  }
+
+  function paint() {
+    // The line.
+    line.textContent = "";
+    for (let i = 0; i < CURVE_SAMPLES; i++) {
+      const x = i / (CURVE_SAMPLES - 1);
+      const seg = el("div", "curve-seg");
+      seg.style.left = pct(x);
+      seg.style.top = yPx(evalCurve(points, x));
+      line.appendChild(seg);
+    }
+
+    // The control points.
+    dots.textContent = "";
+    points.forEach((p, i) => {
+      const dot = el("div", "curve-dot");
+      dot.style.left = pct(p[0]);
+      dot.style.top = yPx(p[1]);
+      dot.addEventListener("pointerdown", (e) => beginDrag(e, i));
+      dots.appendChild(dot);
+    });
+
+    const changed = !isIdentityCurve(points);
+    wrap.className = "curve" + (changed ? " modified" : "");
+    readout.textContent = changed ? `${points.length} points` : "linear";
+  }
+
+  function setHistogram(bins) {
+    hist.textContent = "";
+    if (!bins || !bins.length) return;
+    let peak = 0;
+    for (const b of bins) if (b > peak) peak = b;
+    if (peak <= 0) return;
+    const w = 100 / bins.length;
+    bins.forEach((b, i) => {
+      const bar = el("div", "curve-bar");
+      bar.style.left = (i * w).toFixed(3) + "%";
+      bar.style.width = (w + 0.2).toFixed(3) + "%";
+      // Square root, so a single dominant bin does not flatten everything else
+      // into invisibility - this is a shape to read, not a measurement.
+      bar.style.height = Math.round(Math.sqrt(b / peak) * (CURVE_H - 4)) + "px";
+      hist.appendChild(bar);
+    });
+  }
+
+  /** Pointer position as a 0..1 point in the box. */
+  function at(e) {
+    const r = box.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return [
+      clampUnit((e.clientX - r.left) / r.width),
+      clampUnit(1 - (e.clientY - r.top) / r.height),
+    ];
+  }
+
+  let dragIndex = -1;
+
+  function beginDrag(e, index) {
+    if (e.altKey) {
+      // Removing needs two points left over, or there is no curve.
+      if (points.length > 2) {
+        points.splice(index, 1);
+        paint();
+        onChange(copy(points), true);
+      }
+      if (e.preventDefault) e.preventDefault();
+      return;
+    }
+    dragIndex = index;
+    try {
+      box.setPointerCapture(e.pointerId);
+    } catch (err) {
+      /* capture is an optimisation, not a requirement */
+    }
+    if (e.preventDefault) e.preventDefault();
+  }
+
+  box.addEventListener("pointerdown", (e) => {
+    if (dragIndex >= 0) return; // a point handled it first
+    const p = at(e);
+    if (!p) return;
+    // Near an existing point, grab it rather than stacking a new one on top.
+    let near = -1;
+    let best = CURVE_GRAB;
+    points.forEach((q, i) => {
+      const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (d < best) {
+        best = d;
+        near = i;
+      }
+    });
+    if (near >= 0) {
+      beginDrag(e, near);
+      return;
+    }
+    points.push(p);
+    points = normaliseCurve(points);
+    dragIndex = points.findIndex((q) => q[0] === p[0] && q[1] === p[1]);
+    paint();
+    try {
+      box.setPointerCapture(e.pointerId);
+    } catch (err) {
+      /* ignore */
+    }
+    if (e.preventDefault) e.preventDefault();
+  });
+
+  box.addEventListener("pointermove", (e) => {
+    if (dragIndex < 0) return;
+    const p = at(e);
+    if (!p) return;
+    const moved = points[dragIndex];
+    // Keep the point between its neighbours: crossing one would reorder the
+    // list under the drag and the point would jump out from under the pointer.
+    const lo = dragIndex > 0 ? points[dragIndex - 1][0] + 0.01 : 0;
+    const hi = dragIndex < points.length - 1 ? points[dragIndex + 1][0] - 0.01 : 1;
+    moved[0] = clampUnit(Math.min(Math.max(p[0], lo), hi));
+    moved[1] = p[1];
+    paint();
+    onChange(copy(points), false);
+  });
+
+  const endDrag = (e) => {
+    if (dragIndex < 0) return;
+    dragIndex = -1;
+    try {
+      box.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      /* ignore */
+    }
+    points = normaliseCurve(points);
+    paint();
+    onChange(copy(points), true);
+  };
+  box.addEventListener("pointerup", endDrag);
+  box.addEventListener("pointercancel", endDrag);
+
+  reset.addEventListener("click", () => {
+    points = normaliseCurve(def.def);
+    paint();
+    onChange(copy(points), true);
+  });
+
+  function set(v) {
+    points = normaliseCurve(v);
+    paint();
+  }
+
+  set(value);
+  if (opts.getHistogram) setHistogram(opts.getHistogram());
+  return { el: wrap, set, setHistogram };
+}
+
+function copy(pts) {
+  return pts.map((p) => [p[0], p[1]]);
+}
+
+function clampUnit(v) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
 /**
  * A collapsible section.
  *
@@ -8216,6 +8800,7 @@ module.exports = {
   createToggle,
   createPalette,
   createColorField,
+  createCurve,
   createSection,
   normalizeHex,
   titleCase,
@@ -11338,6 +11923,7 @@ const { ALGORITHMS, ALGORITHM_FAMILIES } = require("../engine/dither.js");
 const { BUILTIN_PRESETS, presetToParams, makeUserPreset } = require("../presets/presets.js");
 const { HalftoneEngine } = require("../engine/pipeline.js");
 const { toDataURL, encodePNG } = require("../util/png.js");
+const { isIdentityCurve } = require("../engine/grade.js");
 const { downscaleBox: downscale } = require("../engine/resample.js");
 const HOST = require("../photoshop/host.js");
 const RENDER = require("../photoshop/render.js");
@@ -11541,6 +12127,8 @@ class Panel {
         }
       } else if (def.type === "palette") {
         parts.push(`${(v || []).length} colours`);
+      } else if (def.type === "curve") {
+        if (!isIdentityCurve(v)) parts.push(`curve ${v.length}pt`);
       }
       if (parts.length >= 3) break;
     }
@@ -11593,6 +12181,11 @@ class Panel {
         break;
       case "color":
         ctl = C.createColorField(def, this.params[def.key], commit, () => IM.foregroundRGB());
+        break;
+      case "curve":
+        ctl = C.createCurve(def, this.params[def.key], commit, {
+          getHistogram: () => this.previewHistogram(),
+        });
         break;
       case "palette":
         ctl = C.createPalette({
@@ -11753,10 +12346,17 @@ class Panel {
     }
   }
 
+  /** Push a fresh histogram into the curve editor, if one is on screen. */
+  refreshHistogram() {
+    const c = this.controls.toneCurve;
+    if (c && c.setHistogram) c.setHistogram(this.previewHistogram());
+  }
+
   /** Rebuild the whole panel from `this.params` (after a preset or a recall). */
   rebuild() {
     this.buildSections();
     this.syncControls();
+    this.refreshHistogram();
     this.renderPresetChips();
   }
 
@@ -11823,6 +12423,16 @@ class Panel {
   }
 
   /* ------------------------------------------------------- viewport */
+
+  /** The source's tone distribution, for the curve editor's backdrop. */
+  previewHistogram() {
+    if (!this.engine.hasSource()) return null;
+    try {
+      return this.engine.histogram(this.params);
+    } catch (e) {
+      return null;
+    }
+  }
 
   /** The document's own pixel dimensions, which is what 1:1 is relative to. */
   documentSize() {
@@ -12125,6 +12735,7 @@ class Panel {
       this.view = { zoom: null, cx: 0.5, cy: 0.5 };
       if (!this.params.paletteLocked) this.syncPaletteFromImage();
       this.updateZoomBar();
+      this.refreshHistogram();
       this.drawPreview();
 
       // If this layer is an existing render, bring its settings back.
@@ -12884,7 +13495,7 @@ const SECTION_SUMMARY = {
   preprocess: ["blur", "sharpen", "noiseReduction"],
   colors: ["colorCount", "quantMethod", "spread"],
   tonal: ["tonalMapping"],
-  grade: ["contrast", "gamma", "exposure", "gradeBias"],
+  grade: ["toneCurve", "contrast", "gamma", "exposure", "gradeBias"],
   adjust: ["invert", "hue", "saturation", "brightness"],
   output: ["output", "useSelection"],
   batch: ["batchScope", "batchSharedPalette"],

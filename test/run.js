@@ -1423,6 +1423,152 @@ group("DPI scale mode");
   ok(resolveResolution(rel, 3000, 0) === 123, "a missing document resolution does not break relative mode");
 }
 
+group("Tone curve");
+{
+  const G = require("../src/engine/grade.js");
+
+  /* ---- evaluation ------------------------------------------------ */
+
+  ok(Math.abs(G.evalCurve(G.normaliseCurve(G.IDENTITY_CURVE), 0.37) - 0.37) < 1e-9,
+    "the identity curve is the identity");
+  ok(G.isIdentityCurve([[0, 0], [0.5, 0.5], [1, 1]]), "a straight line is recognised as one");
+  ok(!G.isIdentityCurve([[0, 0], [0.5, 0.6], [1, 1]]), "a bent one is not");
+
+  // Normalising has to survive whatever comes back off disk or out of a drag.
+  const junk = G.normaliseCurve([[2, -1], [0.5, 0.5], [0.5, 0.9], ["x", "y"], null]);
+  ok(junk.length >= 2, `garbage still yields a usable curve (${JSON.stringify(junk)})`);
+  let sorted = true;
+  for (let i = 1; i < junk.length; i++) if (junk[i][0] <= junk[i - 1][0]) sorted = false;
+  ok(sorted, "with strictly increasing x, so no segment has an infinite slope");
+  ok(G.normaliseCurve([]).length === 2, "an empty curve falls back to the identity");
+  ok(G.normaliseCurve([[0.5, 0.5]]).length === 2, "so does a single point");
+
+  /*
+   * The property that matters. A tone curve that turns back on itself between
+   * its control points makes a patch that gets darker as the source gets
+   * lighter - a false edge running through a gradient. A natural cubic spline
+   * does exactly that through hand-placed points, which is why the interpolation
+   * is Fritsch-Carlson.
+   */
+  const shapes = [
+    ["identity", [[0, 0], [1, 1]]],
+    ["gentle S", [[0, 0], [0.25, 0.15], [0.75, 0.85], [1, 1]]],
+    ["hard S", [[0, 0], [0.28, 0.05], [0.72, 0.95], [1, 1]]],
+    ["spike", [[0, 0], [0.2, 0.9], [0.5, 0.1], [1, 1]]],
+    ["near flat", [[0, 0.4], [0.5, 0.42], [1, 0.45]]],
+    ["shoulder", [[0, 0], [0.05, 0.9], [0.95, 0.95], [1, 1]]],
+    ["inverted", [[0, 1], [1, 0]]],
+    ["step", [[0, 0], [0.49, 0], [0.51, 1], [1, 1]]],
+  ];
+
+  let overshot = null;
+  let outOfRange = null;
+  for (const [name, raw] of shapes) {
+    const pts = G.normaliseCurve(raw);
+    // How many times the *control points* change direction. The curve may do
+    // the same, and no more.
+    let allowed = 0;
+    let cd = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const sgn = Math.sign(pts[i][1] - pts[i - 1][1]);
+      if (sgn !== 0) {
+        if (cd !== 0 && sgn !== cd) allowed++;
+        cd = sgn;
+      }
+    }
+    let flips = 0;
+    let dir = 0;
+    let prev = G.evalCurve(pts, 0);
+    for (let i = 1; i <= 2000; i++) {
+      const v = G.evalCurve(pts, i / 2000);
+      if (v < -1e-9 || v > 1 + 1e-9) {
+        outOfRange = outOfRange || `${name} reached ${v}`;
+        break;
+      }
+      const d = Math.sign(v - prev);
+      if (d !== 0) {
+        if (dir !== 0 && d !== dir) flips++;
+        dir = d;
+      }
+      prev = v;
+    }
+    if (flips > allowed) {
+      overshot = overshot || `${name}: ${flips} direction changes, points allow ${allowed}`;
+    }
+  }
+  ok(outOfRange === null, `every curve stays inside 0..1 (${outOfRange || shapes.length + " shapes"})`);
+  ok(overshot === null, `and never overshoots its own control points (${overshot || "monotone between points"})`);
+
+  // The endpoints are the whole tonal range; drifting there would clip.
+  const s = G.normaliseCurve([[0, 0], [0.3, 0.7], [1, 1]]);
+  ok(Math.abs(G.evalCurve(s, 0)) < 1e-9 && Math.abs(G.evalCurve(s, 1) - 1) < 1e-9,
+    "control points are hit exactly");
+  ok(Math.abs(G.evalCurve(s, 0.3) - 0.7) < 1e-9, "including the interior ones");
+
+  /* ---- through the grading chain --------------------------------- */
+
+  const flat = G.buildToneLUT({ contrast: 1, gamma: 1, blackPoint: 0, whitePoint: 255, exposure: 0 });
+  ok(G.isIdentityLUT(flat), "no curve and no sliders is the identity");
+
+  const withCurve = G.buildToneLUT({
+    contrast: 1, gamma: 1, blackPoint: 0, whitePoint: 255, exposure: 0,
+    toneCurve: [[0, 0], [0.25, 0.1], [0.75, 0.9], [1, 1]],
+  });
+  ok(!G.isIdentityLUT(withCurve), "a curve reaches the tone LUT");
+  ok(withCurve[64] < flat[64] && withCurve[191] > flat[191],
+    `and bends it the way it is drawn (${withCurve[64].toFixed(2)} < ${flat[64].toFixed(2)}, ${withCurve[191].toFixed(2)} > ${flat[191].toFixed(2)})`);
+
+  // The LUT must stay monotone too, or a gradient gains a false edge.
+  let lutFlips = 0;
+  for (let i = 1; i < 256; i++) if (withCurve[i] < withCurve[i - 1] - 1e-6) lutFlips++;
+  ok(lutFlips === 0, `the LUT is non-decreasing (${lutFlips} reversals)`);
+
+  // Order: the curve is applied after the sliders, as Curves is after Levels.
+  // With black lifted to 128, everything below it is already 0, so a curve that
+  // pins 0 cannot pull anything back out of it.
+  const clipped = G.buildToneLUT({
+    contrast: 1, gamma: 1, blackPoint: 128, whitePoint: 255, exposure: 0,
+    toneCurve: [[0, 0], [0.5, 0.9], [1, 1]],
+  });
+  ok(clipped[0] === 0 && clipped[100] === 0, "the sliders clip first, and the curve shapes what survives");
+
+  /* ---- end to end ------------------------------------------------ */
+
+  /*
+   * This is the assertion that would have caught the bug this feature shipped
+   * with for one revision: buildToneLUT read `p.curve` while the parameter is
+   * called `toneCurve`, so the editor drew a curve that changed nothing at all.
+   * Every unit above still passed.
+   */
+  const S = [[0, 0], [0.28, 0.1], [0.72, 0.92], [1, 1]];
+  const src = F.photo(600, 400);
+  for (const mode of ["halftone", "dither"]) {
+    const plain = new HalftoneEngine();
+    plain.setSource(src);
+    const bent = new HalftoneEngine();
+    bent.setSource(src);
+    const a = plain.render(sanitizeParams({ mode, density: 50, ditherResolution: 200 }), { width: 300, height: 200 });
+    const b = bent.render(sanitizeParams({ mode, density: 50, ditherResolution: 200, toneCurve: S }), { width: 300, height: 200 });
+    let moved = 0;
+    for (let i = 0; i < a.data.length; i += 4) if (Math.abs(a.data[i] - b.data[i]) > 10) moved++;
+    ok(
+      moved / (300 * 200) > 0.02,
+      `a curve visibly changes the ${mode} render (${((moved / 60000) * 100).toFixed(1)}% of pixels)`
+    );
+  }
+
+  // And it must survive the round trip a preset or a stored render takes.
+  const params = sanitizeParams({ mode: "halftone", toneCurve: S });
+  const back = sanitizeParams(JSON.parse(JSON.stringify(params)));
+  ok(
+    JSON.stringify(back.toneCurve) === JSON.stringify(params.toneCurve),
+    "the curve round-trips through JSON unchanged"
+  );
+  const dflt = defaultParams();
+  dflt.toneCurve[0][1] = 0.5;
+  ok(defaultParams().toneCurve[0][1] === 0, "defaultParams hands out a fresh curve, not the shared one");
+}
+
 group("Per-cell colour cache");
 {
   // Deciding which palette entry a cell takes means an OKLab conversion and a

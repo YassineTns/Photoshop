@@ -522,6 +522,20 @@ const PARAM_DEFS = [
 
   // ---------------------------------------------------------------- Grade
   {
+    key: "toneCurve",
+    label: "Curve",
+    section: "grade",
+    type: "curve",
+    def: [
+      [0, 0],
+      [1, 1],
+    ],
+    hint:
+      "Shape the tone directly. Applied after the sliders above, as Curves is " +
+      "in an image editor: they set the range, this shapes what is inside it. " +
+      "Drag a point, click the grid to add one, alt-click a point to remove it.",
+  },
+  {
     key: "contrast",
     label: "Contrast",
     section: "grade",
@@ -705,7 +719,9 @@ for (const d of PARAM_DEFS) DEF_BY_KEY[d.key] = d;
 function defaultParams() {
   const p = { version: SCHEMA_VERSION };
   for (const d of PARAM_DEFS) {
-    p[d.key] = Array.isArray(d.def) ? d.def.slice() : d.def;
+    p[d.key] = Array.isArray(d.def)
+      ? d.def.map((e) => (Array.isArray(e) ? e.slice() : e))
+      : d.def;
   }
   return p;
 }
@@ -755,6 +771,11 @@ function sanitizeParams(raw) {
       case "toggle":
         out[d.key] = !!v;
         break;
+      case "curve":
+        // Untrusted like everything else read back from disk: the normaliser
+        // sorts, clamps, drops duplicate x values and guarantees two points.
+        if (Array.isArray(v)) out[d.key] = normaliseCurve(v);
+        break;
       case "internal":
         if (Array.isArray(v)) {
           out[d.key] = v
@@ -789,6 +810,13 @@ function sanitizeParams(raw) {
   return out;
 }
 
+/**
+ * A curve as stored: sorted, clamped, at least two points, no duplicate x.
+ * Shared with the engine so the panel and the renderer can never disagree
+ * about what a given set of points means.
+ */
+const { normaliseCurve } = require("../engine/grade.js");
+
 function normalizeHex(c) {
   let h = String(c).trim().replace(/^#/, "");
   if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
@@ -803,7 +831,13 @@ function paramsEqual(a, b) {
     const vb = b[d.key];
     if (Array.isArray(va) || Array.isArray(vb)) {
       if (!Array.isArray(va) || !Array.isArray(vb) || va.length !== vb.length) return false;
-      for (let i = 0; i < va.length; i++) if (va[i] !== vb[i]) return false;
+      for (let i = 0; i < va.length; i++) {
+        // The curve is an array of pairs, so equality is one level deeper.
+        if (Array.isArray(va[i]) || Array.isArray(vb[i])) {
+          if (!Array.isArray(va[i]) || !Array.isArray(vb[i])) return false;
+          if (va[i][0] !== vb[i][0] || va[i][1] !== vb[i][1]) return false;
+        } else if (va[i] !== vb[i]) return false;
+      }
     } else if (va !== vb) return false;
   }
   return true;
@@ -811,7 +845,11 @@ function paramsEqual(a, b) {
 
 function cloneParams(p) {
   const out = {};
-  for (const k of Object.keys(p)) out[k] = Array.isArray(p[k]) ? p[k].slice() : p[k];
+  for (const k of Object.keys(p)) {
+    const v = p[k];
+    // Deep enough for the curve's array of pairs; nothing here nests further.
+    out[k] = Array.isArray(v) ? v.map((e) => (Array.isArray(e) ? e.slice() : e)) : v;
+  }
   return out;
 }
 
