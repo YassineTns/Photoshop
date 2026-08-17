@@ -1267,58 +1267,41 @@ body {
   color: var(--text);
 }
 
-/* ------------------------------------------- detached preview panel */
+/* ------------------------------------------------- full preview mode */
 
 /*
- * The second entrypoint. It is nothing but a frame in a box, so it gets no
- * chrome at all - anything else would be competing with the picture, which is
- * the only reason the window exists.
+ * Everything except the picture and the zoom bar steps aside. Combined with
+ * floating and resizing the panel, this is the large view - and unlike a second
+ * panel entrypoint it depends on nothing but `display: none`.
  */
-#detached {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  padding: 8px;
-  background-color: var(--bg);
-  display: flex;
-  flex-direction: column;
+#app.theatre .brand,
+#app.theatre .rule,
+#app.theatre .status,
+#app.theatre .progress,
+#app.theatre .actions,
+#app.theatre .preview-grip,
+#app.theatre #scroll {
+  display: none;
 }
 
-.detached-wrap {
-  position: relative;
+#app.theatre #head {
   flex-grow: 1;
   flex-shrink: 1;
-  flex-basis: 0;
   min-height: 0;
-  background-color: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
-.detached-img {
-  display: none;
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
+#app.theatre .preview-wrap {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0;
 }
 
-.detached-img.visible { display: block; }
-
-.detached-empty {
-  color: var(--text-faint);
-  font-size: 11px;
-  text-align: center;
-  padding: 24px;
-  line-height: 1.8;
-  max-width: 320px;
+/* The bar has to stay: a big view you cannot set to 1:1 is a big thumbnail. */
+#app.theatre .zoombar {
+  flex-grow: 0;
+  flex-shrink: 0;
+  margin-top: 10px;
+  margin-bottom: 0;
 }
-
-.detached-empty.hidden { display: none; }

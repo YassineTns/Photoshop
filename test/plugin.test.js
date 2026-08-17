@@ -1018,90 +1018,51 @@ async function main() {
   }
 
   /* ================================================================ */
-  group("Detached preview panel");
+  group("Full preview mode");
   {
-    // Two panel entrypoints, one JS realm. They cannot see each other's DOM,
-    // so the only thing they share is the module registry - which is exactly
-    // what the frame bus is. If that sharing ever stopped holding, this is the
-    // test that would say so.
+    // This replaced a second panel entrypoint that opened empty: UXP loads one
+    // document per plugin, so an entrypoint with its own HTML file is not a
+    // thing. What it does instead depends on nothing but display:none, which is
+    // why it is testable at all.
     resetModules();
-    const { ps, document } = install({ width: 800, height: 600, image: F.photo(800, 600) });
-    const BUS = require("../src/ui/framebus.js");
+    const { document } = install({ width: 900, height: 600, image: F.photo(900, 600) });
     const { Panel } = require("../src/ui/panel.js");
-    const { PreviewPanel } = require("../src/ui/previewpanel.js");
-
-    BUS.reset();
-    ok(BUS.latest() === null, "the bus starts with no frame");
-    ok(BUS.isAttached() === false, "and with nothing attached");
 
     const panel = new Panel(document);
     await panel.init();
     document.getElementById("btn-load").emit("click");
-    ok(await waitFor(() => panel.engine.hasSource()), "the controls panel loaded a layer");
-    ok(await waitFor(() => !!BUS.latest()), "rendering publishes a frame to the bus");
-    const first = BUS.latest();
-    ok(
-      first.url.indexOf("data:image/png;base64,") === 0,
-      "the frame carries a displayable image"
-    );
-    ok(/cells|px/.test(first.badge), `and the badge that goes with it ("${first.badge}")`);
+    ok(await waitFor(() => panel.engine.hasSource()), "a layer is loaded");
 
-    // The detached panel is a separate document. The mock hands out one shared
-    // element per id, which is enough to prove the wiring: what matters is that
-    // it receives the frame at all.
-    const preview = new PreviewPanel(document);
-    preview.init();
-    ok(BUS.isAttached() === true, "the detached panel registers itself");
-    ok(
-      document.getElementById("detached-img").src === first.url,
-      "it immediately shows the frame that already existed, rather than sitting blank"
-    );
+    const app = document.getElementById("app");
+    ok(panel.theatre === false, "it starts off");
+    ok(app.className.indexOf("theatre") < 0, "and the panel carries no class for it");
 
-    // A later render must reach it too.
-    panel.setParam("radius", 55, true);
-    panel.drawPreview();
+    const before = panel.previewBox();
+    document.getElementById("btn-theatre").emit("click", {});
+    ok(panel.theatre === true, "the button turns it on");
+    ok(app.className === "theatre", "which is what the stylesheet keys off");
     ok(
-      await waitFor(() => document.getElementById("detached-img").src !== first.url),
-      "a later render reaches the detached panel"
+      document.getElementById("btn-theatre").className.indexOf("active") >= 0,
+      "and the button shows it is on"
+    );
+    // The grip must stop dictating the height, or the picture cannot take the
+    // space the mode exists to give it.
+    panel.ui.previewHeight = 140;
+    panel.applyPreviewHeight();
+    ok(
+      document.getElementById("preview-wrap").style.height === "",
+      "a dragged height is not applied while full"
     );
 
-    // Size negotiation: a big detached window must make the controls panel
-    // rasterise bigger, otherwise the detached view is only magnified.
-    const dockedBox = panel.outputBox();
-    const dockedPlan = panel.renderPlan(dockedBox);
-    BUS.requestSize({ width: 1200, height: 900 });
-    const bigBox = panel.outputBox();
-    const bigPlan = panel.renderPlan(bigBox);
+    document.getElementById("btn-theatre").emit("click", {});
+    ok(panel.theatre === false, "clicking again turns it off");
+    ok(app.className === "", "the class is removed");
     ok(
-      bigBox.width > dockedBox.width,
-      `a large detached window raises the output box (${dockedBox.width} -> ${bigBox.width})`
+      document.getElementById("preview-wrap").style.height === "140px",
+      "and the dragged height comes back"
     );
-    ok(
-      bigPlan.width > dockedPlan.width,
-      `and so the frame is rasterised larger (${dockedPlan.width} -> ${bigPlan.width})`
-    );
-    const doc = panel.documentSize();
-    ok(
-      Math.abs(bigPlan.width / bigPlan.height - doc.width / doc.height) < 0.02,
-      "at the document's own aspect ratio"
-    );
+    void before;
 
-    // A small one must not drag it below what the docked panel needs.
-    BUS.requestSize({ width: 80, height: 60 });
-    ok(
-      panel.outputBox().width === dockedBox.width,
-      "a small detached window never shrinks the docked preview"
-    );
-
-    // Closing it hands the size back.
-    preview.dispose();
-    ok(BUS.isAttached() === false, "closing the detached panel unregisters it");
-    ok(
-      panel.outputBox().width === dockedBox.width,
-      "and the controls panel goes back to rendering for itself"
-    );
-
-    BUS.reset();
     uninstall();
   }
 
@@ -1112,7 +1073,6 @@ async function main() {
     const { document } = install({ width: 800, height: 600, image: F.photo(800, 600) });
     const { Panel } = require("../src/ui/panel.js");
     const META = require("../src/photoshop/metadata.js");
-    require("../src/ui/framebus.js").reset();
 
     const panel = new Panel(document);
     await panel.init();

@@ -36,7 +36,6 @@ const META = require("../photoshop/metadata.js");
 const IM = require("../photoshop/imaging.js");
 const BATCH = require("../photoshop/batch.js");
 const SWATCH = require("../photoshop/swatches.js");
-const BUS = require("./framebus.js");
 const FILES = require("../photoshop/files.js");
 
 const PREVIEW_MAX = 460;
@@ -106,6 +105,7 @@ class Panel {
     this.view = { zoom: null, cx: 0.5, cy: 0.5 };
     this._comparing = false;
     this._splitAt = 0.5;
+    this.theatre = false;
   }
 
   /* ---------------------------------------------------------------- */
@@ -145,8 +145,6 @@ class Panel {
     this.bindPreviewGrip();
     this.bindZoom();
     this.applyPreviewHeight();
-    // A detached preview panel resizing means we should re-rasterise for it.
-    BUS.onSizeRequest(() => this.schedulePreview());
     this.watchSelection();
     this.refreshContext();
   }
@@ -497,8 +495,15 @@ class Panel {
     });
   }
 
-  /** How tall the docked preview box is: the user's drag, or the default cap. */
+  /** How tall the preview box is: the whole panel when full, else the cap. */
   previewBoxHeight() {
+    if (this.theatre) {
+      const wrap = this.$("preview-wrap");
+      const h = wrap && wrap.clientHeight;
+      if (h) return h;
+      const app = this.$("app");
+      return Math.max(PREVIEW_HEIGHT_MIN, ((app && app.clientHeight) || 720) - 70);
+    }
     if (this.ui.previewHeight) return this.ui.previewHeight;
     const app = this.$("app");
     const panelH = (app && app.clientHeight) || 720;
@@ -568,6 +573,7 @@ class Panel {
     this.$("btn-zoom-out").addEventListener("click", () => this.zoomBy(1 / ZOOM_STEP));
     this.$("btn-zoom-fit").addEventListener("click", () => this.setZoom(null));
     this.$("btn-zoom-1").addEventListener("click", () => this.setZoom(1));
+    this.$("btn-theatre").addEventListener("click", () => this.toggleTheatre());
     if (!wrap) return;
 
     // The wheel is the natural gesture and costs nothing if UXP does not deliver
@@ -725,22 +731,11 @@ class Panel {
   /**
    * The box a frame has to land in.
    *
-   * Normally the docked preview. But when the detached preview panel is open it
-   * asks for its own, larger size, and we render for whichever window is bigger
-   * - otherwise the detached view would only be *bigger*, showing a frame
-   * rasterised for a 360px panel and scaled up, rather than sharper. The docked
-   * <img> caps itself with max-width/max-height, so it displays the larger
-   * frame smaller.
+   * In full-preview mode that is the whole panel, which is how you get a large
+   * view: float the panel, size it, and give all of it to the picture.
    */
   outputBox() {
-    const box = this.previewBox();
-    const want = BUS.requestedSize();
-    if (!want) return box;
-    if (want.width <= box.width && want.height <= box.height) return box;
-    return {
-      width: Math.max(box.width, want.width),
-      height: Math.max(box.height, want.height),
-    };
+    return this.previewBox();
   }
 
   /**
@@ -800,7 +795,6 @@ class Panel {
       this.badge(this._lastBadge);
       // Hand the same frame to the detached panel, if one is open. One object
       // and one callback: the data URL was built for the docked <img> anyway.
-      BUS.publish({ url, width: out.width, height: out.height, badge: this._lastBadge });
       if (this._comparing) this.layoutSplit();
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
@@ -1004,7 +998,34 @@ class Panel {
   applyPreviewHeight() {
     const wrap = this.$("preview-wrap");
     if (!wrap) return;
-    wrap.style.height = this.ui.previewHeight ? this.ui.previewHeight + "px" : "";
+    // In full-preview mode the box is sized by the layout, not by the grip.
+    wrap.style.height = !this.theatre && this.ui.previewHeight ? this.ui.previewHeight + "px" : "";
+  }
+
+  /* ------------------------------------------------- full preview */
+
+  /**
+   * Give the whole panel to the picture.
+   *
+   * This is the honest replacement for a second, detached panel. That was
+   * declared as its own entrypoint with its own HTML file, which is not how UXP
+   * loads panels - a plugin has one document - so it opened empty. Rather than
+   * guess at an API this environment cannot verify against Adobe's
+   * documentation, the same need is met with something that cannot fail: hide
+   * the chrome and the controls, float the panel, size it to taste. The zoom bar
+   * stays, because a large view without 1:1 is only a bigger thumbnail.
+   */
+  toggleTheatre() {
+    this.theatre = !this.theatre;
+    const app = this.$("app");
+    if (app) app.className = this.theatre ? "theatre" : "";
+    const btn = this.$("btn-theatre");
+    if (btn) btn.className = "zoom-btn zoom-word" + (this.theatre ? " active" : "");
+    this.applyPreviewHeight();
+    this.updateZoomBar();
+    // The box changed shape, so a fitted view has a different fit.
+    this.drawPreview();
+    if (this._comparing) this.layoutSplit();
   }
 
   /* ------------------------------------------------------ SVG export */

@@ -73,14 +73,12 @@ reload each time.
    showing you the effect of, and the bar under it drags to resize (double-click
    to go back to automatic).
 
-   For a genuinely large view, open the second panel — **Plugins ▸ Halftone
-   Studio ▸ Halftone Preview** — and float it. It shows nothing but the render,
-   at whatever size that window is, and it tells the controls panel how big it
-   is so frames are *rasterised* for it rather than magnified. Worth being clear
-   about the docked one: in a 340px panel a landscape image is limited by the
-   panel's **width**, so dragging the box taller gains nothing for landscape
-   artwork. It helps for portrait work, and it is genuinely useful in the other
-   direction — dragging it small buys space back for the controls.
+   **Zoom** with the wheel, the − / + buttons, or by double-clicking; **drag to
+   pan**; **1:1** gives one preview pixel per document pixel, which is the only
+   scale at which dot quality can actually be judged. **Full** hands the whole
+   panel to the picture — float the panel and size it for a large view.
+   **Compare** puts the untouched original over the render behind a draggable
+   seam, both at the same zoom, so a difference shows up right at the edge.
 4. Press **Apply**. The plugin builds:
 
 ```
@@ -119,6 +117,12 @@ alpha — so a dot does not move when the selection changes, and a selected regi
 lines up exactly with a render of the whole layer. Feathered selections come
 through as soft edges, because the coverage is used as-is rather than thresholded.
 
+**Export Plates** writes one PNG per ink at the document's real size, black on
+white — what a screen printer or a riso shop asks for. A plate says *where* the
+ink goes and the press decides what colour it is, which is why they are not in
+their own colours; the paper is skipped for the same reason. One folder picker
+for the whole set.
+
 **Export SVG** writes the halftone as vector art: one `<circle>`, `<rect>` or
 `<polygon>` per dot, grouped by ink, at the layer's real document size. Per-ink
 screens export as one `mix-blend-mode: multiply` group per ink, so the file
@@ -136,7 +140,9 @@ Conventions:
 | Click a swatch | Type a hex value |
 | Alt-click a swatch | Take Photoshop's foreground colour |
 | Shift-click a swatch | Lock it against re-extraction |
-| Hold **Compare** | Show the untouched source |
+| **Compare**, then drag the seam | Original beside the render |
+| Wheel over the preview, or double-click | Zoom |
+| Drag the preview | Pan, once zoomed in |
 | Alt-click a user preset | Delete it |
 
 ---
@@ -144,11 +150,9 @@ Conventions:
 ## Architecture
 
 ```
-manifest.json          UXP manifest (v5) - two panel entrypoints
-index.html             controls panel markup
+manifest.json          UXP manifest (v5)
+index.html             panel markup
 main.js                bootstrap (at the root: see the note in the file)
-preview.html           detached preview panel markup
-preview-main.js        its bootstrap (at the root for the same reason)
 src/
   engine/              the renderers - pure JS, zero UXP dependencies
     color.js           sRGB/linear, OKLab, HSL, luma
@@ -178,8 +182,6 @@ src/
     files.js           writing generated files through a save dialog
   ui/
     panel.js           panel controller
-    previewpanel.js    the detached preview panel's controller
-    framebus.js        the channel between the two panels
     controls.js        sliders, segmented pickers, chips, toggles, palette
     styles.css
   state/params.js      the parameter schema - single source of truth
@@ -426,7 +428,9 @@ Units are chosen so that nothing depends on document resolution.
 | | Angle | 0–90° | Screen angle (halftone) |
 | Halftone | Radius | 0–200% | Max dot size as a % of the cell half-size; >100% overlaps |
 | | Dot Curve | 0–1 | 0 = area tracks tone (classic), 1 = radius tracks tone |
-| | Shape | circle, ellipse, square, diamond, cross, line | |
+| | Shape | circle, ellipse, square, diamond, cross, engrave, line | |
+| | Wave | 0–200% | Undulate each row of dots, as a % of the cell. Neighbours move together, so a line screen becomes one continuous wavy line — the engraved look |
+| | Wavelength | 2–64 cells | How many cells one wave takes |
 | | Dot Gain | 0–20% | Ink spread on paper, added to every dot radius |
 | | Screen | AM / FM | AM varies dot size; FM keeps it fixed and varies placement |
 | | Screens | single / per ink | One screen, or one angled screen per ink |
@@ -461,8 +465,15 @@ Units are chosen so that nothing depends on document resolution.
 | Batch | Scope | selection / group / document | Which layers Batch Apply covers |
 | | Shared palette | on/off | Extract one palette and pin it across the batch |
 
+**Engraving.** The `engrave` shape is a line whose thickness carries tone, plus a
+second line crossing it once the first is thick enough that a darker tone could
+not be told from the one before — that crossover is why engraved portraits read
+as modelled rather than flat. Both bars span the whole cell so neighbours join
+into unbroken lines. Add **Wave** and you have the banknote look; the
+**Engraved Note** preset is that, set up.
+
 **Presets.** Halftone: Classic B&W, Soft Print, Comic, Newspaper, RGB Pop, Retro
-Poster. Dither: Mac Classic, Newsprint Dither, Handheld Green, Blue Noise, Zone
+Poster, Engraved Note. Dither: Mac Classic, Newsprint Dither, Handheld Green, Blue Noise, Zone
 Poster. Save your own with **Save Preset**.
 
 ---
@@ -470,7 +481,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (395 assertions) + mocked host (210 assertions)
+npm test              # engine (400 assertions) + mocked host (211 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)
@@ -678,12 +689,13 @@ only tests the cases it happens to try.
     200,000 shapes the panel warns that illustration apps will struggle.
 11. **`imaging.getSelection` is probed, not assumed.** On a build without it the
     selection is silently ignored and the whole layer renders.
-12. **The two panels share modules, not messages.** A UXP plugin has one
-    JavaScript realm but one document per panel, so the detached preview gets
-    its frames through a module both panels `require` rather than through any
-    messaging API. If a host build did not share modules between panel
-    documents, the detached panel would say it is waiting instead of showing
-    anything; the docked panel is unaffected either way.
+12. **There is no second, detached preview window.** One was tried, declared as
+    a second panel entrypoint with its own HTML file — and it opened empty,
+    because a UXP plugin has one document and entrypoints do not each get their
+    own. Adobe's documentation is unreachable from the environment this was
+    built in, so rather than guess at the API a second time, the same need is
+    met by **Full** mode: hide the chrome and the controls, float the panel,
+    size it. It depends on nothing but `display: none`.
 
 ### The visual direction
 
