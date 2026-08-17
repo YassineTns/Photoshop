@@ -512,6 +512,160 @@ async function main() {
   }
 
   /* ================================================================ */
+  group("Batch render");
+  {
+    resetModules();
+    const image = F.photo(400, 300);
+    const { ps } = install({ width: 400, height: 300, image });
+    const BATCH = require("../src/photoshop/batch.js");
+    const META = require("../src/photoshop/metadata.js");
+    const { HalftoneEngine } = require("../src/engine/pipeline.js");
+    const { sanitizeParams: sane, defaultParams: defs } = require("../src/state/params.js");
+
+    // Three more pixel layers alongside the Background.
+    const mk = (name) => {
+      const l = {
+        id: ps.nextLayerId++,
+        name,
+        kind: "pixel",
+        visible: true,
+        parent: ps.doc,
+        bounds: { left: 0, top: 0, right: 400, bottom: 300 },
+      };
+      ps.doc.layers.push(l);
+      return l;
+    };
+    const a = mk("Shot A");
+    const b = mk("Shot B");
+    mk("Shot C");
+
+    ok(BATCH.previewBatch("document").count === 4, "document scope finds every pixel layer");
+    ps.doc.activeLayers = [a, b];
+    ok(BATCH.previewBatch("selection").count === 2, "selection scope follows the selection");
+
+    const engine = new HalftoneEngine();
+    const params = sane(Object.assign(defs(), { density: 40, colorCount: 3, paletteLocked: false }));
+
+    const seen = [];
+    const res = await BATCH.runBatch(engine, params, {
+      scope: "selection",
+      sharedPalette: true,
+      onItem: (i, total, name) => seen.push(name),
+    });
+
+    ok(res.done === 2, `both selected layers were rendered (${res.done}/${res.total})`);
+    ok(res.failures.length === 0, "no failures");
+    ok(seen.join(",") === "Shot A,Shot B", `progress reported each layer by name (${seen.join(",")})`);
+    ok(ps.putPixelsCalls.length === 2, "one render written per layer");
+    ok(res.renderIds.length === 2 && res.renderIds[0] !== res.renderIds[1], "each render got its own id");
+
+    const groups = ps.doc.layers.filter((l) => l.kind === "group");
+    ok(groups.length === 2, `two halftone groups were created (${groups.length})`);
+    ok(
+      groups.every((g) => g.layers.some((l) => l.name === META.SOURCE_LAYER_NAME)),
+      "each group holds its own Smart Object source"
+    );
+
+    // Shared palette: the second render must use the first one's colours.
+    ok(!!res.palette && res.palette.length === 3, `a shared palette was pinned (${res.palette})`);
+    const recs = await Promise.all(
+      res.renderIds.map((id) => META.loadRecord({ renderId: id, layerIds: [] }))
+    );
+    ok(
+      recs[1].record.params.palette.join(",") === res.palette.join(","),
+      "the second layer rendered with the pinned palette"
+    );
+    ok(recs[1].record.params.paletteLocked === true, "the pinned palette is locked for the rest of the batch");
+
+    // Re-running must not halftone its own output.
+    const after = BATCH.previewBatch("document");
+    ok(
+      after.names.every((n) => n !== META.RENDER_LAYER_NAME && n !== META.SOURCE_LAYER_NAME),
+      `a second batch skips existing halftone output (${after.names.join(", ")})`
+    );
+    ok(after.count === 2, `only the two untouched layers remain eligible (${after.count})`);
+
+    uninstall();
+  }
+
+  /* ================================================================ */
+  group("Batch resilience");
+  {
+    resetModules();
+    const { ps } = install({ width: 300, height: 200 });
+    const BATCH = require("../src/photoshop/batch.js");
+    const { HalftoneEngine } = require("../src/engine/pipeline.js");
+    const { defaultParams: defs, sanitizeParams: sane } = require("../src/state/params.js");
+
+    for (const n of ["One", "Two", "Three"]) {
+      ps.doc.layers.push({
+        id: ps.nextLayerId++,
+        name: n,
+        kind: "pixel",
+        visible: true,
+        parent: ps.doc,
+        bounds: { left: 0, top: 0, right: 300, bottom: 200 },
+      });
+    }
+
+    // Make the middle layer fail on read.
+    const realGetPixels = ps.imaging.getPixels;
+    let call = 0;
+    ps.imaging.getPixels = async (req) => {
+      call++;
+      if (call === 2) throw new Error("simulated read failure");
+      return realGetPixels(req);
+    };
+
+    const engine = new HalftoneEngine();
+    const res = await BATCH.runBatch(engine, sane(defs()), { scope: "document" });
+    ok(res.failures.length === 1, `one layer failed (${res.failures.length})`);
+    ok(res.done === 3, `the other three still rendered (${res.done}/${res.total})`);
+    ok(/simulated read failure/.test(res.failures[0].error), "the failure reason is carried back");
+    ok(!!res.failures[0].name, `the failing layer is named (${res.failures[0].name})`);
+
+    // Cancellation stops early and reports it.
+    ps.imaging.getPixels = realGetPixels;
+    resetModules();
+    uninstall();
+  }
+
+  /* ================================================================ */
+  group("Batch cancellation");
+  {
+    resetModules();
+    const { ps } = install({ width: 200, height: 150 });
+    const BATCH = require("../src/photoshop/batch.js");
+    const { HalftoneEngine } = require("../src/engine/pipeline.js");
+    const { defaultParams: defs, sanitizeParams: sane } = require("../src/state/params.js");
+
+    for (const n of ["P", "Q", "R", "S"]) {
+      ps.doc.layers.push({
+        id: ps.nextLayerId++,
+        name: n,
+        kind: "pixel",
+        visible: true,
+        parent: ps.doc,
+        bounds: { left: 0, top: 0, right: 200, bottom: 150 },
+      });
+    }
+
+    let count = 0;
+    const res = await BATCH.runBatch(new HalftoneEngine(), sane(defs()), {
+      scope: "document",
+      shouldCancel: () => count++ >= 2,
+    });
+    ok(res.cancelled === true, "cancellation is reported");
+    ok(res.done < res.total, `it stopped early (${res.done}/${res.total})`);
+    ok(
+      ps.doc.layers.filter((l) => l.kind === "group").length === res.done,
+      "only the completed layers left groups behind"
+    );
+
+    uninstall();
+  }
+
+  /* ================================================================ */
   group("Panel wiring");
   {
     resetModules();
@@ -545,13 +699,25 @@ async function main() {
     for (const mode of ["halftone", "dither"]) {
       for (const scaleMode of ["relative", "dpi"]) {
         for (const tonal of [false, true]) {
-          panel.params = sanitizeAll({ mode, scaleMode, tonalMapping: tonal, sharpen: 50 });
-          panel.buildSections();
-          Object.keys(panel.controls).forEach((k) => everSeen.add(k));
+          for (const screenMode of ["single", "perInk"]) {
+            panel.params = sanitizeAll({
+              mode,
+              scaleMode,
+              screenMode,
+              tonalMapping: tonal,
+              sharpen: 50,
+            });
+            panel.buildSections();
+            Object.keys(panel.controls).forEach((k) => everSeen.add(k));
+          }
         }
       }
     }
-    const orphans = PARAM_DEFS.filter((d) => !everSeen.has(d.key)).map((d) => d.key);
+    // Internal params deliberately have no control; they are state carried on
+    // the swatches themselves.
+    const orphans = PARAM_DEFS.filter(
+      (d) => d.type !== "internal" && !everSeen.has(d.key)
+    ).map((d) => d.key);
     ok(orphans.length === 0, `every parameter is reachable in some state (${orphans.join(", ") || "none orphaned"})`);
     panel.params = savedParams;
     panel.buildSections();
@@ -594,6 +760,24 @@ async function main() {
     document.getElementById("btn-apply").emit("click");
     ok(await waitFor(() => ps.putPixelsCalls.length === 1), `Apply wrote the render (${ps.putPixelsCalls.length} writes)`);
     ok(!!ps.doc.layers.find((l) => l.kind === "group"), "Apply built the group");
+
+    // Compare view: holding the button swaps in the untouched source.
+    const compareBtn = document.getElementById("btn-compare");
+    const rendered = document.getElementById("preview").src;
+    compareBtn.emit("pointerdown", {});
+    const shown = document.getElementById("preview").src;
+    ok(shown.indexOf("data:image/png;base64,") === 0, "compare shows an image");
+    ok(shown !== rendered, "compare swaps in something other than the render");
+    compareBtn.emit("pointerup", {});
+    ok(document.getElementById("preview").src === rendered, "releasing compare restores the render");
+
+    // Locked swatches survive re-extraction.
+    panel.params.palette = ["#FF0000", "#00FF00", "#0000FF"];
+    panel.params.lockedSwatches = [0];
+    panel.params.colorCount = 3;
+    panel.extractPalette();
+    ok(panel.params.palette[0] === "#FF0000", "a locked swatch survives re-extraction");
+    ok(panel.params.palette[1] !== "#00FF00", "unlocked swatches are replaced");
 
     // Session persistence.
     const META = require("../src/photoshop/metadata.js");

@@ -156,10 +156,58 @@ const PARAM_DEFS = [
     key: "shape",
     label: "Shape",
     section: "halftone",
-    type: "choice",
+    type: "chips",
     def: "circle",
-    options: ["circle", "square", "diamond", "cross", "line"],
+    options: ["circle", "ellipse", "square", "diamond", "cross", "line"],
     modes: ["halftone"],
+    hint: "Ellipse joins its neighbours gradually, avoiding the hard 50% tone jump a circle makes.",
+  },
+  {
+    key: "dotGain",
+    label: "Dot Gain",
+    section: "halftone",
+    type: "slider",
+    def: 0,
+    min: 0,
+    max: 40,
+    step: 0.5,
+    decimals: 1,
+    unit: "%",
+    modes: ["halftone"],
+    hint: "Simulates a press spreading ink a fixed width around every dot edge. A radius offset, not a tonal curve.",
+  },
+  {
+    key: "screenMode",
+    label: "Screens",
+    section: "halftone",
+    type: "choice",
+    def: "single",
+    options: ["single", "perInk"],
+    modes: ["halftone"],
+    hint: "perInk gives every ink its own angle and overprints them, producing a rosette instead of a moire.",
+  },
+  {
+    key: "screenSpread",
+    label: "Angle Spread",
+    section: "halftone",
+    type: "slider",
+    def: 1,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    decimals: 2,
+    modes: ["halftone"],
+    showIf: (p) => p.screenMode === "perInk",
+    hint: "1 uses the classic 45/15/75/0 separation. 0 collapses every screen onto one angle.",
+  },
+  {
+    key: "edgeAware",
+    label: "Edge Aware",
+    section: "halftone",
+    type: "toggle",
+    def: false,
+    modes: ["halftone"],
+    hint: "Cells straddling an edge take the tone of the dominant side instead of averaging across it.",
   },
 
   // --------------------------------------------------------------- Dither
@@ -286,6 +334,16 @@ const PARAM_DEFS = [
     section: "colors",
     type: "palette",
     def: ["#161616", "#F5EBD8", "#EC3E32"],
+  },
+  {
+    // Not a control of its own: rendered as a small lock badge on each swatch.
+    // Locked entries survive re-extraction, so you can pin your brand red and
+    // let the engine choose the rest.
+    key: "lockedSwatches",
+    label: "Locked swatches",
+    section: "colors",
+    type: "internal",
+    def: [],
   },
   {
     key: "paletteLocked",
@@ -462,6 +520,25 @@ const PARAM_DEFS = [
     hint: "Halftone: dots grow in the highlights and the paper flips. Dither: the tone curve inverts.",
   },
 
+  // ---------------------------------------------------------------- Batch
+  {
+    key: "batchScope",
+    label: "Scope",
+    section: "batch",
+    type: "choice",
+    def: "selection",
+    options: ["selection", "group", "document"],
+    hint: "Which layers Batch Apply touches. Existing halftone output is always skipped.",
+  },
+  {
+    key: "batchSharedPalette",
+    label: "Shared palette",
+    section: "batch",
+    type: "toggle",
+    def: true,
+    hint: "Extract the palette once from the first layer and pin it for the rest, so a sequence does not crawl.",
+  },
+
   // --------------------------------------------------------------- Output
   {
     key: "output",
@@ -485,6 +562,7 @@ const SECTIONS = [
   { id: "grade", label: "Grade" },
   { id: "adjust", label: "Color Adjustments" },
   { id: "output", label: "Output" },
+  { id: "batch", label: "Batch" },
 ];
 
 const DEF_BY_KEY = Object.create(null);
@@ -505,6 +583,8 @@ function defaultParams() {
  * @param {object} params
  */
 function isVisible(def, params) {
+  // Internal params carry state but have no row of their own.
+  if (def.type === "internal") return false;
   if (def.modes && def.modes.indexOf(params.mode) < 0) return false;
   if (def.showIf && !def.showIf(params)) return false;
   return true;
@@ -541,6 +621,13 @@ function sanitizeParams(raw) {
         break;
       case "toggle":
         out[d.key] = !!v;
+        break;
+      case "internal":
+        if (Array.isArray(v)) {
+          out[d.key] = v
+            .map((n) => Math.round(Number(n)))
+            .filter((n) => Number.isFinite(n) && n >= 0 && n < 64);
+        }
         break;
       case "palette":
         if (Array.isArray(v)) {

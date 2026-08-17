@@ -142,6 +142,7 @@ function sampleCells(img, grid, lumaMode, opts = {}) {
       rgb: new Float32Array(n * 3),
       count: new Uint32Array(n),
       grid,
+      lumaMode,
     };
   const lumaFn = getLumaFn(lumaMode);
   const { cell, cols, rows, cos, sin, gminX, gminY, cx, cy } = grid;
@@ -183,6 +184,95 @@ function sampleCells(img, grid, lumaMode, opts = {}) {
 }
 
 /**
+ * Refine cell means so a cell straddling an edge reports the tone of whichever
+ * side dominates it, instead of a grey average of both.
+ *
+ * One mean-shift iteration: re-average, weighting each pixel by how close it is
+ * to the cell's current mean colour. Cells inside a flat area barely move; cells
+ * on a hard edge snap to the majority side. That is what stops dots hovering at
+ * half size all along a contour, which is the main source of ragged edges at low
+ * density.
+ *
+ * @param {{data: Uint8ClampedArray, width: number, height: number}} img
+ * @param {Grid} grid
+ * @param {CellData} cells modified in place
+ * @param {number} [strength] 0..1
+ */
+function refineCellsEdgeAware(img, grid, cells, strength = 1) {
+  const { data, width: w, height: h } = img;
+  const n = grid.cols * grid.rows;
+  const { cell, cols, rows, cos, sin, gminX, gminY, cx, cy } = grid;
+  const invCell = 1 / cell;
+
+  // Current means, as the reference each pixel is weighted against.
+  const meanR = new Float32Array(n);
+  const meanG = new Float32Array(n);
+  const meanB = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const c = cells.count[i];
+    if (!c) continue;
+    meanR[i] = cells.rgb[i * 3] / c;
+    meanG[i] = cells.rgb[i * 3 + 1] / c;
+    meanB[i] = cells.rgb[i * 3 + 2] / c;
+  }
+
+  const lumW = new Float32Array(n);
+  const rgbW = new Float32Array(n * 3);
+  const wSum = new Float32Array(n);
+  const lumaFn = getLumaFn(cells.lumaMode);
+  // Tolerance in squared RGB distance. Generous enough that noise does not
+  // fragment a flat cell, tight enough that a real edge splits.
+  const sigma2 = 3 * 48 * 48;
+
+  for (let y = 0; y < h; y++) {
+    const dy = y + 0.5 - cy;
+    const dx0 = 0.5 - cx;
+    let gx = dx0 * cos + dy * sin;
+    let gy = -dx0 * sin + dy * cos;
+    let p = y * w * 4;
+    for (let x = 0; x < w; x++, p += 4, gx += cos, gy -= sin) {
+      if (data[p + 3] < 8) continue;
+      let col = ((gx - gminX) * invCell) | 0;
+      let row = ((gy - gminY) * invCell) | 0;
+      if (col < 0) col = 0;
+      else if (col >= cols) col = cols - 1;
+      if (row < 0) row = 0;
+      else if (row >= rows) row = rows - 1;
+      const ci = row * cols + col;
+
+      const r = data[p];
+      const g = data[p + 1];
+      const b = data[p + 2];
+      const dr = r - meanR[ci];
+      const dg = g - meanG[ci];
+      const db = b - meanB[ci];
+      const wgt = Math.exp(-(dr * dr + dg * dg + db * db) / sigma2);
+
+      lumW[ci] += lumaFn(r, g, b) * wgt;
+      const q = ci * 3;
+      rgbW[q] += r * wgt;
+      rgbW[q + 1] += g * wgt;
+      rgbW[q + 2] += b * wgt;
+      wSum[ci] += wgt;
+    }
+  }
+
+  const s = Math.max(0, Math.min(1, strength));
+  for (let i = 0; i < n; i++) {
+    const c = cells.count[i];
+    if (!c || wSum[i] < 1e-6) continue;
+    // Blend towards the refined mean, expressed back in "sum over count" form
+    // so the rest of the pipeline keeps working unchanged.
+    const k = c / wSum[i];
+    cells.lum[i] = cells.lum[i] * (1 - s) + lumW[i] * k * s;
+    for (let ch = 0; ch < 3; ch++) {
+      cells.rgb[i * 3 + ch] = cells.rgb[i * 3 + ch] * (1 - s) + rgbW[i * 3 + ch] * k * s;
+    }
+  }
+  return cells;
+}
+
+/**
  * @typedef {object} RasterParams
  * @property {number} radius        percent of the cell half size, 0..200
  * @property {string} shape
@@ -214,6 +304,7 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
 
   const shape = getShape(p.shape);
   const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
+  const gain = (grid.cell * (p.dotGain || 0)) / 100;
   const labPal = paletteToLab(p.palette);
   const centre = [0, 0];
   const adj = p.colorAdjust || {};
@@ -233,8 +324,11 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const graded = sampleLUT(p.toneLUT, L);
       let ink = p.invert ? graded : 1 - graded;
       ink = biasCurve(ink, p.gradeBias);
-      const r = inkToRadius(ink, maxRadius, p.radiusCurve);
+      let r = inkToRadius(ink, maxRadius, p.radiusCurve);
       if (r <= 0.008) continue;
+      // Dot gain models a press spreading ink by a fixed width around every
+      // edge, which is a radius offset - not a tonal curve like Grade Bias.
+      r += gain;
 
       // --- colour: cell mean -> hue/sat/bright -> nearest palette -----
       const q = ci * 3;
@@ -251,6 +345,190 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   }
 
   return buf;
+}
+
+/**
+ * @typedef {object} Screen
+ * @property {Grid} grid
+ * @property {Float32Array} cov    ink coverage per cell, 0..1
+ * @property {Uint32Array} count   opaque pixel count per cell
+ * @property {number[]} color      ink colour, rgb
+ * @property {number} paletteIndex index into the full palette
+ */
+
+/**
+ * Rasterise a set of independently angled ink screens, overprinting them.
+ *
+ * This is the difference between a poster and a print. Each ink gets its own
+ * grid at its own angle and the inks composite by *multiply*, because real ink
+ * is transparent: cyan over magenta gives blue, and the offset screens interlock
+ * into a rosette instead of beating into a moiré.
+ *
+ * @param {Screen[]} screens
+ * @param {object} p {radius, shape, radiusCurve, dotGain, background}
+ * @param {number} width
+ * @param {number} height
+ * @param {Uint8ClampedArray} [out]
+ * @param {{screenStart?: number, screenEnd?: number, skipBackground?: boolean}} [chunk]
+ */
+function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
+  const buf = out || new Uint8ClampedArray(width * height * 4);
+  if (!chunk.skipBackground) fillBackground(buf, p.background);
+
+  const shape = getShape(p.shape);
+  const centre = [0, 0];
+  const first = chunk.screenStart || 0;
+  const last = chunk.screenEnd === undefined ? screens.length : Math.min(screens.length, chunk.screenEnd);
+
+  for (let s = first; s < last; s++) {
+    const screen = screens[s];
+    const grid = screen.grid;
+    const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
+    const gain = (grid.cell * (p.dotGain || 0)) / 100;
+    const colour = screen.color;
+
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        const ci = row * grid.cols + col;
+        if (screen.count[ci] === 0) continue;
+        let r = inkToRadius(screen.cov[ci], maxRadius, p.radiusCurve);
+        if (r <= 0.008) continue;
+        r += gain;
+        cellCentre(grid, col, row, centre);
+        drawDotMultiply(buf, width, height, centre[0], centre[1], r, grid.cell, shape, colour);
+      }
+    }
+  }
+  return buf;
+}
+
+/**
+ * Draw one transparent-ink dot: `out = out · (1 − a + a·ink)`.
+ *
+ * The lerp is between "leave the pixel alone" and "multiply it by the ink", so
+ * partial coverage from the antialiasing band behaves exactly like partial ink
+ * area, which is what keeps overprints clean at the dot edges.
+ */
+function drawDotMultiply(buf, w, h, cx, cy, r, cell, shape, colour) {
+  const ir = colour[0] / 255;
+  const ig = colour[1] / 255;
+  const ib = colour[2] / 255;
+
+  const apply = (x, y, a) => {
+    if (x < 0 || y < 0 || x >= w || y >= h || a <= 0) return;
+    const i = (y * w + x) * 4;
+    buf[i] = buf[i] * (1 - a + a * ir);
+    buf[i + 1] = buf[i + 1] * (1 - a + a * ig);
+    buf[i + 2] = buf[i + 2] * (1 - a + a * ib);
+    buf[i + 3] = 255;
+  };
+
+  if (r < 0.5) {
+    const area = Math.min(1, shape.area(r, cell));
+    if (area <= 0.0005) return;
+    const fx = cx - 0.5;
+    const fy = cy - 0.5;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const tx = fx - x0;
+    const ty = fy - y0;
+    apply(x0, y0, area * (1 - tx) * (1 - ty));
+    apply(x0 + 1, y0, area * tx * (1 - ty));
+    apply(x0, y0 + 1, area * (1 - tx) * ty);
+    apply(x0 + 1, y0 + 1, area * tx * ty);
+    return;
+  }
+
+  const ext = shape.extent(r, cell) + 1;
+  const x0 = Math.max(0, Math.floor(cx - ext));
+  const x1 = Math.min(w, Math.ceil(cx + ext));
+  const y0 = Math.max(0, Math.floor(cy - ext));
+  const y1 = Math.min(h, Math.ceil(cy + ext));
+  const sdf = shape.sdf;
+  for (let y = y0; y < y1; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = x0; x < x1; x++) {
+      const d = sdf(x + 0.5 - cx, dy, r, cell);
+      if (d >= 0.5) continue;
+      apply(x, y, d <= -0.5 ? 1 : 0.5 - d);
+    }
+  }
+}
+
+/**
+ * One coverage mask per ink screen, for the separated output.
+ *
+ * Unlike the opaque model these masks are NOT mutually exclusive - overlapping
+ * is the whole point of a rosette - so the fill layers they feed must be set to
+ * Multiply, and the paper layer stays fully opaque underneath.
+ *
+ * @returns {Uint8ClampedArray[]} one mask per screen, in screen order
+ */
+function rasterizeScreensSeparated(screens, p, width, height) {
+  const shape = getShape(p.shape);
+  const centre = [0, 0];
+  const masks = [];
+
+  for (const screen of screens) {
+    const mask = new Uint8ClampedArray(width * height);
+    const grid = screen.grid;
+    const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
+    const gain = (grid.cell * (p.dotGain || 0)) / 100;
+
+    const paint = (x, y, a) => {
+      if (x < 0 || y < 0 || x >= w0 || y >= h0 || a <= 0) return;
+      const i = y * w0 + x;
+      // Coverage accumulates, it does not replace: two dots of the same ink
+      // overlapping are still that ink.
+      const v = mask[i] / 255;
+      mask[i] = (v + a * (1 - v)) * 255;
+    };
+    const w0 = width;
+    const h0 = height;
+
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        const ci = row * grid.cols + col;
+        if (screen.count[ci] === 0) continue;
+        let r = inkToRadius(screen.cov[ci], maxRadius, p.radiusCurve);
+        if (r <= 0.008) continue;
+        r += gain;
+        cellCentre(grid, col, row, centre);
+        stampCoverage(paint, centre[0], centre[1], r, grid.cell, shape);
+      }
+    }
+    masks.push(mask);
+  }
+  return masks;
+}
+
+/** Shared traversal for coverage stamping, used by the separated screens path. */
+function stampCoverage(paint, cx, cy, r, cell, shape) {
+  if (r < 0.5) {
+    const area = Math.min(1, shape.area(r, cell));
+    if (area <= 0.0005) return;
+    const fx = cx - 0.5;
+    const fy = cy - 0.5;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const tx = fx - x0;
+    const ty = fy - y0;
+    paint(x0, y0, area * (1 - tx) * (1 - ty));
+    paint(x0 + 1, y0, area * tx * (1 - ty));
+    paint(x0, y0 + 1, area * (1 - tx) * ty);
+    paint(x0 + 1, y0 + 1, area * tx * ty);
+    return;
+  }
+  const ext = shape.extent(r, cell) + 1;
+  const sdf = shape.sdf;
+  for (let y = Math.floor(cy - ext); y <= Math.ceil(cy + ext); y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = Math.floor(cx - ext); x <= Math.ceil(cx + ext); x++) {
+      const d = sdf(x + 0.5 - cx, dy, r, cell);
+      if (d >= 0.5) continue;
+      paint(x, y, d <= -0.5 ? 1 : 0.5 - d);
+    }
+  }
 }
 
 /**
@@ -283,6 +561,7 @@ function rasterizeSeparated(cells, p, width, height) {
 
   const shape = getShape(p.shape);
   const maxRadius = (grid.cell * 0.5 * p.radius) / 100;
+  const gain = (grid.cell * (p.dotGain || 0)) / 100;
   const labPal = paletteToLab(p.inkPalette);
   const centre = [0, 0];
   const adj = p.colorAdjust || {};
@@ -298,8 +577,9 @@ function rasterizeSeparated(cells, p, width, height) {
       const graded = sampleLUT(p.toneLUT, L);
       let ink = p.invert ? graded : 1 - graded;
       ink = biasCurve(ink, p.gradeBias);
-      const r = inkToRadius(ink, maxRadius, p.radiusCurve);
+      let r = inkToRadius(ink, maxRadius, p.radiusCurve);
       if (r <= 0.008) continue;
+      r += gain;
 
       const q = ci * 3;
       adjustColor(cells.rgb[q] / cnt, cells.rgb[q + 1] / cnt, cells.rgb[q + 2] / cnt, adj, adjOut);
@@ -452,6 +732,10 @@ module.exports = {
   scaleGrid,
   cellCentre,
   rasterizeSeparated,
+  rasterizeScreens,
+  rasterizeScreensSeparated,
+  refineCellsEdgeAware,
+  drawDotMultiply,
   sampleCells,
   rasterize,
   drawDot,

@@ -27,6 +27,11 @@
 
 const SQRT2 = Math.SQRT2;
 
+/** Ellipse semi-axes as multiples of the radius; a*b = 1 keeps the area equal. */
+const ELLIPSE_RATIO = 1.3;
+const ELLIPSE_A = Math.sqrt(ELLIPSE_RATIO);
+const ELLIPSE_B = 1 / Math.sqrt(ELLIPSE_RATIO);
+
 /** @type {Object<string, Shape>} */
 const SHAPES = {
   circle: {
@@ -62,6 +67,34 @@ const SHAPES = {
     },
     area: (r) => Math.PI * r * r,
     extent: (r) => r * 1.2533141373155003 + 1,
+  },
+
+  ellipse: {
+    id: "ellipse",
+    label: "Ellipse",
+    // Elongated along the 45 degree diagonal, area matched to a circle.
+    //
+    // The ratio is 1.3:1, not 2:1. Elliptical dots exist to soften the tone jump
+    // at 50%, where circles all touch their neighbours at once: an ellipse
+    // touches along its long axis first and its short axis later, spreading the
+    // join over a range of tones. Push the ratio too far and the long axes chain
+    // into unbroken diagonal lines through the shadows instead - which is what
+    // 2:1 did here.
+    sdf: (dx, dy, r) => {
+      const c = Math.SQRT1_2;
+      const px = Math.abs(dx * c + dy * c);
+      const py = Math.abs(-dx * c + dy * c);
+      const a = r * ELLIPSE_A;
+      const b = r * ELLIPSE_B;
+      // Quilez's ellipse distance approximation: exact at the boundary and
+      // well behaved for the 1px antialiasing band, without an iterative solve.
+      const k1 = Math.hypot(px / a, py / b);
+      if (k1 < 1e-6) return -Math.min(a, b);
+      const k2 = Math.hypot(px / (a * a), py / (b * b));
+      return (k1 * (k1 - 1)) / k2;
+    },
+    area: (r) => Math.PI * r * r,
+    extent: (r) => r * ELLIPSE_A + 1,
   },
 
   cross: {

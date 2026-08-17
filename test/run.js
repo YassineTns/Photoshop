@@ -24,6 +24,8 @@ const { SHAPES, SHAPE_IDS } = require("../src/engine/shapes.js");
 const D = require("../src/engine/dither.js");
 const { zoneBands, makeZoneRange } = require("../src/engine/tonemap.js");
 const { unsharpMask, reduceNoise } = require("../src/engine/preprocess.js");
+const SEP = require("../src/engine/separation.js");
+const SWATCH = require("../src/photoshop/swatches.js");
 const { hexToRgb, rgbToHex, luma709, adjustColor, rgbToOklab } = require("../src/engine/color.js");
 const { defaultParams, sanitizeParams, PARAM_DEFS } = require("../src/state/params.js");
 const { BUILTIN_PRESETS, presetToParams } = require("../src/presets/presets.js");
@@ -1031,6 +1033,273 @@ group("Colour separation");
       });
     }
   }
+}
+
+group("Ink separation");
+{
+  ok(SEP.screenAngles(4, 0, 1).join(",") === "45,15,75,0", "four inks get the classic screen angles");
+  ok(
+    SEP.screenAngles(4, 0, 0).every((a) => a === 45),
+    "spread 0 collapses every screen onto one angle"
+  );
+  const rotated = SEP.screenAngles(4, 10, 1);
+  ok(rotated[0] === 55 && rotated[1] === 25, `the base angle rotates the whole set (${rotated.join(",")})`);
+  const many = SEP.screenAngles(9, 0, 1);
+  ok(new Set(many).size === 9, "nine inks still get nine distinct angles");
+
+  // Adjacent screens must stay far enough apart to avoid beating.
+  const sorted = SEP.screenAngles(4, 0, 1).slice().sort((a, b) => a - b);
+  let minGap = 180;
+  for (let i = 1; i < sorted.length; i++) minGap = Math.min(minGap, sorted[i] - sorted[i - 1]);
+  ok(minGap >= 15, `screens are at least 15 degrees apart (min gap ${minGap})`);
+
+  const paper = [255, 255, 255];
+  const cmyk = [[26, 23, 27], [0, 158, 224], [230, 0, 126], [255, 237, 0]];
+  const basis = SEP.buildInkBasis(cmyk, paper);
+  const cov = new Float64Array(4);
+
+  SEP.unmix(basis, paper, cov);
+  ok(Math.max(...cov) < 0.02, `paper needs no ink (max ${Math.max(...cov).toFixed(3)})`);
+
+  // Each pure ink must resolve to itself and (near enough) nothing else.
+  for (let k = 0; k < 4; k++) {
+    SEP.unmix(basis, cmyk[k], cov);
+    const others = Array.from(cov).filter((_, i) => i !== k);
+    ok(cov[k] > 0.9, `ink ${k} resolves to itself (${cov[k].toFixed(2)})`);
+    ok(Math.max(...others) < 0.1, `ink ${k} does not drag in the others (max ${Math.max(...others).toFixed(2)})`);
+  }
+
+  // A secondary must come out as its two constituents.
+  SEP.unmix(basis, [40, 60, 160], cov); // blue = cyan + magenta
+  ok(cov[1] > 0.3 && cov[2] > 0.15, `blue separates into cyan + magenta (${Array.from(cov).map((v) => v.toFixed(2)).join(" ")})`);
+  ok(cov[3] < 0.1, "blue pulls in no yellow");
+
+  // Coverage must never go negative or run away, whatever it is handed.
+  for (const c of [[0, 0, 0], [255, 255, 255], [255, 0, 0], [12, 200, 33], [128, 128, 128]]) {
+    SEP.unmix(basis, c, cov);
+    ok(
+      Array.from(cov).every((v) => v >= 0 && v <= 1 && Number.isFinite(v)),
+      `coverage stays in [0,1] for ${rgbToHex(c[0], c[1], c[2])}`
+    );
+  }
+
+  // Darker inks take the least visible angles.
+  const order = SEP.inkOrder(cmyk);
+  ok(order[0] === 0, "the darkest ink is screened first (45 degrees)");
+}
+
+group("Per-ink screens");
+{
+  const e = mkEngine(F.photo(700, 500));
+  const base = {
+    mode: "halftone",
+    screenMode: "perInk",
+    density: 60,
+    radius: 115,
+    colorCount: 4,
+    palette: ["#1A1A1A", "#009EE0", "#E6007E", "#FFED00"],
+    paletteLocked: true,
+    spread: 0,
+    background: "#FFFFFF",
+  };
+  const p = sanitizeParams(base);
+  const out = e.render(p, { width: 700, height: 500 });
+  save("32-perink.png", out);
+
+  ok(!hasNaN(out), "per-ink render has no NaN");
+  // Four inks and a white paper that is not itself a palette entry, so nothing
+  // is excluded from the ink set: four screens.
+  ok(out.angles && out.angles.length === 4, `one screen per ink (${out.angles})`);
+  ok(new Set(out.angles).size === out.angles.length, "each screen has its own angle");
+
+  // Overprinting must be able to reach darker than any single ink: that is what
+  // multiply compositing buys, and an opaque renderer cannot do it.
+  let darkest = 255;
+  for (let i = 0; i < out.data.length; i += 4) {
+    darkest = Math.min(darkest, out.data[i] + out.data[i + 1] + out.data[i + 2]);
+  }
+  ok(darkest < 3 * 40, `overprinting reaches deep shadow (min channel sum ${darkest})`);
+
+  // Collapsing the spread stacks every screen on the same grid. That genuinely
+  // changes the result - overlapping ink absorbs less than interleaved ink
+  // covering more paper, which is precisely why real presses offset their
+  // screens - so the test is that it stays in the same tonal ballpark and that
+  // the pattern actually differs, not that the pixels match.
+  const collapsed = e.render(sanitizeParams(Object.assign({}, base, { screenSpread: 0 })), {
+    width: 700,
+    height: 500,
+  });
+  const m1 = meanRGB(out);
+  const m2 = meanRGB(collapsed);
+  for (let c = 0; c < 3; c++) {
+    ok(
+      Math.abs(m2[c] - m1[c]) < 45,
+      `collapsing the screens stays in the same tonal range on channel ${c} ` +
+        `(${m1[c].toFixed(0)} vs ${m2[c].toFixed(0)})`
+    );
+  }
+  ok(
+    m2[0] > m1[0],
+    `overlapping screens cover less paper, so they read lighter (${m1[0].toFixed(0)} -> ${m2[0].toFixed(0)})`
+  );
+  save("32-perink-collapsed.png", collapsed);
+
+  // Resolution independence holds here too.
+  const small = e.render(p, { width: 350, height: 250 });
+  const big = e.render(p, { width: 1400, height: 1000 });
+  const ms = meanRGB(small);
+  const mb = meanRGB(big);
+  for (let c = 0; c < 3; c++) near(ms[c], mb[c], 14, `per-ink render is scale invariant on channel ${c}`);
+
+  // Separated output: masks overlap on purpose, and declare that they do.
+  const sep = e.renderSeparated(p, { width: 350, height: 250 });
+  ok(sep.blend === "multiply", "per-ink separation asks for Multiply fill layers");
+  ok(sep.exclusive === false, "per-ink masks are explicitly not mutually exclusive");
+  ok(sep.masks.length === out.angles.length + 1, `one mask per ink plus the paper (${sep.masks.length})`);
+  ok(
+    Array.from(sep.masks[sep.paperIndex]).every((v) => v === 255),
+    "the paper mask is fully opaque underneath"
+  );
+  let overlapping = 0;
+  for (let i = 0; i < 350 * 250; i++) {
+    let inked = 0;
+    for (let k = 1; k < sep.masks.length; k++) if (sep.masks[k][i] > 128) inked++;
+    if (inked > 1) overlapping++;
+  }
+  ok(overlapping > 0, `inks genuinely overprint (${overlapping} pixels carry more than one ink)`);
+}
+
+group("Dot gain and dot shapes");
+{
+  const e = mkEngine(F.solid(400, 300, 128, 128, 128));
+  const base = {
+    density: 40,
+    radius: 100,
+    palette: ["#000000", "#FFFFFF"],
+    paletteLocked: true,
+    spread: 0,
+    background: "#FFFFFF",
+  };
+  const ink = (gain) => {
+    const out = e.render(sanitizeParams(Object.assign({}, base, { dotGain: gain })), {
+      width: 400,
+      height: 300,
+    });
+    return inkDensity(out, [255, 255, 255]);
+  };
+  const g0 = ink(0);
+  const g10 = ink(10);
+  const g25 = ink(25);
+  ok(g10 > g0 && g25 > g10, `dot gain monotonically fattens the dots (${g0.toFixed(3)} < ${g10.toFixed(3)} < ${g25.toFixed(3)})`);
+  ok(g0 > 0.3 && g0 < 0.7, "the ungained mid grey lands near half coverage");
+
+  // Gain must not fabricate ink where there is none.
+  const white = mkEngine(F.white(200, 150));
+  const w = white.render(
+    sanitizeParams(Object.assign({}, base, { dotGain: 40 })),
+    { width: 200, height: 150 }
+  );
+  ok(inkDensity(w, [255, 255, 255]) < 0.001, "dot gain adds nothing to an empty highlight");
+
+  // The ellipse must carry the same ink as a circle of the same radius.
+  const shapes = {};
+  for (const sh of ["circle", "ellipse", "square", "diamond"]) {
+    const out = e.render(sanitizeParams(Object.assign({}, base, { shape: sh })), {
+      width: 400,
+      height: 300,
+    });
+    shapes[sh] = inkDensity(out, [255, 255, 255]);
+    save(`33-shape-${sh}.png`, out);
+  }
+  const vals = Object.values(shapes);
+  const spreadPct = (Math.max(...vals) - Math.min(...vals)) / Math.max(...vals);
+  ok(spreadPct < 0.1, `ellipse is area-matched to the other shapes (${(spreadPct * 100).toFixed(1)}% spread)`);
+}
+
+group("Edge-aware sampling");
+{
+  // A hard vertical edge: without refinement the straddling column of cells
+  // reports a mid grey; with it, each cell commits to one side.
+  const img = F.makeImage(480, 160, (x, y, p) => {
+    const v = x < 240 ? 0 : 255;
+    p[0] = p[1] = p[2] = v;
+  });
+  const e = mkEngine(img);
+  const base = {
+    density: 30,
+    radius: 100,
+    palette: ["#000000", "#FFFFFF"],
+    paletteLocked: true,
+    spread: 0,
+    background: "#FFFFFF",
+    blur: 0,
+  };
+
+  const midness = (params) => {
+    const radii = cellRadii(e, sanitizeParams(params)).flat().filter((r) => r !== null);
+    const cell = e._ensureCells(sanitizeParams(params)).grid.cell;
+    const maxR = cell * 0.5;
+    // Count cells sitting awkwardly between "no dot" and "full dot".
+    return radii.filter((r) => r > maxR * 0.2 && r < maxR * 0.8).length;
+  };
+
+  const plain = midness(Object.assign({}, base, { edgeAware: false }));
+  const aware = midness(Object.assign({}, base, { edgeAware: true }));
+  ok(aware <= plain, `edge-aware sampling reduces half-sized straddling dots (${plain} -> ${aware})`);
+
+  // It must leave a flat field completely alone.
+  const flatE = mkEngine(F.solid(300, 200, 100, 100, 100));
+  const a = flatE.render(sanitizeParams(Object.assign({}, base, { edgeAware: false })), { width: 300, height: 200 });
+  const b = flatE.render(sanitizeParams(Object.assign({}, base, { edgeAware: true })), { width: 300, height: 200 });
+  let maxDiff = 0;
+  for (let i = 0; i < a.data.length; i += 4) maxDiff = Math.max(maxDiff, Math.abs(a.data[i] - b.data[i]));
+  ok(maxDiff <= 2, `edge-aware sampling is a no-op on a flat field (max diff ${maxDiff})`);
+
+  // And a gradient must stay monotonic.
+  const gradE = mkEngine(F.gradient(600, 200));
+  const gp = sanitizeParams(Object.assign({}, base, { edgeAware: true, density: 40 }));
+  const rows = cellRadii(gradE, gp);
+  const mid = rows[Math.floor(rows.length / 2)].filter((r) => r !== null);
+  let ok2 = true;
+  for (let i = 1; i < mid.length; i++) if (mid[i] > mid[i - 1] + 0.05) ok2 = false;
+  ok(ok2, "edge-aware sampling keeps a gradient monotonic");
+}
+
+group("Swatch files");
+{
+  const pal = ["#161616", "#F5EBD8", "#EC3E32", "#009EE0"];
+
+  const act = SWATCH.encodeACT(pal);
+  ok(act.length === 772, `.act is 768 bytes plus the count trailer (${act.length})`);
+  ok(SWATCH.decodeACT(act).join(",") === pal.join(","), ".act round trips exactly");
+  ok((act[768] << 8) + act[769] === 4, "the .act trailer records the real colour count");
+
+  const ase = SWATCH.encodeASE(pal, "Test");
+  ok(String.fromCharCode(ase[0], ase[1], ase[2], ase[3]) === "ASEF", ".ase carries the ASEF signature");
+  ok(SWATCH.decodeASE(ase).join(",") === pal.join(","), ".ase round trips exactly");
+
+  let threw = null;
+  try {
+    SWATCH.decodeASE(Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
+  } catch (err) {
+    threw = err;
+  }
+  ok(!!threw && /ASEF/.test(threw.message), "a bad .ase is rejected with a useful message");
+
+  let threw2 = null;
+  try {
+    SWATCH.decodeACT(Uint8Array.from([1, 2, 3]));
+  } catch (err) {
+    threw2 = err;
+  }
+  ok(!!threw2, "a truncated .act is rejected");
+
+  // A single-colour palette and the 256 colour maximum must both survive.
+  ok(SWATCH.decodeACT(SWATCH.encodeACT(["#FFFFFF"])).length === 1, "a one colour .act round trips");
+  const big = [];
+  for (let i = 0; i < 300; i++) big.push(rgbToHex(i % 256, (i * 3) % 256, (i * 7) % 256));
+  ok(SWATCH.decodeACT(SWATCH.encodeACT(big)).length === 256, ".act clamps to its 256 colour limit");
+  ok(SWATCH.decodeASE(SWATCH.encodeASE(big)).length === 300, ".ase has no such limit");
 }
 
 group("DPI scale mode");

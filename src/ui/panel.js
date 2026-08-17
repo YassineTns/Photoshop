@@ -28,10 +28,13 @@ const { ALGORITHMS, ALGORITHM_FAMILIES } = require("../engine/dither.js");
 const { BUILTIN_PRESETS, presetToParams, makeUserPreset } = require("../presets/presets.js");
 const { HalftoneEngine } = require("../engine/pipeline.js");
 const { toDataURL } = require("../util/png.js");
+const { downscaleBox: downscale } = require("../engine/resample.js");
 const HOST = require("../photoshop/host.js");
 const RENDER = require("../photoshop/render.js");
 const META = require("../photoshop/metadata.js");
 const IM = require("../photoshop/imaging.js");
+const BATCH = require("../photoshop/batch.js");
+const SWATCH = require("../photoshop/swatches.js");
 
 const PREVIEW_MAX = 460;
 /** Cap on the dither grid used for previews; above this the preview approximates. */
@@ -54,6 +57,9 @@ class Panel {
     this._busy = false;
     this._selectionTimer = null;
     this.sectionOpen = {};
+    this._sourceURL = null;
+    this._renderedSrc = null;
+    this._cancelBatch = false;
   }
 
   /* ---------------------------------------------------------------- */
@@ -172,8 +178,10 @@ class Panel {
       case "palette":
         ctl = C.createPalette({
           value: this.params[def.key],
-          onChange: (hexes) => {
+          locked: this.params.lockedSwatches,
+          onChange: (hexes, lockedIdx) => {
             this.params.palette = hexes;
+            this.params.lockedSwatches = lockedIdx || [];
             this.params.paletteLocked = true;
             if (this.controls.paletteLocked) this.controls.paletteLocked.set(true);
             this.params.colorCount = Math.min(8, Math.max(2, hexes.length));
@@ -181,6 +189,8 @@ class Panel {
             this.onParamsChanged(true);
           },
           onExtract: () => this.extractPalette(),
+          onImport: () => this.importPalette(),
+          onExport: () => this.exportPalette(),
           getForeground: () => IM.foregroundRGB(),
         });
         break;
@@ -196,6 +206,8 @@ class Panel {
     this.$("btn-apply").addEventListener("click", () => this.apply());
     this.$("btn-update").addEventListener("click", () => this.update());
     this.$("btn-reset").addEventListener("click", () => this.resetAll());
+    this.$("btn-batch").addEventListener("click", () => this.batchApply());
+    this.bindCompare();
     this.$("btn-save-preset").addEventListener("click", () => this.savePreset());
     this.$("btn-load-preset").addEventListener("click", () => this.promptLoadPreset());
   }
@@ -231,24 +243,40 @@ class Panel {
     const count = this.params.colorCount;
     if (this.engine.hasSource()) {
       try {
-        this.params.palette = this.engine.extractPaletteHex(this.params);
+        this.params.palette = this.mergeLocked(this.engine.extractPaletteHex(this.params));
       } catch (e) {
         this.params.palette = padHexes(this.params.palette, count);
       }
     } else {
       this.params.palette = padHexes(this.params.palette, count);
     }
-    if (this.controls.palette) this.controls.palette.set(this.params.palette);
+    if (this.controls.palette) this.controls.palette.set(this.params.palette, this.params.lockedSwatches);
   }
 
   syncPaletteFromImage() {
     if (!this.engine.hasSource()) return;
     try {
-      this.params.palette = this.engine.extractPaletteHex(this.params);
-      if (this.controls.palette) this.controls.palette.set(this.params.palette);
+      this.params.palette = this.mergeLocked(this.engine.extractPaletteHex(this.params));
+      if (this.controls.palette) this.controls.palette.set(this.params.palette, this.params.lockedSwatches);
     } catch (e) {
       /* keep the current palette */
     }
+  }
+
+  /**
+   * Re-extract, keeping any swatch the user pinned.
+   *
+   * The locked entries are put back at their own indices afterwards, so pinning
+   * a brand colour and letting the engine choose the rest works as expected.
+   */
+  mergeLocked(extracted) {
+    const locks = this.params.lockedSwatches || [];
+    if (!locks.length) return extracted;
+    const out = extracted.slice();
+    for (const i of locks) {
+      if (i < out.length && this.params.palette[i]) out[i] = this.params.palette[i];
+    }
+    return out;
   }
 
   extractPalette() {
@@ -256,12 +284,41 @@ class Panel {
       this.notice("Load a layer first, then the palette can be read from its pixels.", "warn");
       return;
     }
-    this.params.palette = this.engine.extractPaletteHex(this.params);
+    const fresh = this.engine.extractPaletteHex(this.params);
+    this.params.palette = this.mergeLocked(fresh);
     this.params.paletteLocked = true;
-    if (this.controls.palette) this.controls.palette.set(this.params.palette);
+    if (this.controls.palette) this.controls.palette.set(this.params.palette, this.params.lockedSwatches);
     if (this.controls.paletteLocked) this.controls.paletteLocked.set(true);
     this.onParamsChanged(true);
-    this.notice(`Extracted ${this.params.palette.length} colours from the layer.`);
+    const kept = (this.params.lockedSwatches || []).length;
+    this.notice(
+      `Extracted ${this.params.palette.length} colours` + (kept ? `, keeping ${kept} locked.` : ".")
+    );
+  }
+
+  async importPalette() {
+    await this.guard("Importing swatches…", async () => {
+      const res = await SWATCH.importPalette();
+      if (!res) return;
+      const hexes = res.hexes.slice(0, 8);
+      this.params.palette = hexes;
+      this.params.colorCount = Math.max(2, Math.min(8, hexes.length));
+      this.params.paletteLocked = true;
+      this.params.lockedSwatches = [];
+      this.rebuild();
+      this.schedulePreview();
+      this.notice(
+        `Imported ${res.hexes.length} swatches from ${res.name}` +
+          (res.hexes.length > 8 ? `, using the first 8.` : ".")
+      );
+    });
+  }
+
+  async exportPalette() {
+    await this.guard("Exporting swatches…", async () => {
+      const name = await SWATCH.exportPalette(this.params.palette, "ase");
+      if (name) this.notice(`Palette written to ${name}.`);
+    });
   }
 
   syncControls() {
@@ -334,9 +391,11 @@ class Panel {
       this.$("preview-empty").className = "preview-empty hidden";
       this.lastFrameMs = Date.now() - t0;
       const unit = this.params.mode === "dither" ? "px" : "cells";
-      this.$("preview-badge").textContent =
-        `${this.engine.stats.cells || 0} ${unit} · ${this.lastFrameMs}ms` +
+      const screens = out.angles ? ` · ${out.angles.length} screens @ ${out.angles.join("/")}°` : "";
+      this._lastBadge =
+        `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
         (out.exact ? "" : " · approx");
+      this.$("preview-badge").textContent = this._lastBadge;
     } catch (e) {
       this.lastFrameMs = Date.now() - t0;
       this.notice(`Preview failed: ${e.message}`, "error");
@@ -414,6 +473,82 @@ class Panel {
     );
   }
 
+  /* ----------------------------------------------------------- batch */
+
+  async batchApply() {
+    const preview = BATCH.previewBatch(this.params.batchScope);
+    if (!preview.count) {
+      this.notice(preview.message, "warn");
+      return;
+    }
+    this._cancelBatch = false;
+    await this.guard(`Batching ${preview.count} layers…`, async () => {
+      const res = await BATCH.runBatch(this.engine, this.params, {
+        scope: this.params.batchScope,
+        sharedPalette: this.params.batchSharedPalette,
+        onItem: (i, total, name) => this.status(`Batch ${i + 1}/${total}: ${name}`, "busy"),
+        onProgress: (t) => this.progress(t),
+        shouldCancel: () => this._cancelBatch,
+      });
+
+      // The engine now holds the last batched layer, not what the panel was
+      // previewing, so drop the stale preview rather than showing a lie.
+      this.engine.sourceLayerId = null;
+
+      const parts = [`Batched ${res.done} of ${res.total} layers.`];
+      if (res.palette) parts.push(`Shared palette: ${res.palette.join(" ")}.`);
+      if (res.cancelled) parts.push("Cancelled before the end.");
+      if (res.failures.length) {
+        parts.push(
+          `${res.failures.length} failed: ` +
+            res.failures.map((f) => `${f.name} (${f.error})`).join("; ")
+        );
+      }
+      this.notice(parts.join(" "), res.failures.length || res.cancelled ? "warn" : "");
+    });
+  }
+
+  /* --------------------------------------------------------- compare */
+
+  /**
+   * Hold the Compare button to swap the preview for the untouched source.
+   * Cheaper and less error-prone than a toggle: you cannot leave it stuck on.
+   */
+  bindCompare() {
+    const btn = this.$("btn-compare");
+    if (!btn) return;
+    const show = () => {
+      if (!this.engine.hasSource()) return;
+      const img = this.$("preview");
+      this._renderedSrc = img.src;
+      img.src = this.sourceDataURL();
+      this.$("preview-badge").textContent = "original";
+    };
+    const hide = () => {
+      if (!this._renderedSrc) return;
+      // Restore rather than re-render: nothing can have changed while the
+      // button was held, and a re-render would race a pending preview tick.
+      this.$("preview").src = this._renderedSrc;
+      this._renderedSrc = null;
+      this.$("preview-badge").textContent = this._lastBadge || "";
+    };
+    btn.addEventListener("pointerdown", show);
+    btn.addEventListener("pointerup", hide);
+    btn.addEventListener("pointercancel", hide);
+    btn.addEventListener("pointerleave", hide);
+  }
+
+  /** The source, downscaled to preview size and cached. */
+  sourceDataURL() {
+    const size = this.previewSize();
+    const key = `${this.engine.sourceId}|${size.width}x${size.height}`;
+    if (this._sourceURL && this._sourceURL.key === key) return this._sourceURL.url;
+    const small = downscale(this.engine.source, size.width, size.height);
+    const url = toDataURL(small.data, small.width, small.height);
+    this._sourceURL = { key, url };
+    return url;
+  }
+
   /* ------------------------------------------------------- selection */
 
   watchSelection() {
@@ -471,7 +606,14 @@ class Panel {
           (preset.id === this.activePresetId ? " active" : ""),
         preset.name
       );
-      chip.addEventListener("click", () => this.applyPreset(preset));
+      chip.addEventListener("click", (e) => {
+        if (e.altKey && preset.user) {
+          this.deletePreset(preset);
+          return;
+        }
+        this.applyPreset(preset);
+      });
+      if (preset.user) chip.title = `${preset.name} — alt-click to delete`;
       host.appendChild(chip);
     }
   }
@@ -484,6 +626,17 @@ class Panel {
     this.schedulePreview();
     this.persistSession();
     this.notice(`Preset "${preset.name}" loaded.`);
+  }
+
+  async deletePreset(preset) {
+    this.userPresets = this.userPresets.filter((p) => p.id !== preset.id);
+    if (this.activePresetId === preset.id) this.activePresetId = null;
+    const saved = await META.saveUserPresets(this.userPresets);
+    this.renderPresetChips();
+    this.notice(
+      saved ? `Preset "${preset.name}" deleted.` : `Preset "${preset.name}" removed for this session only.`,
+      saved ? "" : "warn"
+    );
   }
 
   async savePreset() {
@@ -595,7 +748,15 @@ class Panel {
   }
 
   setButtonsEnabled(enabled) {
-    for (const id of ["btn-load", "btn-apply", "btn-update", "btn-reset", "btn-save-preset", "btn-load-preset"]) {
+    for (const id of [
+      "btn-load",
+      "btn-apply",
+      "btn-update",
+      "btn-reset",
+      "btn-batch",
+      "btn-save-preset",
+      "btn-load-preset",
+    ]) {
       const b = this.$(id);
       if (!b) continue;
       if (enabled) b.removeAttribute("disabled");

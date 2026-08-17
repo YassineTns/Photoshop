@@ -2,17 +2,21 @@
 
 A Photoshop UXP plugin for bitmapping artwork, with two rendering engines:
 
-- **Halftone** — a regular grid of dots whose size follows local luminance and
-  whose colour comes from a quantised palette.
+- **Halftone** — a grid of dots whose size follows local tone, either as a single
+  screen or as **one independently angled screen per ink**, overprinted into a
+  real CMYK-style rosette.
 - **Dither** — 24 dithering algorithms (Bayer, clustered, blue noise, and ten
   error-diffusion kernels) that pick one palette colour per pixel.
 
 Both are computed by the plugin's own engine, not by a stack of Photoshop
-adjustment layers, and both can output either a flat pixel layer or a
-**colour-separated stack of editable fill layers**.
+adjustment layers. Both can output either a flat pixel layer or a
+**colour-separated stack of editable fill layers**, and both can be run across
+many layers at once with **Batch Apply**.
 
-![Comic preset — halftone mode](docs/sample-comic.png)
-![Zone Poster preset — dither mode with tonal zones](docs/sample-dither.png)
+![Offset CMYK preset — per-ink screens at 45/15/75/0°](docs/sample-offset.png)
+![Comic preset — single-screen halftone](docs/sample-comic.png)
+![Risograph preset — three spot inks overprinting](docs/sample-riso.png)
+![Zone Poster preset — dither with tonal zones](docs/sample-dither.png)
 
 ---
 
@@ -60,9 +64,22 @@ Halftone ▸ HT-4f2a9c
    from the stored parameters. Change what you like and press **Update** — the
    render is recomputed from the untouched source.
 
-Slider conventions: drag to scrub, hold **Shift** for fine control, **double
-click** (or the ↺ button) to restore the default, and type in the numeric field
-for an exact value.
+**Batch Apply** runs the same settings across every layer in the chosen scope
+(selection, group, or whole document), skipping anything that is already halftone
+output. The whole batch is a single undo step.
+
+Conventions:
+
+| Gesture | Effect |
+|---|---|
+| Drag a slider | Scrub |
+| Shift-drag | Fine control |
+| Double-click a slider, or ↺ | Restore the default |
+| Click a swatch | Type a hex value |
+| Alt-click a swatch | Take Photoshop's foreground colour |
+| Shift-click a swatch | Lock it against re-extraction |
+| Hold **Compare** | Show the untouched source |
+| Alt-click a user preset | Delete it |
 
 ---
 
@@ -81,9 +98,10 @@ src/
     quantization.js    median cut, k-means, popularity
     palette.js         extraction, spread, matching, ink/paper split
     tonemap.js         shadow / midtone / highlight palette bands
+    separation.js      ink unmixing (non-negative lasso) + screen angles
     shapes.js          dot shapes as signed distance functions
     resample.js        area-average downscaling
-    halftone.js        grid, cell sampling, antialiased rasteriser, separation
+    halftone.js        grid, cell sampling, antialiased + multi-screen rasterisers
     dither.js          threshold matrices, diffusion kernels, dither pass
     pipeline.js        staged cache, mode dispatch, async chunked rendering
   photoshop/           everything that touches the host
@@ -93,12 +111,14 @@ src/
     imaging.js         getPixels / putPixels / putLayerMask
     metadata.js        parameter persistence
     render.js          Apply / Update orchestration, output modes
+    batch.js           multi-layer batch runner
+    swatches.js        .ase and .act import / export
   ui/
     panel.js           panel controller
     controls.js        sliders, segmented pickers, chips, toggles, palette
     styles.css
   state/params.js      the parameter schema - single source of truth
-  presets/presets.js   the eleven built-in presets
+  presets/presets.js   the thirteen built-in presets
   util/                PNG encoder, UTF-8 base64
 test/                  engine suite + mocked-host integration suite
 tools/make-icons.js
@@ -183,6 +203,37 @@ Atkinson deliberately discards 25% of its error; that is what produces the
 blown-out early-Macintosh look, and the test suite exempts it by name rather than
 loosening the tolerance for everyone.
 
+### Per-ink screens
+
+`Screens: perInk` is the difference between a poster and a print. Each ink gets
+its own grid at its own angle and the inks composite by **multiply**, because
+real ink is transparent: cyan over magenta gives blue, and the offset screens
+interlock into a rosette rather than beating into a moiré.
+
+Two pieces make it work.
+
+**Separation.** How much of each ink is needed to reach a colour, solved in
+optical density space (`D = -log₁₀ reflectance`) where overprinting is addition.
+With more than three inks the system is underdetermined and needs regularising,
+and the choice of penalty decides the result: an **L2 (ridge)** penalty minimises
+the norm by *spreading* coverage across every ink, so pure black separated as
+0.59 key plus a third of everything else. An **L1** penalty promotes sparsity —
+the correct prior for ink, since a press uses as few plates as it can — and makes
+a pure ink resolve to itself. The solver is non-negative lasso with FISTA
+momentum; plain proximal gradient was far too slow on a basis this correlated.
+The sparsity weight is scaled to the basis magnitude, without which a light-ink
+palette drives every coverage to zero.
+
+The result behaves the way a separation should: pure K → 1.00 key and nothing
+else, a neutral grey → key only (classic grey component replacement), blue →
+cyan + magenta, skin → magenta + yellow.
+
+**Angles.** The classic 45/15/75/0 exists because 30° apart is the maximum three
+screens can be, and yellow goes at 0 because it is the least visible. The darkest
+ink is screened first so the most visible pattern lands on the least visible
+angle. `Angle Spread` scales the separation; at 0 every screen collapses onto one
+angle, which is a deliberate graphic look rather than a print one.
+
 ### Halftone dot quality
 
 - **Antialiasing** is analytic: each shape is a signed distance function and
@@ -194,6 +245,16 @@ loosening the tolerance for everyone.
   amplitude-modulated screen behaves.
 - **Shapes are area-matched** to within 4%, so switching shape changes the
   texture without changing the exposure.
+- **Elliptical dots** are 1.3:1, not 2:1. Ellipses exist to soften the tone jump
+  at 50% where circles all touch at once — they join along the long axis first
+  and the short axis later. Pushed further, the long axes chain into unbroken
+  diagonal lines through the shadows, which is exactly what 2:1 did.
+- **Dot gain** models a press spreading ink a fixed width around every edge, so
+  it is a radius offset, not a tonal curve. That is what makes it different from
+  Grade Bias, and why it adds nothing at all to an empty highlight.
+- **Edge-aware sampling** runs one mean-shift iteration over each cell, so a cell
+  straddling a hard edge commits to the dominant side instead of reporting a grey
+  average and hovering at half size all along the contour.
 - **The paper colour is never used as a dot colour.** If it were, every cell
   lighter than the mid point would draw an invisible paper-coloured dot and half
   the tonal range would disappear.
@@ -216,7 +277,16 @@ the boundary shows up as a hard contour.
 `Spread` pushes palette entries away from their centroid in OKLab, expanding
 lightness harder than chroma. Hue/Saturation/Brightness are applied to the
 palette rather than per pixel — for these pointwise HSL operations that is
-equivalent, and it keeps Hue at O(colours) in both modes.
+equivalent, and it keeps Hue at O(colours) in every mode. Which entry is the
+paper and which are inks is decided **by index on the unadjusted palette**, so a
+hue rotation can never silently re-pick a different paper, and cached screens
+survive it.
+
+Individual swatches can be **locked** (shift-click) so they survive
+re-extraction — pin a brand colour and let the engine choose the rest. Palettes
+import and export as **.ase** (Adobe Swatch Exchange, round-trips to Illustrator
+and InDesign) and **.act** (Adobe Color Table); both encoders are written by hand
+against the format specs, with no dependency.
 
 ---
 
@@ -315,7 +385,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (253 assertions) + mocked host (129 assertions)
+npm test              # engine (310 assertions) + mocked host (155 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 ```
@@ -332,13 +402,19 @@ ordered matrix with L distinct thresholds can only represent tone in steps of
 achieves the best it structurally can, instead of hiding a regression behind a
 loose number. Threshold and Atkinson are exempted by name, with the reason.
 
+For separation it asserts the properties that matter rather than pixel values:
+pure inks resolve to themselves and drag nothing else in, secondaries decompose
+into their constituents, neutrals go to the key ink, coverage never leaves [0,1]
+for any input, and no two screens share an angle or sit closer than 15°.
+
 The integration suite runs the Photoshop and UI layers against a mocked host. It
 cannot prove the batchPlay descriptors are accepted by Photoshop — only Photoshop
 can — but it does prove the plugin's own logic: layer structure and ordering, the
 original never being written to, mask writes reaching every fill layer, the
 documented fallback when masks are unavailable, parameters round-tripping through
-XMP *and* the sidecar, and that every parameter in the schema is reachable in
-some UI state and no control is built for a hidden one.
+XMP *and* the sidecar, batches that skip their own output / isolate a failing
+layer / stop cleanly on cancel, and that every parameter in the schema is
+reachable in some UI state while no control is built for a hidden one.
 
 ### Measured performance
 
@@ -353,7 +429,8 @@ Synthetic photograph, Node 22 (Photoshop will differ, but the ratios hold):
 | Dither | 1080×1080 | 49 ms | 5 ms | 14 ms |
 | Dither | 1920×1080 | 36 ms | 3 ms | 25 ms |
 | Dither | 3000×3000 | 99 ms | 7 ms | 119 ms |
-| Dither | 6000×4000 | 155 ms | 6 ms | 798 ms |
+| Dither | 6000×4000 | 245 ms | 8 ms | 1065 ms |
+| Per-ink (4 screens) | 6000×4000 | 679 ms | 36–102 ms | 3076 ms |
 
 Slider latency is flat in document size. Full renders are chunked with yields so
 Photoshop's UI keeps breathing, and reads from Photoshop are capped at 2600px on
@@ -364,40 +441,42 @@ the longest edge while the render is still written at full resolution.
 ## Known limitations
 
 1. **Not a real Smart Filter.** Explained above. Update is a button.
-2. **No batch or video render.** There is no "apply across all layers or frames"
-   mode; each render is one layer at a time.
-3. **Layer XMP is not a documented UXP API.** Every write is verified by
+2. **Batch covers layers, not video frames.** Rendering a video timeline
+   frame-by-frame would mean rasterising the video layer per frame, which UXP
+   does not expose. Frame-animation documents are covered, because their frames
+   are made of ordinary layers.
+3. **Per-ink screens are slower.** Four screens mean four rasterisations, so
+   slider latency is 36–102 ms rather than the ~14 ms of a single screen, and a
+   24-megapixel render takes about 3 s. The panel's adaptive debounce handles it.
+4. **Layer XMP is not a documented UXP API.** Every write is verified by
    readback, with a sidecar fallback, so the worst case is that parameters do not
    travel to another machine inside the .psd.
-4. **RGB documents only.** CMYK, Lab, Indexed and Duotone are not converted.
-5. **Dither previews above 700 dither-pixels are approximate.** The preview
+5. **RGB documents only.** CMYK, Lab, Indexed and Duotone are not converted.
+6. **Dither previews above 700 dither-pixels are approximate.** The preview
    caps the grid so dragging stays responsive, and the badge says `approx` when
    it does. Apply and Update always render the full grid. Halftone previews are
    always exact.
-6. **Colour management is assumed sRGB.**
-7. **The plugin does not watch the Smart Object.** Edit its contents, then press
+7. **Colour management is assumed sRGB.** The separation also assumes ink
+   behaves as a simple subtractive filter; it has no press profile, so it models
+   overprinting rather than predicting it.
+8. **The plugin does not watch the Smart Object.** Edit its contents, then press
    Update.
-8. **Renaming the halftone group** breaks the sidecar lookup. The layer XMP still
+9. **Renaming the halftone group** breaks the sidecar lookup. The layer XMP still
    works if it took.
 
 ## Roadmap
 
-Ordered by how much each would improve fidelity:
-
-1. **Per-channel screens with independent angles.** Real CMYK halftones give each
-   ink its own angle (15°/75°/0°/45°) to produce a rosette instead of a moiré.
-   The renderer is already generic over grids and the separated output already
-   produces per-ink masks, so this means running the grid once per ink.
-2. **Batch render across layers and video frames**, the main remaining feature
-   gap against comparable commercial plugins.
-3. **Dot gain / spot function shaping**: a configurable transfer curve on the ink
-   amount, plus elliptical dots that merge along one axis first.
-4. **Per-swatch locking** so extraction can refresh some palette colours while
-   preserving others, plus `.ase` / `.act` import and export.
-5. **Edge-aware cell sampling**, weighting the cell average towards the dominant
-   region so dots stop straddling hard edges.
-6. **A C++ or WASM rasteriser.** Only the rasteriser is worth moving — the
-   analysis stage is already negligible. The current JS path holds ~1 s for
-   6000×4000, so this is an optimisation, not a necessity; the staged interface
-   (`_ensureCells`/`_ensureDither` → `rasterize`) is where a native module slots
-   in without touching anything else.
+1. **Press profile for the separation.** The unmixer models ink as an ideal
+   subtractive filter. Loading a measured dot-gain curve and ink densities would
+   turn it from a plausible model into a predictive one.
+2. **Second-order rosette control**: moiré detection across screen pairs, and
+   irrational or stochastic screening as an alternative to fixed angles.
+3. **Video timeline rendering**, if a route to rasterising a video layer per
+   frame becomes available through UXP.
+4. **A C++ or WASM rasteriser.** Only the rasteriser is worth moving — the
+   analysis stage is already negligible. The staged interface
+   (`_ensureCells` / `_ensureDither` / `_ensureScreens` → rasterise) is where a
+   native module slots in without touching anything else. Per-ink mode is the
+   case that would benefit most.
+5. **Per-swatch tonal ranges**, so an ink can be restricted to a tonal band
+   directly rather than through the shared zone splits.

@@ -462,7 +462,18 @@ body {
   user-select: text;
 }
 
-.palette-actions { display: flex; gap: 4px; margin-top: 2px; }
+.palette-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+
+.swatch-lock {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  font-size: 8px;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 0 2px #000, 0 0 2px #000;
+  pointer-events: none;
+}
 
 .hint {
   color: var(--text-faint);

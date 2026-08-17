@@ -38,15 +38,27 @@
           "width": 23,
           "height": 23,
           "path": "icons/icon-23.png",
-          "scale": [1, 2],
-          "theme": ["darkest", "dark", "medium", "lightest", "light", "all"],
-          "species": ["generic"]
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "darkest",
+            "dark",
+            "medium",
+            "lightest",
+            "light",
+            "all"
+          ],
+          "species": [
+            "generic"
+          ]
         }
       ]
     }
   ],
   "requiredPermissions": {
-    "localFileSystem": "plugin",
+    "localFileSystem": "fullAccess",
     "clipboard": "readAndWrite"
   },
   "icons": [
@@ -54,9 +66,21 @@
       "width": 48,
       "height": 48,
       "path": "icons/icon-48.png",
-      "scale": [1, 2],
-      "theme": ["darkest", "dark", "medium", "lightest", "light", "all"],
-      "species": ["pluginList"]
+      "scale": [
+        1,
+        2
+      ],
+      "theme": [
+        "darkest",
+        "dark",
+        "medium",
+        "lightest",
+        "light",
+        "all"
+      ],
+      "species": [
+        "pluginList"
+      ]
     }
   ]
 }

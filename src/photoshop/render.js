@@ -293,6 +293,83 @@ function hexToRgbTriplet(hex) {
 }
 
 /**
+ * Build the halftone structure for one layer.
+ *
+ * Assumes it is already inside a modal scope, which is what lets the batch
+ * runner wrap an arbitrary number of these in a single undo step.
+ *
+ * @param {import("../engine/pipeline.js").HalftoneEngine} engine
+ * @param {object} params
+ * @param {object} targetLayer DOM layer to convert
+ * @param {object} d the document
+ * @param {(t:number)=>void} report
+ * @returns {Promise<object>}
+ */
+async function buildRenderFor(engine, params, targetLayer, d, report) {
+  const renderId = META.newRenderId();
+  const bounds = layerBounds(targetLayer, d);
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+
+  // The panel may have been previewing a different layer (the user can change
+  // the selection between Load and Apply, and a batch walks many layers), so
+  // re-read rather than silently rendering the wrong pixels.
+  if (engine.sourceLayerId !== targetLayer.id) {
+    const image = await IM.readLayerPixels({
+      documentID: d.id,
+      layerID: targetLayer.id,
+      bounds,
+    });
+    engine.setSource(image);
+    engine.sourceLayerId = targetLayer.id;
+  }
+  report(0.05);
+
+  // 1. Seal the original inside a Smart Object. Nothing destructive happens to
+  //    it from here on.
+  await L.selectLayers([targetLayer.id]);
+  const so = await L.convertToSmartObject();
+  await L.renameLayer(so.id, META.SOURCE_LAYER_NAME);
+
+  // 2. Wrap it in a group that carries the render id.
+  const group = await L.groupLayers(META.groupName(renderId), [so]);
+
+  // 3. Everything below the render is the untouched original.
+  await L.setVisible(so.id, false);
+
+  // 4. Write the render.
+  report(0.1);
+  const written = await writeRender(engine, params, null, {
+    doc: d,
+    bounds,
+    width,
+    height,
+    group,
+    anchorLayerId: so.id,
+    report,
+  });
+
+  // 5. Remember how we got here.
+  const record = META.makeRecord(renderId, params, {
+    docName: d.name,
+    bounds,
+    outputMode: written.mode,
+    sourceLayerName: META.SOURCE_LAYER_NAME,
+  });
+  const persistence = await META.saveRecord([group.id].concat(written.layerIds), record);
+
+  return {
+    renderId,
+    persistence,
+    width,
+    height,
+    outputMode: written.mode,
+    note: written.note,
+    groupId: group.id,
+  };
+}
+
+/**
  * Build a brand new halftone render from the selected layer.
  *
  * @param {import("../engine/pipeline.js").HalftoneEngine} engine already holding the source
@@ -307,77 +384,16 @@ async function applyNew(engine, params, hooks = {}) {
   if (!engine.hasSource()) throw new Error("No source pixels loaded yet.");
 
   const d = app().activeDocument;
-  const renderId = META.newRenderId();
-  const bounds = layerBounds(ctx.targetLayer, d);
-  const width = bounds.right - bounds.left;
-  const height = bounds.bottom - bounds.top;
-
-  let persistence = { xmp: false, sidecar: false };
-  let written = { mode: params.output, layerIds: [], note: "" };
+  let result = null;
 
   await modal(async (executionContext) => {
     const report = makeReporter(executionContext, hooks.onProgress);
-
-    // 0. The panel may have been previewing a different layer (the user can
-    //    change the selection between Load and Apply). Re-read rather than
-    //    silently rendering the wrong pixels.
-    if (engine.sourceLayerId !== ctx.targetLayer.id) {
-      const image = await IM.readLayerPixels({
-        documentID: d.id,
-        layerID: ctx.targetLayer.id,
-        bounds,
-      });
-      engine.setSource(image);
-      engine.sourceLayerId = ctx.targetLayer.id;
-    }
-    report(0.05);
-
-    // 1. Seal the original inside a Smart Object. Nothing destructive happens
-    //    to it from here on.
-    await L.selectLayers([ctx.targetLayer.id]);
-    const so = await L.convertToSmartObject();
-    await L.renameLayer(so.id, META.SOURCE_LAYER_NAME);
-
-    // 2. Wrap it in a group that carries the render id.
-    const group = await L.groupLayers(META.groupName(renderId), [so]);
-
-    // 3. Everything below the render is the untouched original.
-    await L.setVisible(so.id, false);
-
-    // 4. Write the render. The cells are already measured from the preview, so
-    //    this is a pure rasterisation pass even on a very large document.
-    report(0.1);
-    written = await writeRender(engine, params, ctx, {
-      doc: d,
-      bounds,
-      width,
-      height,
-      group,
-      anchorLayerId: so.id,
-      report,
-    });
-
-    // 5. Remember how we got here.
-    const record = META.makeRecord(renderId, params, {
-      docName: d.name,
-      bounds,
-      outputMode: written.mode,
-      sourceLayerName: META.SOURCE_LAYER_NAME,
-    });
-    persistence = await META.saveRecord([group.id].concat(written.layerIds), record);
-
-    await L.selectLayers([group.id]);
+    result = await buildRenderFor(engine, params, ctx.targetLayer, d, report);
+    await L.selectLayers([result.groupId]);
     report(1);
   }, "Apply Halftone");
 
-  return {
-    renderId,
-    persistence,
-    width,
-    height,
-    outputMode: written.mode,
-    note: written.note,
-  };
+  return result;
 }
 
 /**
@@ -511,6 +527,7 @@ function makeReporter(executionContext, onProgress) {
 module.exports = {
   currentContext,
   readSource,
+  buildRenderFor,
   applyNew,
   updateExisting,
   recallParams,

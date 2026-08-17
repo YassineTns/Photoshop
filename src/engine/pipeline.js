@@ -29,23 +29,28 @@ const {
   computeGrid,
   scaleGrid,
   sampleCells,
+  refineCellsEdgeAware,
   rasterize,
   rasterizeSeparated,
+  rasterizeScreens,
+  rasterizeScreensSeparated,
 } = require("./halftone.js");
-const { buildToneLUT, applyToneToImage } = require("./grade.js");
+const { screenAngles, buildInkBasis, unmix, inkOrder } = require("./separation.js");
+const { buildToneLUT, applyToneToImage, biasCurve } = require("./grade.js");
 const { ditherToIndices, indicesToRGBA, indicesToMasks } = require("./dither.js");
 const { makeZoneRange } = require("./tonemap.js");
 const {
   extractPalette,
   applySpread,
   adjustPalette,
-  resolveBackground,
   inkPalette,
   hexToPalette,
   paletteToHex,
   padPalette,
   paletteToLab,
+  pickBackgroundIndex,
 } = require("./palette.js");
+const { hexToRgb } = require("./color.js");
 const { resolveResolution } = require("../state/params.js");
 
 /** Samples along a cell edge in the analysis image. 8 -> 64 samples per cell. */
@@ -66,6 +71,7 @@ class HalftoneEngine {
     this._analysis = null;
     this._cells = null;
     this._dither = null;
+    this._screens = null;
     this._basePalette = null;
     this.stats = {};
   }
@@ -76,6 +82,7 @@ class HalftoneEngine {
     this._analysis = null;
     this._cells = null;
     this._dither = null;
+    this._screens = null;
     this._basePalette = null;
   }
 
@@ -147,6 +154,7 @@ class HalftoneEngine {
     this._analysis = { key, img, target };
     this._cells = null;
     this._dither = null;
+    this._screens = null;
     return this._analysis;
   }
 
@@ -156,7 +164,7 @@ class HalftoneEngine {
 
   _ensureCells(params) {
     const analysis = this._ensureAnalysis(params);
-    const key = `${analysis.key}|${this.resolution(params)}|${params.angle}|${params.lumaMode}`;
+    const key = `${analysis.key}|${this.resolution(params)}|${params.angle}|${params.lumaMode}|${params.edgeAware}`;
     if (this._cells && this._cells.key === key) return this._cells.cells;
 
     const t0 = now();
@@ -167,6 +175,7 @@ class HalftoneEngine {
       params.angle
     );
     const cells = sampleCells(analysis.img, grid, params.lumaMode);
+    if (params.edgeAware) refineCellsEdgeAware(analysis.img, grid, cells);
     this.stats.sampleMs = now() - t0;
     this.stats.cells = grid.cols * grid.rows;
     this._cells = { key, cells };
@@ -209,6 +218,128 @@ class HalftoneEngine {
       exact: !maxGrid || this.resolution(params) <= maxGrid,
     };
     return this._dither;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Stage 2c: per-ink screens (halftone, screenMode "perInk")
+   * ------------------------------------------------------------------ */
+
+  /**
+   * One screen per ink, each on its own grid at its own angle, each carrying the
+   * coverage of that ink per cell.
+   *
+   * Sampling is repeated per ink because the grids genuinely differ - that is
+   * the whole point - but it runs on the analysis image, so N passes over a few
+   * hundred thousand pixels is cheap next to what it buys.
+   */
+  _ensureScreens(params) {
+    const analysis = this._ensureAnalysis(params);
+    const rp = this._rasterParams(params);
+    // Separate against the UNADJUSTED inks: hue and saturation are pointwise
+    // recolouring, so applying them here would only invalidate the cache and
+    // change nothing about which ink goes where.
+    const inks = rp.inkIndices.map((i) => rp.matchPalette[i]);
+    const matchBg =
+      params.background && params.background !== "auto"
+        ? rp.background
+        : rp.matchPalette[rp.paperIndex];
+    const order = inkOrder(inks);
+    const angles = screenAngles(inks.length, params.angle, params.screenSpread);
+
+    const key = [
+      analysis.key,
+      this.resolution(params),
+      params.angle,
+      params.screenSpread,
+      params.lumaMode,
+      params.edgeAware,
+      params.contrast,
+      params.gamma,
+      params.blackPoint,
+      params.whitePoint,
+      params.exposure,
+      params.gradeBias,
+      params.invert,
+      rp.matchPalette.join(","),
+      matchBg.join(","),
+    ].join("|");
+    if (this._screens && this._screens.key === key) {
+      // Colours are recoloured on the way out, so a cached screen set is still
+      // valid after a hue or saturation change.
+      return this._recolourScreens(this._screens, rp);
+    }
+
+    const t0 = now();
+    const basis = buildInkBasis(inks, matchBg);
+    const lut = rp.toneLUT;
+    const cov = new Float64Array(inks.length);
+    const graded = [0, 0, 0];
+
+    // One sampling pass per distinct angle; identical angles share their grid.
+    const gridCache = new Map();
+    const cellCache = new Map();
+    const screens = [];
+
+    for (let rank = 0; rank < order.length; rank++) {
+      const k = order[rank];
+      const angle = angles[rank];
+      const akey = angle.toFixed(4);
+      if (!gridCache.has(akey)) {
+        const g = computeGrid(
+          analysis.img.width,
+          analysis.img.height,
+          this.resolution(params),
+          angle
+        );
+        const c = sampleCells(analysis.img, g, params.lumaMode);
+        if (params.edgeAware) refineCellsEdgeAware(analysis.img, g, c);
+        gridCache.set(akey, g);
+        cellCache.set(akey, c);
+      }
+      const grid = gridCache.get(akey);
+      const cells = cellCache.get(akey);
+      const n = grid.cols * grid.rows;
+      const coverage = new Float32Array(n);
+
+      for (let i = 0; i < n; i++) {
+        const cnt = cells.count[i];
+        if (!cnt) continue;
+        // Grade the cell colour per channel, then invert, then separate. Doing
+        // it here rather than per pixel keeps this O(cells).
+        for (let ch = 0; ch < 3; ch++) {
+          const v = sampleLUTByte(lut, cells.rgb[i * 3 + ch] / cnt);
+          graded[ch] = params.invert ? 255 - v : v;
+        }
+        unmix(basis, graded, cov);
+        coverage[i] = biasCurve(Math.min(1, cov[k]), params.gradeBias);
+      }
+
+      screens.push({
+        grid,
+        cov: coverage,
+        count: cells.count,
+        color: inks[k],
+        inkSlot: k,
+        paletteIndex: rp.inkIndices[k],
+        angle,
+      });
+    }
+
+    this.stats.screenMs = now() - t0;
+    this.stats.screens = screens.length;
+    this.stats.cells = screens.reduce((a, s2) => a + s2.grid.cols * s2.grid.rows, 0);
+    this._screens = { key, screens, rp };
+    return this._recolourScreens(this._screens, rp);
+  }
+
+  /** Point a cached screen set at the currently adjusted ink colours. */
+  _recolourScreens(cached, rp) {
+    for (const sc of cached.screens) {
+      const idx = rp.inkIndices[sc.inkSlot];
+      if (idx !== undefined && rp.fullPalette[idx]) sc.color = rp.fullPalette[idx];
+    }
+    cached.rp = rp;
+    return cached;
   }
 
   /* ------------------------------------------------------------------ *
@@ -260,32 +391,66 @@ class HalftoneEngine {
     });
   }
 
+  /**
+   * Decide, once, which palette entry is the paper and which are inks - and do
+   * it on the *unadjusted* palette, by index.
+   *
+   * Deciding on the adjusted palette instead would mean Hue could silently
+   * re-pick a different paper (luminance ordering can flip under rotation), and
+   * it would make every hue change invalidate the cached screens. Indices are
+   * stable; only the colours they map to move.
+   *
+   * @returns {{match: number[][], out: number[][], paperIndex: number,
+   *            inkIndices: number[], background: number[]}}
+   */
+  _paletteStructure(params) {
+    const match = this._matchPalette(params).map((c) => c.slice());
+    const out = adjustPalette(match, {
+      hue: params.hue,
+      saturation: params.saturation,
+      brightness: params.brightness,
+    });
+
+    let paperIndex;
+    let background;
+    const explicit = params.background && params.background !== "auto" ? hexToRgb(params.background) : null;
+
+    if (explicit) {
+      background = explicit;
+      // An explicit paper that matches a palette entry consumes it, so the
+      // engine does not also try to print with it.
+      const near = inkPalette(match, explicit);
+      if (near.length < match.length) {
+        paperIndex = match.findIndex((c) => !near.some((k) => k[0] === c[0] && k[1] === c[1] && k[2] === c[2]));
+      } else {
+        match.push(explicit.slice());
+        out.push(explicit.slice());
+        paperIndex = match.length - 1;
+      }
+    } else {
+      paperIndex = pickBackgroundIndex(match, params.invert);
+      background = out[paperIndex];
+    }
+    if (paperIndex < 0 || paperIndex >= match.length) paperIndex = 0;
+
+    const inkIndices = [];
+    for (let i = 0; i < match.length; i++) if (i !== paperIndex) inkIndices.push(i);
+    if (!inkIndices.length) inkIndices.push(paperIndex);
+
+    return { match, out, paperIndex, inkIndices, background };
+  }
+
   /* ------------------------------------------------------------------ *
    * Stage 4: rasterisation
    * ------------------------------------------------------------------ */
 
   _rasterParams(params) {
-    const palette = this._outputPalette(params);
-    const background = resolveBackground(palette, params.background, params.invert);
-    const ink = inkPalette(palette, background);
-
-    let paperIndex = indexOfColour(palette, background);
-    if (paperIndex < 0) {
-      // An explicit background that is not part of the palette becomes its own
-      // layer in the separated output.
-      palette.push(background);
-      paperIndex = palette.length - 1;
-    }
-    // Map an ink-palette index back to the full palette, so the separated
-    // output knows which fill layer each dot belongs to.
-    const inkToPaletteIndex = ink.map((c) => {
-      const i = indexOfColour(palette, c);
-      return i < 0 ? paperIndex : i;
-    });
-
+    const st = this._paletteStructure(params);
+    const ink = st.inkIndices.map((i) => st.out[i]);
     return {
       radius: params.radius,
       shape: params.shape,
+      dotGain: params.dotGain,
       gradeBias: params.gradeBias,
       radiusCurve: params.radiusCurve,
       invert: params.invert,
@@ -293,10 +458,12 @@ class HalftoneEngine {
       // Dots may use every palette colour except the paper - see inkPalette().
       palette: ink,
       inkPalette: ink,
-      inkToPaletteIndex,
-      fullPalette: palette,
-      paperIndex,
-      background,
+      inkToPaletteIndex: st.inkIndices.slice(),
+      fullPalette: st.out,
+      matchPalette: st.match,
+      inkIndices: st.inkIndices,
+      paperIndex: st.paperIndex,
+      background: st.background,
       colorAdjust: {
         hue: params.hue,
         saturation: params.saturation,
@@ -336,6 +503,29 @@ class HalftoneEngine {
       };
     }
 
+    if (params.screenMode === "perInk") {
+      const { screens, rp: srp } = this._ensureScreens(params);
+      const t0 = now();
+      const data = rasterizeScreens(
+        this._scaleScreens(screens, width, height),
+        srp,
+        width,
+        height,
+        opts.out
+      );
+      this.stats.rasterMs = now() - t0;
+      return {
+        data,
+        width,
+        height,
+        palette: paletteToHex(srp.fullPalette),
+        ink: paletteToHex(srp.palette),
+        background: srp.background,
+        angles: screens.map((sc) => sc.angle),
+        exact: true,
+      };
+    }
+
     const cells = this._ensureCells(params);
     const rp = this._rasterParams(params);
     const grid = scaleGrid(cells.grid, width, height);
@@ -356,6 +546,18 @@ class HalftoneEngine {
     };
   }
 
+  /** Re-express every screen's grid at the output resolution. */
+  _scaleScreens(screens, width, height) {
+    return screens.map((sc) => ({
+      grid: scaleGrid(sc.grid, width, height),
+      cov: sc.cov,
+      count: sc.count,
+      color: sc.color,
+      paletteIndex: sc.paletteIndex,
+      angle: sc.angle,
+    }));
+  }
+
   /**
    * Render to one 8-bit coverage mask per palette colour, for the separated
    * fill-layer output. Masks are mutually exclusive and sum to 255, so the
@@ -373,7 +575,41 @@ class HalftoneEngine {
       const d = this._ensureDither(params, opts.maxDitherGrid);
       const palette = this._outputPalette(params);
       const masks = indicesToMasks(d.indices, d.width, d.height, palette.length, width, height);
-      return { masks, palette: paletteToHex(palette), paperIndex: 0, width, height };
+      return {
+        masks,
+        palette: paletteToHex(palette),
+        paperIndex: 0,
+        blend: "normal",
+        exclusive: true,
+        width,
+        height,
+      };
+    }
+
+    if (params.screenMode === "perInk") {
+      const { screens, rp: srp } = this._ensureScreens(params);
+      const scaled = this._scaleScreens(screens, width, height);
+      const inkMasks = rasterizeScreensSeparated(scaled, srp, width, height);
+      // Transparent inks overlap by design, so the masks are NOT exclusive and
+      // the fill layers must be set to Multiply over an opaque paper.
+      const paper = new Uint8ClampedArray(width * height).fill(255);
+      const masks = [];
+      const palette = [];
+      masks.push(paper);
+      palette.push(paletteToHex([srp.background])[0]);
+      for (let i = 0; i < scaled.length; i++) {
+        masks.push(inkMasks[i]);
+        palette.push(paletteToHex([scaled[i].color])[0]);
+      }
+      return {
+        masks,
+        palette,
+        paperIndex: 0,
+        blend: "multiply",
+        exclusive: false,
+        width,
+        height,
+      };
     }
 
     const cells = this._ensureCells(params);
@@ -385,6 +621,8 @@ class HalftoneEngine {
       masks,
       palette: paletteToHex(rp.fullPalette),
       paperIndex: rp.paperIndex,
+      blend: "normal",
+      exclusive: true,
       width,
       height,
     };
@@ -420,6 +658,35 @@ class HalftoneEngine {
         ink: paletteToHex(palette),
         background: palette[0] || [0, 0, 0],
         exact: d.exact,
+      };
+    }
+
+    if (params.screenMode === "perInk") {
+      const { screens, rp: srp } = this._ensureScreens(params);
+      if (shouldCancel()) return null;
+      onProgress(0.2);
+      const scaled = this._scaleScreens(screens, width, height);
+      const data = opts.out || new Uint8ClampedArray(width * height * 4);
+      for (let i = 0; i < scaled.length; i++) {
+        rasterizeScreens(scaled, srp, width, height, data, {
+          screenStart: i,
+          screenEnd: i + 1,
+          skipBackground: i !== 0,
+        });
+        onProgress(0.2 + 0.8 * ((i + 1) / scaled.length));
+        if (shouldCancel()) return null;
+        // eslint-disable-next-line no-await-in-loop
+        await yieldToHost();
+      }
+      return {
+        data,
+        width,
+        height,
+        palette: paletteToHex(srp.fullPalette),
+        ink: paletteToHex(srp.palette),
+        background: srp.background,
+        angles: scaled.map((sc) => sc.angle),
+        exact: true,
       };
     }
 
@@ -460,6 +727,16 @@ class HalftoneEngine {
 }
 
 /* ------------------------------------------------------------------ */
+
+/** Sample a 0..1 tone LUT with a 0..255 input, returning 0..255. */
+function sampleLUTByte(lut, v) {
+  const x = v < 0 ? 0 : v > 255 ? 255 : v;
+  const i = x | 0;
+  const f = x - i;
+  const a = lut[i];
+  const b = i >= 255 ? lut[255] : lut[i + 1];
+  return (a + (b - a) * f) * 255;
+}
 
 function indexOfColour(palette, c) {
   for (let i = 0; i < palette.length; i++) {

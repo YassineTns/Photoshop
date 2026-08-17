@@ -313,27 +313,31 @@ function createPalette(opts) {
   const strip = el("div", "palette");
   const actions = el("div", "palette-actions");
 
-  const extractBtn = el("button", "btn btn-small", "Extract from Image");
-  extractBtn.addEventListener("click", () => opts.onExtract());
-  actions.appendChild(extractBtn);
+  const mkBtn = (label, title, fn) => {
+    const b = el("button", "btn btn-small", label);
+    b.title = title;
+    b.addEventListener("click", fn);
+    return b;
+  };
 
-  const fgBtn = el("button", "btn btn-small", "＋ FG");
-  fgBtn.title = "Append Photoshop's foreground colour";
-  fgBtn.addEventListener("click", () => {
-    const rgb = opts.getForeground();
-    if (!rgb) return;
-    const hex = toHex(rgb);
-    set(current.concat([hex]));
-    opts.onChange(current.slice());
-  });
-  actions.appendChild(fgBtn);
+  actions.appendChild(mkBtn("Extract", "Re-read the palette from the layer", () => opts.onExtract()));
+  actions.appendChild(
+    mkBtn("＋FG", "Append Photoshop's foreground colour", () => {
+      const rgb = opts.getForeground();
+      if (!rgb) return;
+      set(current.concat([toHex(rgb)]), locked);
+      opts.onChange(current.slice(), locked.slice());
+    })
+  );
+  actions.appendChild(mkBtn("Import", "Load an .ase or .act swatch file", () => opts.onImport && opts.onImport()));
+  actions.appendChild(mkBtn("Export", "Save the palette as .ase", () => opts.onExport && opts.onExport()));
 
   let current = (opts.value || []).slice();
+  let locked = (opts.locked || []).slice();
 
   function toHex(rgb) {
     return (
-      "#" +
-      ((rgb[0] << 16) | (rgb[1] << 8) | rgb[2]).toString(16).padStart(6, "0").toUpperCase()
+      "#" + ((rgb[0] << 16) | (rgb[1] << 8) | rgb[2]).toString(16).padStart(6, "0").toUpperCase()
     );
   }
 
@@ -355,12 +359,12 @@ function createPalette(opts) {
         const norm = normalizeHex(raw);
         if (norm) {
           current[index] = norm;
-          set(current);
-          opts.onChange(current.slice());
+          set(current, locked);
+          opts.onChange(current.slice(), locked.slice());
           return;
         }
       }
-      set(current);
+      set(current, locked);
     };
     input.addEventListener("blur", () => finish(true));
     input.addEventListener("keydown", (e) => {
@@ -369,35 +373,56 @@ function createPalette(opts) {
     });
   }
 
-  function set(hexes) {
+  function toggleLock(i) {
+    const at = locked.indexOf(i);
+    if (at >= 0) locked.splice(at, 1);
+    else locked.push(i);
+    set(current, locked);
+    opts.onChange(current.slice(), locked.slice());
+  }
+
+  function set(hexes, lockedIdx) {
     current = (hexes || []).slice();
+    if (lockedIdx) locked = lockedIdx.slice();
+    locked = locked.filter((i) => i < current.length);
     strip.textContent = "";
     current.forEach((hex, i) => {
       const swatchWrap = el("div", "swatch-wrap");
       const swatch = el("button", "swatch");
       swatch.style.background = hex;
-      swatch.title = `${hex} — click to edit, alt-click to use the foreground colour`;
+      swatch.title =
+        `${hex} — click to edit, alt-click for the foreground colour, ` +
+        `shift-click to ${locked.indexOf(i) >= 0 ? "unlock" : "lock"} against re-extraction`;
       swatch.addEventListener("click", (e) => {
+        if (e.shiftKey) {
+          toggleLock(i);
+          return;
+        }
         if (e.altKey) {
           const rgb = opts.getForeground();
           if (rgb) {
             current[i] = toHex(rgb);
-            set(current);
-            opts.onChange(current.slice());
+            set(current, locked);
+            opts.onChange(current.slice(), locked.slice());
           }
           return;
         }
         beginEdit(i, swatchWrap, swatch);
       });
       swatchWrap.appendChild(swatch);
+      if (locked.indexOf(i) >= 0) {
+        const badge = el("div", "swatch-lock", "\u25CF");
+        badge.title = "Locked: survives re-extraction";
+        swatchWrap.appendChild(badge);
+      }
       strip.appendChild(swatchWrap);
     });
   }
 
   wrap.appendChild(strip);
   wrap.appendChild(actions);
-  set(current);
-  return { el: wrap, set };
+  set(current, locked);
+  return { el: wrap, set, setLocked: (l) => set(current, l) };
 }
 
 function normalizeHex(c) {
