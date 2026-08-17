@@ -1015,6 +1015,69 @@ async function main() {
   }
 
   /* ================================================================ */
+  group("Output mode beside Apply");
+  {
+    /*
+     * The separated output had shipped for weeks when a user asked whether Apply
+     * could produce one layer per colour. It could - the control was three
+     * collapsed sections below the button it governs. So it is mirrored into the
+     * action card, and this asserts the two stay one value.
+     */
+    resetModules();
+    const { ps, document } = install({ width: 400, height: 300, image: F.photo(400, 300) });
+    const { Panel } = require("../src/ui/panel.js");
+
+    const panel = new Panel(document);
+    await panel.init();
+
+    ok(!!panel.outputMirror, "the action card carries an output control");
+    const host = document.getElementById("output-mode");
+    const segs = host.findAll((e) => e.className && e.className.indexOf("seg-item") === 0);
+    ok(segs.length === 2, `with both choices (${segs.map((x) => x.textContent).join(", ")})`);
+    ok(
+      segs.some((x) => /colour/i.test(x.textContent)),
+      `named for what it makes rather than for the mode (${segs.map((x) => x.textContent).join(" / ")})`
+    );
+
+    // The mirror drives the parameter.
+    segs.find((x) => /colour/i.test(x.textContent)).emit("click", {});
+    ok(panel.params.output === "separated", `clicking it sets the parameter (${panel.params.output})`);
+
+    // And the control in the Output section follows.
+    ok(
+      panel.controls.output && panel.controls.output.set,
+      "the Output section still has its own control"
+    );
+    panel.setParam("output", "flat", true);
+    ok(panel.params.output === "flat", "setting it from elsewhere works too");
+
+    // Now prove the thing the user actually asked for: Apply builds one layer
+    // per palette colour.
+    panel.setParam("output", "separated", true);
+    panel.setParam("colorCount", 5, true);
+    panel.params.paletteLocked = false;
+    document.getElementById("btn-load").emit("click");
+    ok(await waitFor(() => panel.engine.hasSource()), "a layer is loaded");
+    document.getElementById("btn-apply").emit("click");
+    ok(await waitFor(() => !panel._busy && ps.doc.layers.some((l) => l.kind === "group")), "Apply ran");
+
+    const group = ps.doc.layers.find((l) => l.kind === "group");
+    const fills = group.layers.filter((l) => l.kind === "solidColor");
+    ok(fills.length === 5, `Apply built one fill layer per palette colour (${fills.length} for 5 colours)`);
+    ok(fills.every((l) => l.maskWritten), "each carrying its own coverage mask");
+    ok(
+      fills.filter((l) => /^Paper /.test(l.name)).length === 1,
+      "one of them is the paper"
+    );
+    ok(
+      fills.filter((l) => /^Ink /.test(l.name)).length === 4,
+      `and the rest are inks (${fills.map((l) => l.name).join(", ")})`
+    );
+
+    uninstall();
+  }
+
+  /* ================================================================ */
   group("Survives broken markup");
   {
     /*

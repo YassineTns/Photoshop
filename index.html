@@ -74,6 +74,12 @@
         <div id="progress" class="progress"><div id="progress-bar" class="progress-bar"></div></div>
 
         <div class="actions">
+          <!--
+            The output mode lives here, not only in the Output section, because
+            this is where the decision is made: it says what pressing Apply will
+            build, right next to the button that builds it.
+          -->
+          <div id="output-mode" class="output-mode"></div>
           <div class="toolbar">
             <button id="btn-load" class="btn">Load Layer</button>
             <button id="btn-apply" class="btn btn-primary">Apply</button>

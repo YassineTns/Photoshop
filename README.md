@@ -87,7 +87,8 @@ Halftone ▸ HT-4f2a9c        ← group, carries the parameters
    └── Halftone Source       ← your original, as a hidden Smart Object
 ```
 
-or, with **Output: separated**:
+or, with **On Apply: One Per Colour** (the control sits directly above the Apply
+button, and is the same setting as *Output* further down):
 
 ```
 Halftone ▸ HT-4f2a9c
@@ -459,7 +460,7 @@ Units are chosen so that nothing depends on document resolution.
 | | Grade Bias | −1…1 | Bends tone → dot size; endpoints stay pinned |
 | | Luma | luma709, luma601, perceptual | How tone is measured |
 | Adjust | Hue / Saturation / Brightness / Invert | | |
-| Output | Output | flat / separated | One pixel layer, or one fill layer per colour |
+| Output | On Apply | One Layer / One Per Colour | One pixel layer, or one editable fill layer per palette colour, each with its own coverage mask |
 | | Respect selection | on/off | Confine the render to the active selection |
 | Batch | Scope | selection / group / document | Which layers Batch Apply covers |
 | | Shared palette | on/off | Extract one palette and pin it across the batch |
@@ -491,7 +492,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (415 assertions) + mocked host (235 assertions)
+npm test              # engine (415 assertions) + mocked host (247 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)

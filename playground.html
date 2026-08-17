@@ -604,6 +604,32 @@ body {
   background-color: var(--bg-raised);
 }
 
+/*
+ * The output mode, at the point of decision. It was only in the Output section -
+ * correct, and invisible: a user asked for a feature that had been shipped for
+ * weeks because it was three collapsed sections down from the button it governs.
+ */
+.output-mode {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 24px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.output-mode .ctl { flex-grow: 1; flex-shrink: 1; min-width: 0; min-height: 22px; }
+
+.output-mode .ctl-label {
+  width: 62px;
+  min-width: 62px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
 .toolbar {
   display: flex;
   flex-direction: row;
@@ -6202,7 +6228,11 @@ const PARAM_DEFS = [
     type: "choice",
     def: "flat",
     options: ["flat", "separated"],
-    hint: "Separated writes one solid-colour fill layer per palette colour, each with its own mask.",
+    optionLabels: { flat: "One Layer", separated: "One Per Colour" },
+    hint:
+      "One Layer writes the composite as a single pixel layer. One Per Colour " +
+      "writes a solid-colour fill layer per palette colour, each carrying that " +
+      "colour's coverage as its own mask - editable, and what a printer wants.",
   },
 ];
 

@@ -162,6 +162,7 @@ class Panel {
       /* first run */
     }
 
+    this.buildOutputMode();
     this.showCancel(false);
     this.bindPreviewGrip();
     this.bindZoom();
@@ -325,6 +326,27 @@ class Panel {
     return parts.join(" · ");
   }
 
+  /**
+   * The output mode, mirrored into the action card.
+   *
+   * It is the same parameter as the one in the Output section - two controls,
+   * one value - because where a setting *lives* and where it is *decided* are
+   * not always the same place. This one governs what Apply builds, so it
+   * belongs beside Apply; leaving it only in a collapsed section three down
+   * from the button meant a user asked for a feature that had shipped weeks
+   * earlier.
+   */
+  buildOutputMode() {
+    const host = this.$("output-mode");
+    if (!host) return;
+    host.textContent = "";
+    const def = Object.assign({}, DEF_BY_KEY.output, { label: "On Apply" });
+    this.outputMirror = C.createChoice(def, this.params.output, (v) => {
+      this.setParam("output", v, true);
+    });
+    host.appendChild(this.outputMirror.el);
+  }
+
   /** Does changing `key` alter which controls should be on screen? */
   affectsLayout(key) {
     return (
@@ -425,6 +447,10 @@ class Panel {
     }
     this.params[key] = value;
     this.activePresetId = null;
+
+    // One value, two controls: keep the mirror in the action card in step
+    // whichever of the two was used.
+    if (key === "output" && this.outputMirror) this.outputMirror.set(value);
 
     // Changing the colour count only means something if the palette follows it.
     if (key === "colorCount" && this.params.paletteLocked) this.syncPaletteToCount();
@@ -533,6 +559,7 @@ class Panel {
       const c = this.controls[def.key];
       if (c && c.set) c.set(this.params[def.key]);
     }
+    if (this.outputMirror) this.outputMirror.set(this.params.output);
   }
 
   /** Push a fresh histogram into the curve editor, if one is on screen. */

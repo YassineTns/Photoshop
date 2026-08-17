@@ -654,7 +654,11 @@ const PARAM_DEFS = [
     type: "choice",
     def: "flat",
     options: ["flat", "separated"],
-    hint: "Separated writes one solid-colour fill layer per palette colour, each with its own mask.",
+    optionLabels: { flat: "One Layer", separated: "One Per Colour" },
+    hint:
+      "One Layer writes the composite as a single pixel layer. One Per Colour " +
+      "writes a solid-colour fill layer per palette colour, each carrying that " +
+      "colour's coverage as its own mask - editable, and what a printer wants.",
   },
 ];
 
