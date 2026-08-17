@@ -44,9 +44,13 @@ function adler32(buf) {
  * @param {Uint8Array|Uint8ClampedArray} rgba length = width*height*4
  * @param {number} width
  * @param {number} height
+ * @param {(raw: Uint8Array) => Uint8Array} [deflate] optional real compressor.
+ *        The panel does not pass one (a few hundred KB of preview costs less
+ *        than pulling in a deflate implementation); Node tooling passes
+ *        zlib.deflateSync to keep committed artefacts small.
  * @returns {Uint8Array} PNG bytes
  */
-function encodePNG(rgba, width, height) {
+function encodePNG(rgba, width, height, deflate) {
   // Raw scanlines with filter byte 0.
   const stride = width * 4;
   const raw = new Uint8Array((stride + 1) * height);
@@ -56,7 +60,7 @@ function encodePNG(rgba, width, height) {
     raw.set(rgba.subarray(y * stride, y * stride + stride), o + 1);
   }
 
-  const z = storedDeflate(raw);
+  const z = deflate ? deflate(raw) : storedDeflate(raw);
 
   const chunks = [];
   chunks.push(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));

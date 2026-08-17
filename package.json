@@ -5,10 +5,12 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test": "node test/run.js",
+    "test": "node test/run.js && node test/plugin.test.js",
+    "test:engine": "node test/run.js",
+    "test:plugin": "node test/plugin.test.js",
     "test:visual": "node test/run.js --visual",
-    "icons": "node tools/make-icons.js",
-    "bench": "node test/bench.js"
+    "test:heavy": "node --max-old-space-size=4096 test/run.js --heavy --visual",
+    "icons": "node tools/make-icons.js"
   },
   "engines": {
     "node": ">=18"

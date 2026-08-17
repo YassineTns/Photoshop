@@ -1,0 +1,54 @@
+<!--
+  Halftone Studio panel.
+
+  The markup is intentionally minimal: every control is built at runtime from
+  src/state/params.js so the panel and the engine can never disagree about what
+  parameters exist.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="src/ui/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="status" class="status">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-text">Starting…</span>
+      </div>
+
+      <div id="preview-wrap" class="preview-wrap">
+        <div id="preview-empty" class="preview-empty">
+          Select a layer, then press <b>Load Layer</b>
+        </div>
+        <img id="preview" class="preview" />
+        <div id="preview-badge" class="preview-badge"></div>
+      </div>
+
+      <div class="toolbar">
+        <button id="btn-load" class="btn">Load Layer</button>
+        <button id="btn-apply" class="btn btn-primary">Apply</button>
+        <button id="btn-update" class="btn">Update</button>
+      </div>
+
+      <div id="progress" class="progress"><div id="progress-bar" class="progress-bar"></div></div>
+
+      <div id="sections" class="sections"></div>
+
+      <div class="preset-bar">
+        <div class="preset-row">
+          <div id="preset-list" class="preset-list"></div>
+        </div>
+        <div class="toolbar">
+          <button id="btn-save-preset" class="btn btn-small">Save Preset</button>
+          <button id="btn-load-preset" class="btn btn-small">Load Preset</button>
+          <button id="btn-reset" class="btn btn-small">Reset All</button>
+        </div>
+      </div>
+
+      <div id="notice" class="notice"></div>
+    </div>
+
+    <script src="src/main.js"></script>
+  </body>
+</html>
