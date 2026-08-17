@@ -15,6 +15,21 @@
  */
 
 const { normaliseCurve, evalCurve, isIdentityCurve } = require("../engine/grade.js");
+const GEO = require("./geometry.js");
+
+/**
+ * The track width to assume when the host will not report one.
+ *
+ * Photoshop 2026 answers `getBoundingClientRect()` for these elements with
+ * values like `-30150`, and the old code only checked that the width was
+ * truthy - so a click computed `(clientX - -30150) / -30150`, which clamps to
+ * zero and slammed every slider to its minimum. Rather than disable dragging
+ * where the rectangle is unusable, the widgets fall back to *relative*
+ * dragging: the value follows how far the pointer has moved, which needs no
+ * rectangle at all. The travel per pixel is then a guess, but the control
+ * still does what a slider is for.
+ */
+const ASSUMED_TRACK_W = 200;
 
 /** @param {string} tag @param {string} [cls] @param {string} [text] */
 function el(tag, cls, text) {
@@ -95,14 +110,29 @@ function createSlider(def, value, onChange) {
     if (!silent && (changed || committed)) onChange(current, !!committed);
   }
 
+  /** Units of value per pixel of travel, from the track if it can be measured. */
+  function perPixel() {
+    const rect = GEO.rectOf(track);
+    return (def.max - def.min) / (rect ? rect.width : ASSUMED_TRACK_W);
+  }
+
+  /**
+   * The value the pointer is over, or null if the track cannot be located.
+   *
+   * Null is the signal to scrub relatively instead of jumping absolutely; it
+   * is never a value, so a refused rectangle can no longer move the control.
+   */
   function valueFromEvent(e) {
-    const rect = track.getBoundingClientRect();
-    if (!rect.width) return current;
+    const rect = GEO.rectOf(track);
+    if (!rect) return null;
     const t = clamp((e.clientX - rect.left) / rect.width, 0, 1);
     return def.min + t * (def.max - def.min);
   }
 
   let fineAnchor = null;
+  // Set whenever a drag has to work without a measurable track.
+  let relAnchor = null;
+
   slider.addEventListener("pointerdown", (e) => {
     dragging = true;
     slider.className = "slider dragging";
@@ -112,7 +142,12 @@ function createSlider(def, value, onChange) {
       /* capture is an optimisation, not a requirement */
     }
     fineAnchor = e.shiftKey ? { x: e.clientX, v: current } : null;
-    if (!fineAnchor) set(valueFromEvent(e), false);
+    relAnchor = null;
+    if (!fineAnchor) {
+      const v = valueFromEvent(e);
+      if (v === null) relAnchor = { x: e.clientX, v: current };
+      else set(v, false);
+    }
     e.preventDefault();
   });
 
@@ -121,13 +156,18 @@ function createSlider(def, value, onChange) {
     if (e.shiftKey) {
       // Shift engages fine scrubbing relative to where Shift was pressed.
       if (!fineAnchor) fineAnchor = { x: e.clientX, v: current };
-      const rect = track.getBoundingClientRect();
-      const perPx = rect.width ? (def.max - def.min) / rect.width : 0;
-      set(fineAnchor.v + (e.clientX - fineAnchor.x) * perPx * 0.2, false);
-    } else {
-      fineAnchor = null;
-      set(valueFromEvent(e), false);
+      set(fineAnchor.v + (e.clientX - fineAnchor.x) * perPixel() * 0.2, false);
+      return;
     }
+    fineAnchor = null;
+    const v = valueFromEvent(e);
+    if (v !== null) {
+      relAnchor = null;
+      set(v, false);
+      return;
+    }
+    if (!relAnchor) relAnchor = { x: e.clientX, v: current };
+    set(relAnchor.v + (e.clientX - relAnchor.x) * perPixel(), false);
   });
 
   const endDrag = (e) => {
@@ -655,7 +695,13 @@ function createCurve(def, value, onChange, opts = {}) {
 
     const changed = !isIdentityCurve(points);
     wrap.className = "curve" + (changed ? " modified" : "");
-    readout.textContent = changed ? `${points.length} points` : "linear";
+    // A curve that cannot be clicked looks identical to one nobody has clicked
+    // yet, so it has to say which it is.
+    readout.textContent = unplaceable
+      ? "drag unavailable in this build"
+      : changed
+        ? `${points.length} points`
+        : "linear";
   }
 
   function setHistogram(bins) {
@@ -676,10 +722,18 @@ function createCurve(def, value, onChange, opts = {}) {
     });
   }
 
-  /** Pointer position as a 0..1 point in the box. */
+  /**
+   * Pointer position as a 0..1 point in the box, or null.
+   *
+   * Unlike a slider there is no sensible relative fallback here: a curve is
+   * edited by putting a point somewhere specific, and moving one by an
+   * unmeasurable amount is not the same gesture. So when the host will not
+   * locate the box, dragging does nothing rather than something arbitrary -
+   * and the panel says why, once, in `curveWarning`.
+   */
   function at(e) {
-    const r = box.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
+    const r = GEO.rectOf(box);
+    if (!r) return null;
     return [
       clampUnit((e.clientX - r.left) / r.width),
       clampUnit(1 - (e.clientY - r.top) / r.height),
@@ -687,6 +741,7 @@ function createCurve(def, value, onChange, opts = {}) {
   }
 
   let dragIndex = -1;
+  let unplaceable = false;
 
   function beginDrag(e, index) {
     if (e.altKey) {
@@ -711,7 +766,13 @@ function createCurve(def, value, onChange, opts = {}) {
   box.addEventListener("pointerdown", (e) => {
     if (dragIndex >= 0) return; // a point handled it first
     const p = at(e);
-    if (!p) return;
+    if (!p) {
+      if (!unplaceable) {
+        unplaceable = true;
+        paint();
+      }
+      return;
+    }
     // Near an existing point, grab it rather than stacking a new one on top.
     let near = -1;
     let best = CURVE_GRAB;

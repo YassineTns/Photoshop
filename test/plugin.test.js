@@ -7,7 +7,7 @@
  *   node test/plugin.test.js
  */
 
-const { install, uninstall, resetModules } = require("./mocks.js");
+const { install, uninstall, resetModules, breakGeometry, repairGeometry } = require("./mocks.js");
 const F = require("./fixtures.js");
 
 let passed = 0;
@@ -1282,6 +1282,96 @@ async function main() {
     uninstall();
   }
 
+  /* ================================================================ *
+   * A host that will not say how big anything is.
+   *
+   * Photoshop 2026 returns clientWidth/clientHeight of 0 for this panel's
+   * elements and a getBoundingClientRect() with a width of -30150. The panel
+   * shipped with every geometry read unguarded, so the zoom computed against
+   * invented constants, the compare overlay wrote `width: -30150px` into the
+   * document, and clicking a slider divided by a negative width and slammed it
+   * to its minimum. None of it was caught, because the mock always answered.
+   *
+   * What is asserted here is not that the panel measures correctly - it cannot,
+   * the host will not tell it - but that everything still *works*: the zoom
+   * ratio is exact even when the absolute scale is a guess, no style is written
+   * from a refused rectangle, and the panel says which it is.
+   * ================================================================ */
+  group("A host that reports no geometry");
+  {
+    resetModules();
+    const { document } = install({ width: 1600, height: 1200, image: F.photo(1600, 1200) });
+    breakGeometry(document);
+    const { Panel } = require("../src/ui/panel.js");
+
+    const panel = new Panel(document);
+    await panel.init();
+    document.getElementById("btn-load").emit("click");
+    ok(await waitFor(() => panel.engine.hasSource()), "a layer still loads");
+
+    const box = panel.previewBox();
+    ok(box.width >= 120 && box.height >= 110, `the preview box is usable (${box.width}x${box.height})`);
+    ok(box.exact === false, "and knows it is an assumption");
+    ok(
+      panel.selfCheck().some((p) => /reports no size/.test(p)),
+      "the self-check says so in words"
+    );
+    ok(/~/.test(document.getElementById("zoom-level").textContent), "the zoom label is marked approximate");
+
+    // The whole point: relative zoom is still exact.
+    const fit = panel.fitZoom(box);
+    panel.setZoom(null);
+    const atFit = panel.renderPlan(panel.previewBox());
+    ok(atFit.view === null, "fit shows the whole document");
+    ok(Math.abs(atFit.width / 1600 - fit) < 0.01, "at the fitted scale");
+
+    panel.zoomBy(1.6);
+    const zoomed = panel.renderPlan(panel.previewBox());
+    ok(
+      Math.abs(zoomed.width / atFit.width - 1.6) < 0.02,
+      `one step is exactly 1.6x (${(zoomed.width / atFit.width).toFixed(3)})`
+    );
+    ok(zoomed.view !== null, "and there is now a window to pan");
+    ok(
+      zoomed.view.width <= zoomed.width && zoomed.view.height <= zoomed.height,
+      "the window is inside the virtual render"
+    );
+
+    // Six more steps, checking nothing goes non-finite along the way.
+    let bad = 0;
+    for (let i = 0; i < 6; i++) {
+      panel.zoomBy(1.6);
+      const p = panel.renderPlan(panel.previewBox());
+      if (!Number.isFinite(p.width) || !Number.isFinite(p.height) || p.width < 1) bad++;
+      if (p.view && (!Number.isFinite(p.view.x) || !Number.isFinite(p.view.y))) bad++;
+    }
+    ok(bad === 0, "zooming to the ceiling stays finite");
+
+    // The compare overlay is what wrote a negative width into the document.
+    panel.toggleCompare();
+    const shot = document.getElementById("split-img");
+    const wrote = ["left", "top", "width", "height"].filter((k) => shot.style[k]);
+    ok(wrote.length === 0, `no geometry is written from a refused rectangle (${wrote.join(",") || "none"}`);
+    const negative = Object.keys(shot.style).filter((k) => /^-/.test(String(shot.style[k])));
+    ok(negative.length === 0, "and nothing negative is written at all");
+
+    // A slider cannot map a click to a position without a rectangle, but it can
+    // still follow the pointer.
+    const ctl = panel.controls.radius;
+    const sliderEl = ctl.el.find((e) => e.className === "slider");
+    const before = panel.params.radius;
+    sliderEl.emit("pointerdown", { clientX: 300, pointerId: 9 });
+    ok(panel.params.radius === before, "clicking a slider no longer jumps it to the minimum");
+    sliderEl.emit("pointermove", { clientX: 340, pointerId: 9 });
+    ok(panel.params.radius > before, `dragging right still raises it (${before} to ${panel.params.radius})`);
+    sliderEl.emit("pointermove", { clientX: 260, pointerId: 9 });
+    ok(panel.params.radius < before, "dragging back past the start lowers it");
+    sliderEl.emit("pointerup", { pointerId: 9 });
+
+    repairGeometry(document);
+    uninstall();
+  }
+
   /* ================================================================ */
   group("Preview resizing");
   {
@@ -1355,6 +1445,9 @@ async function main() {
     const slider = C.createSlider(def, 40, (v, committed) => seen.push([v, committed]));
 
     const track = slider.el.find((e) => e.className === "slider");
+    // Pin the measured track to 200px so the coordinates below say what they
+    // mean: 100 is the middle, 500 is past the end, -50 is before the start.
+    slider.el.find((e) => e.className === "slider-track").clientWidth = 200;
     track.emit("pointerdown", { clientX: 100, pointerId: 1 });
     ok(seen.length === 1 && !seen[0][1], "dragging emits uncommitted changes");
     ok(seen[0][0] === 100, `mid-track maps to the middle of the range (${seen[0][0]} of ${def.min}..${def.max})`);

@@ -7847,6 +7847,162 @@ module.exports = { BUILTIN_PRESETS, presetToParams, findPreset, makeUserPreset }
 
 });
 
+window.__define("src/ui/geometry.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Measuring elements, in a host that cannot always be asked.
+ *
+ * This module exists because of a Photoshop 2026 log. Two lines from it:
+ *
+ *   [Halftone Studio] self-check: the preview area has no width (0px) |
+ *   the preview area has no height (0px) | the controls area has no height (0px)
+ *
+ *   Incompatible value for user parameter. Default value auto being used for
+ *   width instead of -30150
+ *
+ * The first says `clientWidth` / `clientHeight` return 0 for this panel's own
+ * elements. The second is UXP rejecting `width: -30150px`, a style the panel
+ * wrote itself out of `getBoundingClientRect().width` - so the rectangle came
+ * back as nonsense, not as zero.
+ *
+ * Both APIs are real and both are used elsewhere in the panel; neither can be
+ * trusted here without checking. The layout is fine - the panel looks right on
+ * screen - it is only the measurement that is unavailable, which is a much
+ * narrower problem and one that can be handled honestly:
+ *
+ *   - ask every API in turn and take the first answer that is *plausible*,
+ *   - never write a style or scale a render from an implausible one,
+ *   - say which answer was used, so a size that turns out wrong is traceable
+ *     to the API that produced it instead of being a mystery.
+ *
+ * "Plausible" is deliberately loose. The point is not to validate a layout, it
+ * is to reject 0, NaN, -30150 and 1e9 - values that can only be a host that
+ * does not know, and that produce a broken preview if used.
+ */
+
+/** Nothing on a panel is this big, and nothing useful is smaller than a pixel. */
+const MIN_SANE = 1;
+const MAX_SANE = 20000;
+
+/** @returns {boolean} whether a length can be taken at face value. */
+function sane(v) {
+  return typeof v === "number" && Number.isFinite(v) && v >= MIN_SANE && v <= MAX_SANE;
+}
+
+/** A coordinate may legitimately be zero or negative; it just may not be wild. */
+function saneCoord(v) {
+  return typeof v === "number" && Number.isFinite(v) && v > -MAX_SANE && v < MAX_SANE;
+}
+
+/**
+ * A validated bounding rectangle, or null.
+ *
+ * Callers that position one element against another need left/top as well as
+ * width/height, and all four have to come from the same call to be consistent -
+ * so this is all-or-nothing rather than a best-effort mixture.
+ *
+ * @returns {{left:number, top:number, width:number, height:number}|null}
+ */
+function rectOf(el) {
+  if (!el || typeof el.getBoundingClientRect !== "function") return null;
+  let r;
+  try {
+    r = el.getBoundingClientRect();
+  } catch (e) {
+    return null;
+  }
+  if (!r) return null;
+  if (!sane(r.width) || !sane(r.height)) return null;
+  if (!saneCoord(r.left) || !saneCoord(r.top)) return null;
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+
+/**
+ * How big an element is, by whichever route this host actually answers.
+ *
+ * @returns {{width:number|null, height:number|null, source:string}}
+ *   `source` names the API each dimension came from, for the self-check report.
+ */
+function sizeOf(el) {
+  if (!el) return { width: null, height: null, source: "none" };
+
+  const r = rectOf(el);
+  if (r) return { width: r.width, height: r.height, source: "rect" };
+
+  // The rectangle was refused. The two dimensions are taken independently from
+  // here on: a host that knows one and not the other is more useful than one
+  // that is discarded for being incomplete.
+  let width = null;
+  let height = null;
+  let source = "none";
+  const take = (w, h, name) => {
+    if (width === null && sane(w)) {
+      width = w;
+      source = source === "none" ? name : source + "+" + name;
+    }
+    if (height === null && sane(h)) {
+      height = h;
+      if (source.indexOf(name) < 0) source = source === "none" ? name : source + "+" + name;
+    }
+  };
+  take(el.clientWidth, el.clientHeight, "client");
+  take(el.offsetWidth, el.offsetHeight, "offset");
+  return { width, height, source };
+}
+
+/**
+ * The panel viewport, for when no element can be measured at all.
+ *
+ * `#app` is pinned to all four edges of the panel, so its size is the panel's
+ * size - but if it cannot be measured either, the window is the last thing
+ * left to ask before falling back to a guess.
+ *
+ * @returns {{width:number|null, height:number|null, source:string}}
+ */
+function viewportSize(win) {
+  const w = win || (typeof window !== "undefined" ? window : null);
+  if (!w) return { width: null, height: null, source: "none" };
+  const width = sane(w.innerWidth) ? w.innerWidth : null;
+  const height = sane(w.innerHeight) ? w.innerHeight : null;
+  return { width, height, source: width || height ? "window" : "none" };
+}
+
+/**
+ * Everything this host will say about an element, unfiltered.
+ *
+ * Written to the console at start-up. Three faults in this plugin have been
+ * diagnosed from a Photoshop log rather than from a reproduction, and each time
+ * the log was missing the one number that would have settled it in a minute.
+ * This is that number, for every API, printed whether or not anything is wrong.
+ */
+function describe(el, name) {
+  if (!el) return `${name}: absent`;
+  let rect = "n/a";
+  if (typeof el.getBoundingClientRect === "function") {
+    try {
+      const r = el.getBoundingClientRect();
+      rect = r ? `${fmt(r.width)}x${fmt(r.height)}@${fmt(r.left)},${fmt(r.top)}` : "null";
+    } catch (e) {
+      rect = "threw";
+    }
+  }
+  return (
+    `${name}: rect=${rect} client=${fmt(el.clientWidth)}x${fmt(el.clientHeight)} ` +
+    `offset=${fmt(el.offsetWidth)}x${fmt(el.offsetHeight)}`
+  );
+}
+
+function fmt(v) {
+  if (typeof v !== "number") return String(v);
+  if (!Number.isFinite(v)) return String(v);
+  return String(Math.round(v * 10) / 10);
+}
+
+module.exports = { sane, saneCoord, rectOf, sizeOf, viewportSize, describe, MAX_SANE };
+
+});
+
 window.__define("src/ui/controls.js", function (module, exports, require) {
 "use strict";
 
@@ -7865,6 +8021,21 @@ window.__define("src/ui/controls.js", function (module, exports, require) {
  */
 
 const { normaliseCurve, evalCurve, isIdentityCurve } = require("../engine/grade.js");
+const GEO = require("./geometry.js");
+
+/**
+ * The track width to assume when the host will not report one.
+ *
+ * Photoshop 2026 answers `getBoundingClientRect()` for these elements with
+ * values like `-30150`, and the old code only checked that the width was
+ * truthy - so a click computed `(clientX - -30150) / -30150`, which clamps to
+ * zero and slammed every slider to its minimum. Rather than disable dragging
+ * where the rectangle is unusable, the widgets fall back to *relative*
+ * dragging: the value follows how far the pointer has moved, which needs no
+ * rectangle at all. The travel per pixel is then a guess, but the control
+ * still does what a slider is for.
+ */
+const ASSUMED_TRACK_W = 200;
 
 /** @param {string} tag @param {string} [cls] @param {string} [text] */
 function el(tag, cls, text) {
@@ -7945,14 +8116,29 @@ function createSlider(def, value, onChange) {
     if (!silent && (changed || committed)) onChange(current, !!committed);
   }
 
+  /** Units of value per pixel of travel, from the track if it can be measured. */
+  function perPixel() {
+    const rect = GEO.rectOf(track);
+    return (def.max - def.min) / (rect ? rect.width : ASSUMED_TRACK_W);
+  }
+
+  /**
+   * The value the pointer is over, or null if the track cannot be located.
+   *
+   * Null is the signal to scrub relatively instead of jumping absolutely; it
+   * is never a value, so a refused rectangle can no longer move the control.
+   */
   function valueFromEvent(e) {
-    const rect = track.getBoundingClientRect();
-    if (!rect.width) return current;
+    const rect = GEO.rectOf(track);
+    if (!rect) return null;
     const t = clamp((e.clientX - rect.left) / rect.width, 0, 1);
     return def.min + t * (def.max - def.min);
   }
 
   let fineAnchor = null;
+  // Set whenever a drag has to work without a measurable track.
+  let relAnchor = null;
+
   slider.addEventListener("pointerdown", (e) => {
     dragging = true;
     slider.className = "slider dragging";
@@ -7962,7 +8148,12 @@ function createSlider(def, value, onChange) {
       /* capture is an optimisation, not a requirement */
     }
     fineAnchor = e.shiftKey ? { x: e.clientX, v: current } : null;
-    if (!fineAnchor) set(valueFromEvent(e), false);
+    relAnchor = null;
+    if (!fineAnchor) {
+      const v = valueFromEvent(e);
+      if (v === null) relAnchor = { x: e.clientX, v: current };
+      else set(v, false);
+    }
     e.preventDefault();
   });
 
@@ -7971,13 +8162,18 @@ function createSlider(def, value, onChange) {
     if (e.shiftKey) {
       // Shift engages fine scrubbing relative to where Shift was pressed.
       if (!fineAnchor) fineAnchor = { x: e.clientX, v: current };
-      const rect = track.getBoundingClientRect();
-      const perPx = rect.width ? (def.max - def.min) / rect.width : 0;
-      set(fineAnchor.v + (e.clientX - fineAnchor.x) * perPx * 0.2, false);
-    } else {
-      fineAnchor = null;
-      set(valueFromEvent(e), false);
+      set(fineAnchor.v + (e.clientX - fineAnchor.x) * perPixel() * 0.2, false);
+      return;
     }
+    fineAnchor = null;
+    const v = valueFromEvent(e);
+    if (v !== null) {
+      relAnchor = null;
+      set(v, false);
+      return;
+    }
+    if (!relAnchor) relAnchor = { x: e.clientX, v: current };
+    set(relAnchor.v + (e.clientX - relAnchor.x) * perPixel(), false);
   });
 
   const endDrag = (e) => {
@@ -8505,7 +8701,13 @@ function createCurve(def, value, onChange, opts = {}) {
 
     const changed = !isIdentityCurve(points);
     wrap.className = "curve" + (changed ? " modified" : "");
-    readout.textContent = changed ? `${points.length} points` : "linear";
+    // A curve that cannot be clicked looks identical to one nobody has clicked
+    // yet, so it has to say which it is.
+    readout.textContent = unplaceable
+      ? "drag unavailable in this build"
+      : changed
+        ? `${points.length} points`
+        : "linear";
   }
 
   function setHistogram(bins) {
@@ -8526,10 +8728,18 @@ function createCurve(def, value, onChange, opts = {}) {
     });
   }
 
-  /** Pointer position as a 0..1 point in the box. */
+  /**
+   * Pointer position as a 0..1 point in the box, or null.
+   *
+   * Unlike a slider there is no sensible relative fallback here: a curve is
+   * edited by putting a point somewhere specific, and moving one by an
+   * unmeasurable amount is not the same gesture. So when the host will not
+   * locate the box, dragging does nothing rather than something arbitrary -
+   * and the panel says why, once, in `curveWarning`.
+   */
   function at(e) {
-    const r = box.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
+    const r = GEO.rectOf(box);
+    if (!r) return null;
     return [
       clampUnit((e.clientX - r.left) / r.width),
       clampUnit(1 - (e.clientY - r.top) / r.height),
@@ -8537,6 +8747,7 @@ function createCurve(def, value, onChange, opts = {}) {
   }
 
   let dragIndex = -1;
+  let unplaceable = false;
 
   function beginDrag(e, index) {
     if (e.altKey) {
@@ -8561,7 +8772,13 @@ function createCurve(def, value, onChange, opts = {}) {
   box.addEventListener("pointerdown", (e) => {
     if (dragIndex >= 0) return; // a point handled it first
     const p = at(e);
-    if (!p) return;
+    if (!p) {
+      if (!unplaceable) {
+        unplaceable = true;
+        paint();
+      }
+      return;
+    }
     // Near an existing point, grab it rather than stacking a new one on top.
     let near = -1;
     let best = CURVE_GRAB;
@@ -11815,6 +12032,7 @@ const { HalftoneEngine } = require("../engine/pipeline.js");
 const { toDataURL, encodePNG } = require("../util/png.js");
 const { isIdentityCurve } = require("../engine/grade.js");
 const { downscaleBox: downscale } = require("../engine/resample.js");
+const GEO = require("./geometry.js");
 const HOST = require("../photoshop/host.js");
 const RENDER = require("../photoshop/render.js");
 const META = require("../photoshop/metadata.js");
@@ -11852,6 +12070,20 @@ const DRAFT_UPGRADE_MS = 260;
 /** Zoom multiplier per step, and the ceiling. 8x is well past useful. */
 const ZOOM_STEP = 1.6;
 const ZOOM_MAX = 8;
+/**
+ * The preview box to assume when the host will not report any size at all.
+ *
+ * Photoshop 2026 returns `clientWidth === 0` for this panel's elements and a
+ * `getBoundingClientRect()` that has come back with a width of -30150, so this
+ * is not a theoretical branch - it is what the plugin ran on. A guess is
+ * survivable, because the frame is scaled to the box by CSS either way and the
+ * zoom *ratio* between two guessed boxes is still correct. What it costs is the
+ * absolute scale: 1:1 is no longer one document pixel per screen pixel, and the
+ * percentage in the zoom bar is relative to the guess. So the panel says so
+ * rather than quietly showing a figure it cannot stand behind.
+ */
+const ASSUMED_BOX_WIDTH = 360;
+const ASSUMED_PANEL_HEIGHT = 720;
 
 class Panel {
   constructor(root) {
@@ -11978,23 +12210,41 @@ class Panel {
     }
 
     /*
-     * Only report a size that was actually measured. An undefined reading means
-     * "cannot measure here", which is not the same as "has no size" - reporting
-     * it as a fault would make the check cry wolf, and a check that cries wolf
-     * is worse than none, because it teaches people to ignore the one that
-     * matters.
+     * The geometry report is written every start, not only when something looks
+     * wrong, and it prints what each API returned rather than a verdict.
+     *
+     * The previous version printed a verdict - "the preview area has no width
+     * (0px)" - and that was enough to know something was wrong but not enough
+     * to know what to do, because it named one API out of three. The log that
+     * finally settled it did so by accident: an unrelated UXP warning about a
+     * rejected `width: -30150px` was the only evidence that
+     * getBoundingClientRect was answering as well as answering wrongly. Nothing
+     * should have to be diagnosed by accident twice.
      */
-    const tooSmall = (v) => Number.isFinite(v) && v < 40;
-    const wrap = this.$("preview-wrap");
-    if (wrap && tooSmall(wrap.clientWidth)) {
-      problems.push(`the preview area has no width (${wrap.clientWidth}px)`);
+    let geometry = "";
+    try {
+      geometry = [
+        GEO.describe(this.$("app"), "#app"),
+        GEO.describe(this.$("preview-wrap"), "#preview-wrap"),
+        GEO.describe(this.$("scroll"), "#scroll"),
+        `window=${typeof window === "undefined" ? "absent" : `${window.innerWidth}x${window.innerHeight}`}`,
+      ].join(" | ");
+      console.log("[Halftone Studio] geometry:", geometry);
+    } catch (e) {
+      /* diagnostics may never be the thing that breaks the panel */
     }
-    if (wrap && tooSmall(wrap.clientHeight)) {
-      problems.push(`the preview area has no height (${wrap.clientHeight}px)`);
-    }
-    const scroll = this.$("scroll");
-    if (scroll && tooSmall(scroll.clientHeight)) {
-      problems.push(`the controls area has no height (${scroll.clientHeight}px)`);
+
+    /*
+     * What matters is not whether an individual API works but whether anything
+     * does, because the panel can route around one and not around none.
+     */
+    const box = this.previewBox();
+    if (!box.exact) {
+      problems.push(
+        `this Photoshop build reports no size for the panel, so the preview is ` +
+          `assuming ${box.width}x${box.height}. Zooming and panning work; the ` +
+          `percentage and 1:1 are relative to that assumption, not to your screen`
+      );
     }
 
     const built = this.sections ? Object.keys(this.sections).length : 0;
@@ -12404,27 +12654,65 @@ class Panel {
     });
   }
 
+  /**
+   * How big the panel is, and how confident we are about it.
+   *
+   * `#app` is pinned to all four edges of the panel, so measuring it measures
+   * the panel. When it cannot be measured - which is the case in Photoshop
+   * 2026, where every geometry API for these elements returns 0 or nonsense -
+   * the window is asked, and failing that a size is assumed.
+   *
+   * @returns {{width:number, height:number, measured:boolean, source:string}}
+   */
+  panelSize() {
+    const app = this.$("app");
+    const s = GEO.sizeOf(app);
+    let width = s.width;
+    let height = s.height;
+    let source = s.source;
+
+    if (width === null || height === null) {
+      const v = GEO.viewportSize(typeof window !== "undefined" ? window : null);
+      if (width === null && v.width !== null) {
+        width = v.width;
+        source = source === "none" ? "window" : source + "+window";
+      }
+      if (height === null && v.height !== null) {
+        height = v.height;
+        if (source.indexOf("window") < 0) source = source === "none" ? "window" : source + "+window";
+      }
+    }
+
+    const measured = width !== null && height !== null;
+    return {
+      // `#app` has 11px of padding on each side, which the preview does not get
+      // to use. Subtracting it matters only when the reading is real.
+      width: width === null ? ASSUMED_BOX_WIDTH : Math.max(120, Math.round(width) - 22),
+      height: height === null ? ASSUMED_PANEL_HEIGHT : Math.round(height),
+      measured,
+      source: measured ? source : source === "none" ? "assumed" : source + "+assumed",
+    };
+  }
+
   /** How tall the preview box is: the whole panel when full, else the cap. */
   previewBoxHeight() {
     /*
-     * Floored in every branch, on purpose. In full-preview mode this reads the
-     * height of a flex-grown element, and UXP's flex layout has already
-     * diverged from a browser's twice in this panel. A zero or near-zero
-     * reading would divide through the fit calculation and render a 1px
-     * preview - which reads as "the preview is broken" rather than as a
-     * layout quirk. The floor turns the worst case into a small preview.
+     * Floored in every branch, on purpose. A zero or near-zero reading would
+     * divide through the fit calculation and render a 1px preview - which reads
+     * as "the preview is broken" rather than as a measurement that was refused.
+     * The floor turns the worst case into a small preview.
      */
     let h;
+    const panel = this.panelSize();
     if (this.theatre) {
-      const wrap = this.$("preview-wrap");
-      const app = this.$("app");
-      h = (wrap && wrap.clientHeight) || ((app && app.clientHeight) || 720) - 70;
+      const wrapH = GEO.sizeOf(this.$("preview-wrap")).height;
+      // In full-preview mode the box *is* the panel, less the zoom bar and the
+      // padding above and below it.
+      h = wrapH === null ? panel.height - 70 : wrapH;
     } else if (this.ui.previewHeight) {
       h = this.ui.previewHeight;
     } else {
-      const app = this.$("app");
-      const panelH = (app && app.clientHeight) || 720;
-      h = Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION));
+      h = Math.min(PREVIEW_HEIGHT_MAX, Math.round(panel.height * PREVIEW_HEIGHT_FRACTION));
     }
     return Number.isFinite(h) && h > PREVIEW_HEIGHT_MIN ? h : PREVIEW_HEIGHT_MIN;
   }
@@ -12577,12 +12865,17 @@ class Panel {
      */
   }
 
-  /** Where the pointer is inside the preview box, in 0..1, or null. */
+  /**
+   * Where the pointer is inside the preview box, in 0..1, or null.
+   *
+   * Null when the box cannot be located, which is not a failure: the caller
+   * then zooms about the centre instead of about the cursor. Anchoring to a
+   * rectangle the host reported as starting at -30150 would send the view
+   * somewhere the user did not point at, which is worse than not anchoring.
+   */
   pointerInView(e) {
-    const wrap = this.$("preview-wrap");
-    if (!wrap || !wrap.getBoundingClientRect) return null;
-    const r = wrap.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
+    const r = GEO.rectOf(this.$("preview-wrap"));
+    if (!r) return null;
     return { x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) };
   }
 
@@ -12592,11 +12885,25 @@ class Panel {
     return !!plan.view;
   }
 
-  /** The box the preview is drawn into, in panel pixels. */
+  /**
+   * The box the preview is drawn into, in panel pixels.
+   *
+   * The width is the preview element's own if the host will give it, otherwise
+   * the panel's, otherwise a guess. `exact` travels with it so callers can tell
+   * the difference between a scale that means something and one that does not.
+   *
+   * @returns {{width:number, height:number, exact:boolean, source:string}}
+   */
   previewBox() {
-    const wrap = this.$("preview-wrap");
-    const width = Math.max(120, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
-    return { width, height: this.previewBoxHeight() };
+    const wrapW = GEO.sizeOf(this.$("preview-wrap")).width;
+    const panel = this.panelSize();
+    const raw = wrapW === null ? panel.width : wrapW;
+    return {
+      width: Math.max(120, Math.min(PREVIEW_MAX, Math.round(raw))),
+      height: this.previewBoxHeight(),
+      exact: wrapW !== null || panel.measured,
+      source: wrapW !== null ? "wrap" : panel.source,
+    };
   }
 
   /**
@@ -12649,9 +12956,15 @@ class Panel {
     const label = this.$("zoom-level");
     const wrap = this.$("preview-wrap");
     if (label) {
+      const box = this.previewBox();
+      // A tilde rather than a footnote. The zoom *ratio* is right either way -
+      // one step is always 1.6x the last - so the honest caveat is only that
+      // the number is not relative to your screen, and a tilde says exactly
+      // that in the width available.
+      const approx = box.exact ? "" : "~";
       if (!this.engine.hasSource()) label.textContent = "—";
-      else if (this.view.zoom === null) label.textContent = `Fit · ${Math.round(this.fitZoom(this.previewBox()) * 100)}%`;
-      else label.textContent = `${Math.round(this.view.zoom * 100)}%`;
+      else if (this.view.zoom === null) label.textContent = `Fit · ${approx}${Math.round(this.fitZoom(box) * 100)}%`;
+      else label.textContent = `${approx}${Math.round(this.view.zoom * 100)}%`;
     }
     const fitBtn = this.$("btn-zoom-fit");
     const oneBtn = this.$("btn-zoom-1");
@@ -12903,11 +13216,9 @@ class Panel {
 
     grip.addEventListener("pointermove", (e) => {
       if (!dragging) return;
-      const app = this.$("app");
-      const panelH = (app && app.clientHeight) || 720;
       // Never more than 70% of the panel: past that there is nothing left to
       // scroll and the pinned preview has eaten the thing it exists to serve.
-      const max = Math.max(PREVIEW_HEIGHT_MIN, Math.round(panelH * 0.7));
+      const max = Math.max(PREVIEW_HEIGHT_MIN, Math.round(this.panelSize().height * 0.7));
       this.ui.previewHeight = clampInt(startH + (e.clientY - startY), PREVIEW_HEIGHT_MIN, max);
       this.applyPreviewHeight();
       this.drawPreview();
@@ -13176,14 +13487,28 @@ class Panel {
     split.className = "split show";
     shot.src = this.sourceDataURL();
 
-    // Where the rendered frame actually sits inside the box.
-    const box = wrap && wrap.getBoundingClientRect ? wrap.getBoundingClientRect() : null;
-    const frame = img && img.getBoundingClientRect ? img.getBoundingClientRect() : null;
-    if (box && frame && box.width && frame.width) {
+    /*
+     * Where the rendered frame actually sits inside the box.
+     *
+     * Validated, because this is the code that wrote `width: -30150px` into the
+     * document on Photoshop 2026 - the old guard was `frame.width` being
+     * truthy, and -30150 is truthy. When the host will not say where the frame
+     * is, the overlay is left to the stylesheet, which centres it on the same
+     * rules as the render underneath it. That is not pixel-exact, but it is the
+     * same picture in the same place; a negative width is neither.
+     */
+    const box = GEO.rectOf(wrap);
+    const frame = GEO.rectOf(img);
+    if (box && frame) {
       shot.style.left = Math.round(frame.left - box.left) + "px";
       shot.style.top = Math.round(frame.top - box.top) + "px";
       shot.style.width = Math.round(frame.width) + "px";
       shot.style.height = Math.round(frame.height) + "px";
+    } else {
+      shot.style.left = "";
+      shot.style.top = "";
+      shot.style.width = "";
+      shot.style.height = "";
     }
     const pct = Math.round(this._splitAt * 100);
     clip.style.width = pct + "%";

@@ -92,6 +92,63 @@ async function step(name, fn) {
 
 const click = (id) => p.evaluate(i => { const e = document.getElementById(i); if (e) e.click(); }, id);
 
+/*
+ * Zoom, checked by what it produces rather than by what it does not throw.
+ *
+ * The earlier version of this test clicked the zoom buttons and asserted that
+ * no error was logged, which every broken version of the zoom would also have
+ * passed. What the user gets out of the zoom is a different picture; that is
+ * what is measured here.
+ */
+{
+  const shot = () => p.evaluate(() => {
+    const panel = window.halftonePanel;
+    const plan = panel.renderPlan(panel.previewBox());
+    return {
+      src: String((document.getElementById("preview") || {}).src || ""),
+      w: plan.width, h: plan.height,
+      view: plan.view ? `${plan.view.x},${plan.view.y},${plan.view.width},${plan.view.height}` : null,
+      label: (document.getElementById("zoom-level") || {}).textContent,
+    };
+  });
+
+  const seen = [await shot()];
+  for (let i = 0; i < 3; i++) { await click("btn-zoom-in"); await p.waitForTimeout(420); seen.push(await shot()); }
+
+  const issues = [];
+  for (let i = 1; i < seen.length; i++) {
+    const a = seen[i - 1], b = seen[i];
+    if (a.src === b.src) issues.push(`step ${i}: the preview image did not change`);
+    const ratio = b.w / a.w;
+    if (Math.abs(ratio - 1.6) > 0.03) issues.push(`step ${i}: zoomed ${ratio.toFixed(3)}x, expected 1.6x`);
+    if (a.label === b.label) issues.push(`step ${i}: the zoom label did not change (${a.label})`);
+  }
+  if (seen[seen.length - 1].view === null) issues.push("zoomed all the way in and there is still nothing to pan");
+  steps.push(["zoom actually zooms", issues]);
+
+  // Panning must move the window, not merely avoid throwing.
+  const beforePan = await shot();
+  await p.evaluate(() => {
+    const w = document.getElementById("preview-wrap");
+    const r = w.getBoundingClientRect();
+    const ev = (t, x, y) => w.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, pointerId: 1, bubbles: true }));
+    ev("pointerdown", r.left + r.width / 2, r.top + r.height / 2);
+    ev("pointermove", r.left + r.width / 2 - 60, r.top + r.height / 2 - 40);
+    ev("pointerup", r.left + r.width / 2 - 60, r.top + r.height / 2 - 40);
+  });
+  await p.waitForTimeout(420);
+  const afterPan = await shot();
+  steps.push(["panning moves the window", afterPan.view === beforePan.view
+    ? [`the window stayed at ${beforePan.view}`] : []]);
+
+  // Fit must undo all of it.
+  await click("btn-zoom-fit");
+  await p.waitForTimeout(420);
+  const back = await shot();
+  steps.push(["fit returns to the whole document", back.view === null ? [] : [`still windowed at ${back.view}`]]);
+  steps.push(["fit restores the first frame", back.src === seen[0].src ? [] : ["the fitted frame differs from the one we started with"]]);
+}
+
 await step("zoom in x3", async () => { for (let i=0;i<3;i++) await click("btn-zoom-in"); });
 await step("pan by dragging", () => p.evaluate(() => {
   const w = document.getElementById("preview-wrap");

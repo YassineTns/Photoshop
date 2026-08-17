@@ -17,8 +17,20 @@ const Module = require("module");
  * DOM
  * ------------------------------------------------------------------ */
 
+/**
+ * How every *newly created* element reports its geometry.
+ *
+ * A module-level default rather than a constructor argument because the panel
+ * builds its own controls: a test cannot reach them at construction time, and
+ * the whole point of `breakGeometry` is that the host is broken for everything,
+ * not for the handful of elements a test happens to hold a reference to.
+ */
+let defaultRectMode = "consistent";
+let defaultClientSize = { width: 360, height: 200 };
+
 class FakeElement {
   constructor(tag) {
+    this.rectMode = defaultRectMode;
     this.tagName = String(tag).toUpperCase();
     this.className = "";
     this.children = [];
@@ -32,8 +44,8 @@ class FakeElement {
     this.type = "";
     this.title = "";
     this.src = "";
-    this.clientWidth = 360;
-    this.clientHeight = 200;
+    this.clientWidth = defaultClientSize.width;
+    this.clientHeight = defaultClientSize.height;
   }
 
   get textContent() {
@@ -90,8 +102,25 @@ class FakeElement {
     return this.attributes[k];
   }
 
+  /*
+   * Consistent with clientWidth/clientHeight on purpose.
+   *
+   * This used to return a fixed 200x20 for every element regardless of what
+   * the same element reported through clientWidth, which meant the two
+   * measurement paths disagreed in the mock and code could pass the tests
+   * while reading whichever one happened to be wrong in the host. `rectMode`
+   * lets a test switch this element over to what Photoshop 2026 actually
+   * does - see `breakGeometry` below.
+   */
   getBoundingClientRect() {
-    return { left: 0, top: 0, width: 200, height: 20, right: 200, bottom: 20 };
+    if (this.rectMode === "absent") return null;
+    if (this.rectMode === "garbage") {
+      // The real values out of a Photoshop 2026 panel.
+      return { left: -30150, top: -31931, width: -30150, height: -31931, right: 0, bottom: 0 };
+    }
+    const w = this.clientWidth;
+    const h = this.clientHeight;
+    return { left: 0, top: 0, width: w, height: h, right: w, bottom: h };
   }
 
   focus() {}
@@ -564,4 +593,50 @@ function resetModules() {
   }
 }
 
-module.exports = { install, uninstall, resetModules, FakeElement, FakePhotoshop };
+/**
+ * Emulate a host that will not report geometry.
+ *
+ * This is not hypothetical. A Photoshop 2026 log showed `clientWidth` and
+ * `clientHeight` returning 0 for the panel's own elements while
+ * `getBoundingClientRect()` returned a width of -30150 - so the panel had no
+ * idea how big it was, and the zoom, the sliders and the compare overlay were
+ * all computing against invented numbers. The suite was entirely green at the
+ * time, because the mock answered every geometry question helpfully.
+ *
+ * Call before building a panel; `repairGeometry` puts it back.
+ */
+function breakGeometry(doc) {
+  defaultRectMode = "garbage";
+  defaultClientSize = { width: 0, height: 0 };
+  const walk = (node) => {
+    if (!node) return;
+    node.rectMode = "garbage";
+    node.clientWidth = 0;
+    node.clientHeight = 0;
+    (node.children || []).forEach(walk);
+  };
+  if (doc) walk(doc.body || doc);
+}
+
+function repairGeometry(doc) {
+  defaultRectMode = "consistent";
+  defaultClientSize = { width: 360, height: 200 };
+  const walk = (node) => {
+    if (!node) return;
+    node.rectMode = "consistent";
+    node.clientWidth = 360;
+    node.clientHeight = 200;
+    (node.children || []).forEach(walk);
+  };
+  if (doc) walk(doc.body || doc);
+}
+
+module.exports = {
+  install,
+  uninstall,
+  resetModules,
+  FakeElement,
+  FakePhotoshop,
+  breakGeometry,
+  repairGeometry,
+};
