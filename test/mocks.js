@@ -114,6 +114,8 @@ class FakeElement {
    */
   getBoundingClientRect() {
     if (this.rectMode === "absent") return null;
+    // What Photoshop 2026 actually does: a rectangle, entirely zero.
+    if (this.rectMode === "zero") return { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 };
     if (this.rectMode === "garbage") {
       // The real values out of a Photoshop 2026 panel.
       return { left: -30150, top: -31931, width: -30150, height: -31931, right: 0, bottom: 0 };
@@ -605,12 +607,16 @@ function resetModules() {
  *
  * Call before building a panel; `repairGeometry` puts it back.
  */
-function breakGeometry(doc) {
-  defaultRectMode = "garbage";
+function breakGeometry(doc, mode) {
+  // "zero" is the observed Photoshop 2026 behaviour; "garbage" is the harsher
+  // case of an API that answers with nonsense rather than with nothing. Both
+  // have to leave the panel working, so both are worth being able to run.
+  const rectMode = mode || "zero";
+  defaultRectMode = rectMode;
   defaultClientSize = { width: 0, height: 0 };
   const walk = (node) => {
     if (!node) return;
-    node.rectMode = "garbage";
+    node.rectMode = rectMode;
     node.clientWidth = 0;
     node.clientHeight = 0;
     (node.children || []).forEach(walk);

@@ -1298,10 +1298,10 @@ async function main() {
    * from a refused rectangle, and the panel says which it is.
    * ================================================================ */
   group("A host that reports no geometry");
-  {
+  for (const hostMode of ["zero", "garbage"]) {
     resetModules();
     const { document } = install({ width: 1600, height: 1200, image: F.photo(1600, 1200) });
-    breakGeometry(document);
+    breakGeometry(document, hostMode);
     const { Panel } = require("../src/ui/panel.js");
 
     const panel = new Panel(document);

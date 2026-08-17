@@ -12063,12 +12063,6 @@ const PREVIEW_HEIGHT_FRACTION = 0.42;
  * can land on by accident has to be a size you can still work in.
  */
 const PREVIEW_HEIGHT_MIN = 150;
-/**
- * Below this, a *stored* height is treated as an accident rather than a choice
- * and the preview goes back to automatic. Only heights at or under the old
- * floor qualify, so a height anyone deliberately set is left alone.
- */
-const PREVIEW_HEIGHT_STUCK = 110;
 const PREVIEW_HEIGHT_MAX = 380;
 /** Cap on the dither grid used for previews; above this the preview approximates. */
 const PREVIEW_DITHER_GRID = 700;
@@ -12089,16 +12083,26 @@ const ZOOM_MAX = 8;
 /**
  * The preview box to assume when the host will not report any size at all.
  *
- * Photoshop 2026 returns `clientWidth === 0` for this panel's elements and a
- * `getBoundingClientRect()` that has come back with a width of -30150, so this
- * is not a theoretical branch - it is what the plugin ran on. A guess is
+ * Photoshop 2026 answers every geometry question with zero, for every element,
+ * through every API:
+ *
+ *   #app: rect=0x0@0,0 client=0x0 offset=0x0 | #preview-wrap: rect=0x0@0,0
+ *   client=0x0 offset=0x0 | #scroll: ... | window=undefinedxundefined
+ *
+ * so this is not a theoretical branch, it is what the plugin ran on. A guess is
  * survivable, because the frame is scaled to the box by CSS either way and the
  * zoom *ratio* between two guessed boxes is still correct. What it costs is the
  * absolute scale: 1:1 is no longer one document pixel per screen pixel, and the
  * percentage in the zoom bar is relative to the guess. So the panel says so
  * rather than quietly showing a figure it cannot stand behind.
+ *
+ * The width errs high, at the top of the range a panel is likely to be. The two
+ * ways of being wrong are not symmetrical: rendering wider than the panel gets
+ * scaled down by CSS and costs only render time, while rendering narrower gets
+ * scaled *up* and is visibly soft - which looks like a broken preview rather
+ * than like a guess.
  */
-const ASSUMED_BOX_WIDTH = 360;
+const ASSUMED_BOX_WIDTH = 460;
 const ASSUMED_PANEL_HEIGHT = 720;
 
 class Panel {
@@ -13260,6 +13264,12 @@ class Panel {
       } catch (err) {
         /* ignore */
       }
+      // Landing on the floor is how a preview gets stuck, and the way back is
+      // a double-click on a bar with no label. Said once, when it is relevant.
+      if (this.ui.previewHeight === PREVIEW_HEIGHT_MIN && !this._floorHinted) {
+        this._floorHinted = true;
+        this.notice("The preview is at its smallest. Double-click this bar to go back to automatic.");
+      }
       this.persistSession();
     };
     grip.addEventListener("pointerup", end);
@@ -13931,11 +13941,20 @@ function clampInt(v, lo, hi) {
 function sanitizeUI(raw) {
   const out = { previewHeight: null };
   if (raw && raw.previewHeight) {
-    // A height at or below the old floor can only have come from a drag that
-    // clamped, on a host whose limits were computed from a size it never
-    // reported. Restoring it would hand the user back the letterbox they were
-    // stuck in, session after session, with no obvious way out.
-    if (raw.previewHeight > PREVIEW_HEIGHT_STUCK) {
+    /*
+     * A stored height at the floor is treated as an accident, not a choice.
+     *
+     * The floor is where a drag lands when it clamps, and on a host that
+     * reports no panel size the drag's limits are computed from a height it
+     * never gave - so landing there is easy and getting back is not obvious.
+     * The previous attempt at this dropped anything at or under 110 and was
+     * still too narrow: the panel came back reporting a box of 360x150, which
+     * is a stored height somewhere in 111..150 being clamped straight onto the
+     * floor again. Nobody chooses the smallest size the control allows, so the
+     * floor itself is the right threshold. Anything above it is a real choice
+     * and is kept.
+     */
+    if (raw.previewHeight > PREVIEW_HEIGHT_MIN) {
       out.previewHeight = clampInt(raw.previewHeight, PREVIEW_HEIGHT_MIN, 2000);
     }
   }
