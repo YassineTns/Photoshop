@@ -1423,6 +1423,132 @@ group("DPI scale mode");
   ok(resolveResolution(rel, 3000, 0) === 123, "a missing document resolution does not break relative mode");
 }
 
+group("Rasteriser fast paths");
+{
+  // Two optimisations in the rasteriser trade clarity for speed, and both are
+  // only acceptable if they change nothing at all about the output. That is
+  // what this group asserts - not that they are fast, but that they are the
+  // same. Without it, either could silently degrade the render.
+  const { drawDot, fillBackground } = require("../src/engine/halftone.js");
+  const { SHAPES } = require("../src/engine/shapes.js");
+
+  // --- fillBackground: written as a seed run doubled with copyWithin -------
+  let fillBad = null;
+  // Sizes chosen to break a doubling loop if it were wrong: empty, a single
+  // pixel, exact powers of two, and awkward remainders either side of them.
+  for (const n of [0, 4, 8, 12, 100, 252, 256, 260, 1024, 1028, 4001 * 4]) {
+    const b = new Uint8ClampedArray(n);
+    fillBackground(b, [245, 238, 216]);
+    for (let i = 0; i < n && !fillBad; i += 4) {
+      if (b[i] !== 245 || b[i + 1] !== 238 || b[i + 2] !== 216 || b[i + 3] !== 255) {
+        fillBad = `${n} bytes, wrong at ${i}`;
+      }
+    }
+  }
+  ok(fillBad === null, `the background fill is exact at every buffer size (${fillBad || "11 sizes"})`);
+
+  // --- interior spans -----------------------------------------------------
+  // A shape may declare the run of pixels in a row that is fully covered, so
+  // the rasteriser can store them directly instead of evaluating the distance
+  // field. Every shape that declares one must produce byte-identical output to
+  // the generic path it is skipping - including when the dot hangs off the
+  // edge of the buffer, sits on a half-pixel, or is smaller than the band.
+  const W = 64;
+  const H = 64;
+  const RADII = [0.4, 0.5, 0.7, 1, 1.5, 2, 3.3, 5, 8, 13.7, 20, 31];
+  const CELLS = [4, 10, 26.7, 64];
+  const CENTRES = [
+    [32, 32],
+    [32.5, 32.5],
+    [32.37, 31.62],
+    [0.2, 0.7],
+    [63.9, 63.1],
+    [-5, 32],
+    [70, 32],
+  ];
+
+  let withSpan = 0;
+  for (const id of Object.keys(SHAPES)) {
+    const shape = SHAPES[id];
+    if (!shape.span) continue;
+    withSpan++;
+    // The same shape with the fast path removed: the reference implementation.
+    const generic = Object.assign({}, shape);
+    delete generic.span;
+
+    let mismatch = null;
+    let cases = 0;
+    for (const r of RADII) {
+      for (const cell of CELLS) {
+        for (const c of CENTRES) {
+          const a = new Uint8ClampedArray(W * H * 4).fill(200);
+          const b = new Uint8ClampedArray(W * H * 4).fill(200);
+          drawDot(a, W, H, c[0], c[1], r, cell, shape, [10, 20, 30], 0);
+          drawDot(b, W, H, c[0], c[1], r, cell, generic, [10, 20, 30], 0);
+          cases++;
+          for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) {
+              mismatch = `r=${r} cell=${cell} at (${c[0]},${c[1]}), byte ${i}: ${a[i]} vs ${b[i]}`;
+              break;
+            }
+          }
+          if (mismatch) break;
+        }
+        if (mismatch) break;
+      }
+      if (mismatch) break;
+    }
+    ok(mismatch === null, `"${id}" spans match the generic path over ${cases} dots (${mismatch || "identical"})`);
+
+    // A span that over-estimates would paint pixels that should have been
+    // antialiased, which the equality check above would catch - but only for
+    // the centres it happens to try. Assert the invariant directly instead:
+    // every pixel a span claims really is at least fully covered.
+    let over = null;
+    for (const r of [1, 3.3, 8, 20]) {
+      for (const cell of [10, 26.7]) {
+        for (let dy = -r - 2; dy <= r + 2 && !over; dy += 0.37) {
+          const sp = shape.span(dy, r, cell);
+          if (sp <= 0) continue;
+          for (const dx of [-sp, -sp * 0.5, 0, sp * 0.5, sp]) {
+            const d = shape.sdf(dx, dy, r, cell);
+            if (d > -0.5 + 1e-9) {
+              over = `${id} r=${r} cell=${cell} dy=${dy.toFixed(2)} dx=${dx.toFixed(2)} sdf=${d.toFixed(4)}`;
+              break;
+            }
+          }
+        }
+      }
+    }
+    ok(over === null, `"${id}" never claims a pixel it has not fully covered (${over || "under-estimates throughout"})`);
+  }
+  ok(withSpan >= 4, `several shapes carry an interior span (${withSpan})`);
+
+  // Rotation must fall back to the generic path: a span is a horizontal run,
+  // and rotating the sampling frame is exactly what stops the interior being
+  // horizontal. Assert the rotated result still matches the generic renderer.
+  let rotBad = null;
+  for (const id of Object.keys(SHAPES)) {
+    const shape = SHAPES[id];
+    if (!shape.span) continue;
+    const generic = Object.assign({}, shape);
+    delete generic.span;
+    for (const rot of [0.3, Math.PI / 4, 1.9]) {
+      const a = new Uint8ClampedArray(W * H * 4).fill(200);
+      const b = new Uint8ClampedArray(W * H * 4).fill(200);
+      drawDot(a, W, H, 32.3, 31.8, 9, 26.7, shape, [10, 20, 30], rot);
+      drawDot(b, W, H, 32.3, 31.8, 9, 26.7, generic, [10, 20, 30], rot);
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) {
+          rotBad = `${id} at ${rot.toFixed(2)}rad`;
+          break;
+        }
+      }
+    }
+  }
+  ok(rotBad === null, `a rotated dot bypasses the span path (${rotBad || "identical"})`);
+}
+
 group("Stochastic (FM) screening");
 {
   // FM keeps the dot size fixed and varies how many dots are placed, so its

@@ -92,7 +92,11 @@ Halftone ▸ HT-4f2a9c
 
 **Batch Apply** runs the same settings across every layer in the chosen scope
 (selection, group, or whole document), skipping anything that is already halftone
-output. The whole batch is a single undo step.
+output. The whole batch is a single undo step. While it runs, **Stop After This
+Layer** appears: it is checked between layers, never inside one, so stopping
+leaves every finished layer finished and every untouched layer untouched — there
+is no half-built group to clean up. That is also why it is the only operation
+offering a cancel.
 
 **Selections.** With a marquee, lasso or mask active, Apply and Update confine the
 render to it (turn this off with *Output ▸ Respect selection*). The screen is
@@ -445,7 +449,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (365 assertions) + mocked host (174 assertions)
+npm test              # engine (376 assertions) + mocked host (186 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)
@@ -482,7 +486,7 @@ It now drives the *real* panel at 300/360/420px in both modes and both themes,
 and asserts geometry: no sibling overlap, no stacked-row collision, nothing
 overflowing, nothing collapsed to zero, no control rendering zero options, no
 start-up errors, and that the panel scrolls far enough to reach its own last
-section. 276 assertions. It cannot prove UXP agrees with Chromium, but every rule
+section. 300 assertions. It cannot prove UXP agrees with Chromium, but every rule
 that broke was one Chromium would have caught, because the fix in each case was
 to stop relying on a feature UXP lacks.
 
@@ -523,19 +527,58 @@ Synthetic photograph, Node 22 (Photoshop will differ, but the ratios hold):
 
 | Mode | Document | First preview | Slider re-render | Full render |
 |---|---|---|---|---|
-| Halftone | 1080×1080 | 41 ms | 14 ms | 32 ms |
-| Halftone | 1920×1080 | 32 ms | 9 ms | 49 ms |
-| Halftone | 3000×3000 | 86 ms | 14 ms | 192 ms |
-| Halftone | 6000×4000 | 149 ms | 10 ms | 973 ms |
-| Dither | 1080×1080 | 49 ms | 5 ms | 14 ms |
-| Dither | 1920×1080 | 36 ms | 3 ms | 25 ms |
-| Dither | 3000×3000 | 99 ms | 7 ms | 119 ms |
-| Dither | 6000×4000 | 245 ms | 8 ms | 1065 ms |
-| Per-ink (4 screens) | 6000×4000 | 679 ms | 36–102 ms | 3076 ms |
+| Halftone | 1080×1080 | 41 ms | 12 ms | 22 ms |
+| Halftone | 1920×1080 | 31 ms | 7 ms | 33 ms |
+| Halftone | 3000×3000 | 83 ms | 13 ms | 130 ms |
+| Halftone | 6000×4000 | 144 ms | 9 ms | 893 ms |
+| Dither | 1080×1080 | 54 ms | 6 ms | 16 ms |
+| Dither | 1920×1080 | 35 ms | 3 ms | 29 ms |
+| Dither | 3000×3000 | 98 ms | 14 ms | 151 ms |
+| Dither | 6000×4000 | 151 ms | 7 ms | 799 ms |
+| Per-ink (4 screens) | 6000×4000 | 172 ms | 3–11 ms | 204 ms |
 
 Slider latency is flat in document size. Full renders are chunked with yields so
 Photoshop's UI keeps breathing, and reads from Photoshop are capped at 2600px on
 the longest edge while the render is still written at full resolution.
+
+#### Where the rasteriser time went
+
+Profiling a full render showed two thirds of it in two places that were not the
+interesting part: `drawDot` at 33% and painting the paper colour at 12%.
+
+- **The background fill** was a per-pixel loop writing a colour that is about to
+  be covered up — 95 ms of a 223 ms render on a 6000×4000 frame. It is now a
+  short seed run doubled with `copyWithin`, which is a memmove: 65 ms → 10 ms on
+  the same 96 MB buffer.
+- **`drawDot`** evaluated the distance field for every pixel in a dot's bounding
+  box, including the interior, where the answer is always "fully covered". A
+  shape can now declare the horizontal run that is guaranteed interior
+  (`span(dy, r, cell)`), and the rasteriser stores that run directly. On a 13 px
+  dot that is roughly three quarters of its pixels skipping the SDF and the
+  blend. Circle, square, diamond and line have cheap closed forms; the rotated
+  ellipse and the non-convex cross do not, and simply keep the generic path — as
+  does any rotated dot, since a span is a horizontal run.
+
+Measured before/after on the same machine:
+
+| Case (6000×4000 out) | Before | After | |
+|---|---|---|---|
+| Single screen, coarse grid | 203 ms | 130 ms | **1.56×** |
+| Single screen, fine grid | 225 ms | 155 ms | **1.45×** |
+| Per-ink, 4 screens | 250 ms | 228 ms | 1.10× |
+| Preview at 420 px (slider path) | 6 ms | 5 ms | 1.28× |
+
+Per-ink gains least because its dots are small — the interior of a small dot is
+a small fraction of it — which is the expected shape of this optimisation rather
+than a surprise.
+
+Both optimisations are only acceptable if they change nothing, so the test suite
+asserts exactly that: `fillBackground` is checked at eleven buffer sizes chosen
+to break a doubling loop, and every shape that declares a span is rendered 336
+ways and compared **byte for byte** against the same shape with the fast path
+removed. A separate assertion checks the invariant directly — that a span never
+claims a pixel the distance field has not fully covered — because equality alone
+only tests the cases it happens to try.
 
 ---
 
@@ -546,9 +589,9 @@ the longest edge while the render is still written at full resolution.
    frame-by-frame would mean rasterising the video layer per frame, which UXP
    does not expose. Frame-animation documents are covered, because their frames
    are made of ordinary layers.
-3. **Per-ink screens are slower.** Four screens mean four rasterisations, so
-   slider latency is 36–102 ms rather than the ~14 ms of a single screen, and a
-   24-megapixel render takes about 3 s. The panel's adaptive debounce handles it.
+3. **Per-ink screens are slower.** Four screens mean four rasterisations, and
+   they benefit least from the interior-span fast path because their dots are
+   smaller. The panel's adaptive debounce handles it.
 4. **Layer XMP is not a documented UXP API.** Every write is verified by
    readback, with a sidecar fallback, so the worst case is that parameters do not
    travel to another machine inside the .psd.

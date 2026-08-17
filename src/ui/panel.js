@@ -61,7 +61,7 @@ class Panel {
     this.sectionOpen = {};
     this._sourceURL = null;
     this._renderedSrc = null;
-    this._cancelBatch = false;
+    this._cancel = false;
   }
 
   /* ---------------------------------------------------------------- */
@@ -96,6 +96,7 @@ class Panel {
       /* first run */
     }
 
+    this.showCancel(false);
     this.watchSelection();
     this.refreshContext();
   }
@@ -268,6 +269,7 @@ class Panel {
     this.$("btn-reset").addEventListener("click", () => this.resetAll());
     this.$("btn-batch").addEventListener("click", () => this.batchApply());
     this.$("btn-svg").addEventListener("click", () => this.exportSVG());
+    this.$("btn-cancel").addEventListener("click", () => this.requestCancel());
     this.bindCompare();
     this.$("btn-save-preset").addEventListener("click", () => this.savePreset());
     this.$("btn-load-preset").addEventListener("click", () => this.promptLoadPreset());
@@ -543,31 +545,38 @@ class Panel {
       this.notice(preview.message, "warn");
       return;
     }
-    this._cancelBatch = false;
-    await this.guard(`Batching ${preview.count} layers…`, async () => {
-      const res = await BATCH.runBatch(this.engine, this.params, {
-        scope: this.params.batchScope,
-        sharedPalette: this.params.batchSharedPalette,
-        onItem: (i, total, name) => this.status(`Batch ${i + 1}/${total}: ${name}`, "busy"),
-        onProgress: (t) => this.progress(t),
-        shouldCancel: () => this._cancelBatch,
-      });
+    // The only cancellable operation: runBatch tests the flag between layers,
+    // which is the one point at which stopping leaves nothing half-built.
+    await this.guard(
+      `Batching ${preview.count} layers…`,
+      async () => {
+        const res = await BATCH.runBatch(this.engine, this.params, {
+          scope: this.params.batchScope,
+          sharedPalette: this.params.batchSharedPalette,
+          onItem: (i, total, name) => this.status(`Batch ${i + 1}/${total}: ${name}`, "busy"),
+          onProgress: (t) => this.progress(t),
+          shouldCancel: () => this._cancel,
+        });
 
-      // The engine now holds the last batched layer, not what the panel was
-      // previewing, so drop the stale preview rather than showing a lie.
-      this.engine.sourceLayerId = null;
+        // The engine now holds the last batched layer, not what the panel was
+        // previewing, so drop the stale preview rather than showing a lie.
+        this.engine.sourceLayerId = null;
 
-      const parts = [`Batched ${res.done} of ${res.total} layers.`];
-      if (res.palette) parts.push(`Shared palette: ${res.palette.join(" ")}.`);
-      if (res.cancelled) parts.push("Cancelled before the end.");
-      if (res.failures.length) {
-        parts.push(
-          `${res.failures.length} failed: ` +
-            res.failures.map((f) => `${f.name} (${f.error})`).join("; ")
-        );
-      }
-      this.notice(parts.join(" "), res.failures.length || res.cancelled ? "warn" : "");
-    });
+        const parts = [`Batched ${res.done} of ${res.total} layers.`];
+        if (res.palette) parts.push(`Shared palette: ${res.palette.join(" ")}.`);
+        if (res.cancelled) {
+          parts.push(`Stopped early; the ${res.total - res.done} remaining layers are untouched.`);
+        }
+        if (res.failures.length) {
+          parts.push(
+            `${res.failures.length} failed: ` +
+              res.failures.map((f) => `${f.name} (${f.error})`).join("; ")
+          );
+        }
+        this.notice(parts.join(" "), res.failures.length || res.cancelled ? "warn" : "");
+      },
+      { cancellable: true }
+    );
   }
 
   /* ------------------------------------------------------ SVG export */
@@ -847,10 +856,12 @@ class Panel {
    * Run an async Photoshop operation with busy state, progress and a single
    * place where errors turn into a readable message.
    */
-  async guard(label, fn) {
+  async guard(label, fn, opts = {}) {
     if (this._busy) return;
     this._busy = true;
+    this._cancel = false;
     this.setButtonsEnabled(false);
+    this.showCancel(!!opts.cancellable);
     this.status(label, "busy");
     this.progress(0, true);
     try {
@@ -862,10 +873,38 @@ class Panel {
       this.status(msg, "error");
     } finally {
       this._busy = false;
+      this.showCancel(false);
       this.setButtonsEnabled(true);
       this.progress(0, false);
       this.refreshContext();
     }
+  }
+
+  /**
+   * Ask the running operation to stop.
+   *
+   * The flag is only ever read between layers, never mid-layer: a batch that
+   * stopped halfway through building a group would leave a Smart Object with no
+   * render over it. So the button says "stop after this layer" and means it -
+   * the layer in flight is finished properly, and every layer already done stays
+   * done. Nothing is rolled back, because nothing is half-built.
+   */
+  requestCancel() {
+    if (!this._busy) return;
+    this._cancel = true;
+    this.status("Stopping after the current layer…", "busy");
+    this.showCancel(false);
+  }
+
+  /** The cancel button only exists while there is something to cancel. */
+  showCancel(visible) {
+    const b = this.$("btn-cancel");
+    if (!b) return;
+    b.className = "btn btn-small btn-cancel" + (visible ? " show" : "");
+    if (visible) b.removeAttribute("disabled");
+    else b.setAttribute("disabled", "true");
+    const row = b.parentNode;
+    if (row) row.className = "toolbar toolbar-tail" + (visible ? "" : " toolbar-hidden");
   }
 
   setButtonsEnabled(enabled) {
@@ -876,6 +915,8 @@ class Panel {
       "btn-reset",
       "btn-batch",
       "btn-svg",
+      // btn-cancel is deliberately absent: it is the one control that must stay
+      // usable while an operation is running.
       "btn-save-preset",
       "btn-load-preset",
     ]) {

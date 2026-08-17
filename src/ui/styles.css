@@ -462,6 +462,28 @@ body {
   color: var(--text-dim);
 }
 
+/*
+ * Only on screen while something is running that can actually be stopped, so
+ * it never offers a promise it cannot keep. The panel toggles the class.
+ */
+.btn-cancel { display: none; }
+
+.btn-cancel.show {
+  display: block;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.btn-cancel.show:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background-color: var(--bg-sunken);
+  box-shadow: 0 0 12px rgba(255, 95, 109, 0.25);
+}
+
+/* A parent row with nothing visible in it must not leave a gap behind. */
+.toolbar-hidden { display: none; }
+
 .progress {
   min-height: 3px;
   height: 3px;

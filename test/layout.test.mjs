@@ -89,6 +89,7 @@ const PROBE = () => {
     zeroWidth: [],
     clipped: [],
     escaped: [],
+    hidden: [],
     scroll: null,
   };
   const app = document.getElementById("app");
@@ -173,6 +174,13 @@ const PROBE = () => {
 
   [".algo-chip", ".preset-chip", ".btn", ".swatch", ".seg"].forEach((sel) => {
     document.querySelectorAll(sel).forEach((c) => {
+      // A control the panel deliberately hides (the cancel button, until there
+      // is something to cancel) is not a collapsed one. `display: none` is the
+      // exact test for that; measuring the box cannot tell the two apart.
+      if (getComputedStyle(c).display === "none") {
+        out.hidden.push(sel + " " + (c.textContent || "").trim().slice(0, 20));
+        return;
+      }
       const r = c.getBoundingClientRect();
       if (r.right > host.right + 1) out.overflows.push(sel + " " + (c.textContent || "").trim());
       if (r.width < 4 || r.height < 4) out.zeroWidth.push(sel + " collapsed");
@@ -262,6 +270,13 @@ function assertGeometry(r, tag) {
   ok(r.clipped.length === 0, `${tag}: nothing is clipped by its own box${fmt(r.clipped)}`);
   ok(r.escaped.length === 0, `${tag}: every row stays inside its section${fmt(r.escaped)}`);
   ok(r.scroll.sections >= 8, `${tag}: the panel built its sections (${r.scroll.sections})`);
+  // Exactly one control is expected to be hidden at rest: the cancel button.
+  // Asserting the count keeps "deliberately hidden" from quietly becoming
+  // "accidentally missing" now that the collapse check skips hidden elements.
+  ok(
+    r.hidden.length === 1 && /Stop After/i.test(r.hidden[0]),
+    `${tag}: only the cancel button is hidden at rest${fmt(r.hidden)}`
+  );
   ok(
     r.scroll.overflowY === "auto" || r.scroll.overflowY === "scroll",
     `${tag}: the panel is a scroll container (overflow-y: ${r.scroll.overflowY})`

@@ -750,6 +750,66 @@ async function main() {
       ps.doc.layers.filter((l) => l.kind === "group").length === res.done,
       "only the completed layers left groups behind"
     );
+    // Nothing may be left half-built: every group a cancelled batch created
+    // must still hold both its source and its render.
+    const groups = ps.doc.layers.filter((l) => l.kind === "group");
+    ok(
+      groups.every((g) => (g.layers || []).length === 2),
+      `every group the cancelled batch built is complete (${groups.map((g) => (g.layers || []).length).join(",")})`
+    );
+
+    uninstall();
+  }
+
+  /* ================================================================ */
+  group("The cancel button reaches the batch");
+  {
+    // runBatch has always supported cancellation, but nothing in the UI ever
+    // set the flag - the feature was implemented and unreachable. This drives
+    // the actual button.
+    resetModules();
+    const { ps, document } = install({ width: 200, height: 150, image: F.photo(200, 150) });
+    const { Panel } = require("../src/ui/panel.js");
+
+    for (const n of ["P", "Q", "R", "S", "T", "U"]) {
+      ps.doc.layers.push({
+        id: ps.nextLayerId++,
+        name: n,
+        kind: "pixel",
+        visible: true,
+        parent: ps.doc,
+        bounds: { left: 0, top: 0, right: 200, bottom: 150 },
+      });
+    }
+
+    const panel = new Panel(document);
+    await panel.init();
+    const cancelBtn = document.getElementById("btn-cancel");
+    ok(cancelBtn.className.indexOf("show") < 0, "the cancel button is hidden when nothing is running");
+    ok(cancelBtn.getAttribute("disabled") === "true", "and disabled, so it cannot be reached early");
+
+    panel.params.batchScope = "document";
+    document.getElementById("btn-batch").emit("click");
+
+    // Press it as soon as the batch is under way.
+    ok(await waitFor(() => cancelBtn.className.indexOf("show") >= 0), "it appears once the batch starts");
+    ok(!cancelBtn.getAttribute("disabled"), "and is enabled while every other button is not");
+    ok(
+      document.getElementById("btn-apply").getAttribute("disabled") === "true",
+      "the other buttons are disabled during the batch"
+    );
+    cancelBtn.emit("click");
+    ok(panel._cancel === true, "clicking it raises the cancel flag");
+
+    ok(await waitFor(() => !panel._busy), "the batch finishes");
+    const built = ps.doc.layers.filter((l) => l.kind === "group").length;
+    ok(built < 6, `it stopped before doing all six layers (${built} built)`);
+    ok(built > 0, `and kept what it had already finished (${built})`);
+    ok(
+      /Stopped early/.test(document.getElementById("notice").textContent),
+      `the panel says what happened ("${document.getElementById("notice").textContent.slice(0, 60)}")`
+    );
+    ok(cancelBtn.className.indexOf("show") < 0, "the button hides again afterwards");
 
     uninstall();
   }

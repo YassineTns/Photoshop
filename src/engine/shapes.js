@@ -14,7 +14,17 @@
  * a gradient fade out smoothly instead of popping.
  *
  * Adding a shape only means adding an entry here; the renderer is generic.
- */
+ *
+ * INTERIOR SPANS
+ * A shape may also declare `span(dy, r, cell)`: the half-width of the strictly
+ * interior part of the row at vertical offset `dy` - the run of pixels for which
+ * the SDF is guaranteed to be <= -0.5, i.e. fully covered. The rasteriser fills
+ * that run directly and only evaluates the SDF on the two edge fragments either
+ * side, which for a large dot is most of its pixels skipped. It is optional:
+ * a shape whose interior is not a cheap closed form (the rotated ellipse, the
+ * non-convex cross) simply omits it and gets the generic per-pixel path. Any
+ * `span` must be a strict *under*-estimate, never an over-estimate, or it would
+ * paint pixels that should have been antialiased.
 
 /**
  * @typedef {object} Shape
@@ -23,6 +33,8 @@
  * @property {(dx:number, dy:number, r:number, cell:number)=>number} sdf
  * @property {(r:number, cell:number)=>number} area   exact area in px^2
  * @property {(r:number, cell:number)=>number} extent half bounding box size
+ * @property {((dy:number, r:number, cell:number)=>number)} [span]
+ *           half-width of the fully covered run at row offset dy, 0 if none
  */
 
 const SQRT2 = Math.SQRT2;
@@ -40,6 +52,12 @@ const SHAPES = {
     sdf: (dx, dy, r) => Math.sqrt(dx * dx + dy * dy) - r,
     area: (r) => Math.PI * r * r,
     extent: (r) => r,
+    // hypot(dx,dy) - r <= -0.5  <=>  dx^2 <= (r-0.5)^2 - dy^2
+    span: (dy, r) => {
+      const ri = r - 0.5;
+      const k = ri * ri - dy * dy;
+      return k > 0 ? Math.sqrt(k) : 0;
+    },
   },
 
   square: {
@@ -56,6 +74,10 @@ const SHAPES = {
     },
     area: (r) => Math.PI * r * r,
     extent: (r) => r * 0.8862269254527580 + 1,
+    span: (dy, r) => {
+      const s = r * 0.8862269254527580 - 0.5;
+      return s > 0 && Math.abs(dy) <= s ? s : 0;
+    },
   },
 
   diamond: {
@@ -67,6 +89,11 @@ const SHAPES = {
     },
     area: (r) => Math.PI * r * r,
     extent: (r) => r * 1.2533141373155003 + 1,
+    // (|dx| + |dy| - s) / sqrt(2) <= -0.5  <=>  |dx| <= s - sqrt(2)/2 - |dy|
+    span: (dy, r) => {
+      const w = r * 1.2533141373155003 - SQRT2 * 0.5 - Math.abs(dy);
+      return w > 0 ? w : 0;
+    },
   },
 
   ellipse: {
@@ -131,6 +158,11 @@ const SHAPES = {
       const halfW = cell * 0.5 + 0.5;
       const halfH = (r * r * Math.PI) / (4 * halfW);
       return Math.max(halfW, halfH) + 1;
+    },
+    span: (dy, r, cell) => {
+      const halfW = cell * 0.5 + 0.5;
+      const halfH = (r * r * Math.PI) / (4 * halfW);
+      return Math.abs(dy) <= halfH - 0.5 && halfW > 0.5 ? halfW - 0.5 : 0;
     },
   },
 };
