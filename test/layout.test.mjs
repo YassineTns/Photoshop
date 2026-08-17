@@ -9,12 +9,16 @@
  * (which assert their own intrinsic width and win). None of that shows up in a
  * unit test - it is only visible once the CSS is laid out.
  *
- * So this renders the real stylesheet, with the real controls, at the real panel
- * width, and asserts geometry: no two siblings in a row may overlap, no row may
- * overflow the panel, and no two stacked rows may collide. It cannot prove UXP
- * agrees with Chromium, but every rule that broke was one Chromium would have
- * caught, because the fix in each case was to stop relying on a feature UXP
- * lacks and use the plainer form that both engines implement.
+ * It then shipped again unable to scroll: a UXP panel does not scroll its
+ * document for you, so every section below the fold was simply unreachable.
+ *
+ * So this renders the real panel at real panel widths and asserts geometry: no
+ * two siblings in a row may overlap, no row may overflow, no two stacked rows
+ * may collide, nothing may collapse to zero, and the panel must scroll far
+ * enough to reach its own last section. It cannot prove UXP agrees with
+ * Chromium, but every rule that broke was one Chromium would have caught,
+ * because the fix in each case was to stop relying on a feature UXP lacks and
+ * use the plainer form that both engines implement.
  *
  * Playwright is an optional dev dependency: if it is missing the test skips
  * rather than fails, so `npm test` stays dependency-free.
@@ -26,7 +30,11 @@ import path from "path";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
-const PAGE = path.join(ROOT, "playground.html");
+/**
+ * The *real* panel: index.html's markup driven by the real panel.js against stub
+ * host modules. Testing a lookalike would only prove the lookalike is fine.
+ */
+const PAGE = path.join(ROOT, "panel-preview.html");
 
 /** Panel widths to check: the manifest minimum, the docked default, and wide. */
 const WIDTHS = [300, 360, 420];
@@ -65,8 +73,27 @@ function ok(cond, msg) {
 
 /** Geometry probe, run inside the page. */
 const PROBE = () => {
-  const out = { overlaps: [], overflows: [], collisions: [], zeroWidth: [] };
-  const host = document.querySelector(".pg-right").getBoundingClientRect();
+  const out = { overlaps: [], overflows: [], collisions: [], zeroWidth: [], scroll: null };
+  const app = document.getElementById("app");
+  const host = app.getBoundingClientRect();
+
+  // Scrolling: content taller than the panel must be reachable, and the last
+  // section must actually come into view when scrolled to the bottom.
+  app.scrollTop = app.scrollHeight;
+  const sections = [...document.querySelectorAll(".section")];
+  const last = sections[sections.length - 1];
+  out.scroll = {
+    overflowY: getComputedStyle(app).overflowY,
+    content: Math.round(app.scrollHeight),
+    panel: Math.round(app.clientHeight),
+    scrolled: Math.round(app.scrollTop),
+    maxScroll: Math.round(app.scrollHeight - app.clientHeight),
+    lastReachable: last
+      ? last.getBoundingClientRect().bottom <= window.innerHeight + 2
+      : false,
+    sections: sections.length,
+  };
+  app.scrollTop = 0;
 
   document.querySelectorAll(".ctl").forEach((row) => {
     const label = (row.textContent || "").trim().slice(0, 24);
@@ -94,7 +121,7 @@ const PROBE = () => {
     }
   });
 
-  [".algo-chip", ".preset-chip", ".btn", ".swatch"].forEach((sel) => {
+  [".algo-chip", ".preset-chip", ".btn", ".swatch", ".seg"].forEach((sel) => {
     document.querySelectorAll(sel).forEach((c) => {
       const r = c.getBoundingClientRect();
       if (r.right > host.right + 1) out.overflows.push(sel + " " + (c.textContent || "").trim());
@@ -110,9 +137,16 @@ const browser = await chromium.launch(launchOpts);
 for (const width of WIDTHS) {
   for (const mode of ["Halftone", "Dither"]) {
     for (const scheme of ["dark", "light"]) {
+      // A real panel height, not a tall one: scrolling only exists if the
+      // viewport is smaller than the content.
       const page = await browser.newPage({
-        viewport: { width, height: 1600 },
+        viewport: { width, height: 720 },
         colorScheme: scheme,
+      });
+      const pageErrors = [];
+      page.on("pageerror", (e) => pageErrors.push(String(e)));
+      page.on("console", (m) => {
+        if (m.type() === "error") pageErrors.push(m.text());
       });
       await page.goto("file://" + PAGE);
       await page.waitForTimeout(700);
@@ -147,10 +181,26 @@ for (const width of WIDTHS) {
 
       const r = await page.evaluate(PROBE);
       const tag = `${width}px ${mode} ${scheme}`;
+      ok(pageErrors.length === 0, `${tag}: the panel starts with no errors${fmt(pageErrors)}`);
       ok(r.overlaps.length === 0, `${tag}: no sibling overlap${fmt(r.overlaps)}`);
       ok(r.collisions.length === 0, `${tag}: no stacked-row collision${fmt(r.collisions)}`);
       ok(r.overflows.length === 0, `${tag}: nothing overflows the panel${fmt(r.overflows)}`);
       ok(r.zeroWidth.length === 0, `${tag}: nothing collapsed to zero${fmt(r.zeroWidth)}`);
+      ok(r.scroll.sections >= 8, `${tag}: the panel built its sections (${r.scroll.sections})`);
+      ok(
+        r.scroll.overflowY === "auto" || r.scroll.overflowY === "scroll",
+        `${tag}: the panel is a scroll container (overflow-y: ${r.scroll.overflowY})`
+      );
+      ok(
+        r.scroll.content > r.scroll.panel,
+        `${tag}: content exceeds the panel, so scrolling is the case that matters ` +
+          `(${r.scroll.content}px in ${r.scroll.panel}px)`
+      );
+      ok(
+        r.scroll.scrolled === r.scroll.maxScroll && r.scroll.maxScroll > 0,
+        `${tag}: scrolls to the bottom (${r.scroll.scrolled}/${r.scroll.maxScroll})`
+      );
+      ok(r.scroll.lastReachable, `${tag}: the last section is reachable`);
 
       await page.close();
     }

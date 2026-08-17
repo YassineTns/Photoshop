@@ -38,6 +38,13 @@ needed if you want to run the tests.
 
 ### Trying it without Photoshop
 
+Two generated pages run in any browser, built with `npm run playground`:
+
+`panel-preview.html` is **index.html's own markup driven by the real panel.js**,
+against stub host modules. Photoshop calls do nothing, so Apply is inert, but
+everything up to the moment a button is pressed is the genuine panel — which is
+what the layout test drives.
+
 `playground.html` is the whole rendering engine in one self-contained file.
 Double-click it — any browser, no Photoshop, no Node, no server. Drop in an
 image, and every control, preset and mode behaves exactly as it does in the
@@ -45,9 +52,9 @@ panel, because it *is* the same code: the engine has no dependency on the
 `photoshop` module, which is what makes both this and the Node test suite
 possible.
 
-It is the fastest way to judge the render and to try settings. What it cannot do
-is the Photoshop side — layers, Smart Objects, colour separation into fill
-layers, batch. Rebuild it after changing the engine with `npm run playground`.
+It is the fastest way to judge the render and to try settings. What neither can
+do is the Photoshop side — layers, Smart Objects, colour separation into fill
+layers, batch.
 
 ## Use
 
@@ -134,6 +141,7 @@ src/
   presets/presets.js   the thirteen built-in presets
   util/                PNG encoder, UTF-8 base64
 playground.html        the engine, bundled to run in a browser (generated)
+panel-preview.html     the real panel, bundled the same way (generated)
 test/                  engine suite + mocked-host integration suite
 tools/make-icons.js
 tools/build-playground.js
@@ -418,16 +426,20 @@ ordered matrix with L distinct thresholds can only represent tone in steps of
 achieves the best it structurally can, instead of hiding a regression behind a
 loose number. Threshold and Atkinson are exempted by name, with the reason.
 
-`test:layout` exists because the panel once shipped with every control piled on
-top of its neighbour. The stylesheet used three things UXP does not implement -
-flex `gap`, a fixed `height` on rows containing form controls, and a flex basis
-on inputs (which assert their own intrinsic width and win) - and none of that is
-visible to a unit test. It now renders the real stylesheet with the real controls
-at 300/360/420px, in both modes and both themes, and asserts geometry: no sibling
-overlap, no stacked-row collision, nothing overflowing the panel, nothing
-collapsed to zero. It cannot prove UXP agrees with Chromium, but every rule that
-broke was one Chromium would have caught, because the fix in each case was to
-stop relying on a feature UXP lacks.
+`test:layout` exists because the panel shipped broken twice. First with every
+control piled on its neighbour: the stylesheet used three things UXP does not
+implement — flex `gap`, a fixed `height` on rows containing form controls, and a
+flex basis on inputs (which assert their own intrinsic width and win). Then
+unable to scroll at all, because a UXP panel does not scroll its document for
+you, so every section below the fold was unreachable. Neither is visible to a
+unit test.
+
+It now drives the *real* panel at 300/360/420px in both modes and both themes,
+and asserts geometry: no sibling overlap, no stacked-row collision, nothing
+overflowing, nothing collapsed to zero, no start-up errors, and that the panel
+scrolls far enough to reach its own last section. 120 assertions. It cannot prove
+UXP agrees with Chromium, but every rule that broke was one Chromium would have
+caught, because the fix in each case was to stop relying on a feature UXP lacks.
 
 For separation it asserts the properties that matter rather than pixel values:
 pure inks resolve to themselves and drag nothing else in, secondaries decompose

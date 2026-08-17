@@ -1,10 +1,18 @@
 "use strict";
 
 /**
- * Builds playground.html: the whole rendering engine in one self-contained file
- * that runs in any browser.
+ * Builds two browser-runnable pages.
  *
  *   npm run playground
+ *
+ * playground.html    - the rendering engine with a purpose-built UI, for judging
+ *                      the render and trying settings.
+ * panel-preview.html - index.html's own markup driven by the real panel.js,
+ *                      against stub host modules. This one exists to test the
+ *                      *panel* rather than the engine: layout, scrolling, which
+ *                      controls appear in which mode. Photoshop calls are stubs,
+ *                      so Apply does nothing, but everything up to the moment a
+ *                      button is pressed is the genuine article.
  *
  * This is possible only because src/engine, src/state, src/presets, src/ui and
  * src/util have no dependency on the `photoshop` module - the same property that
@@ -40,6 +48,7 @@ const MODULES = [
   "src/presets/presets.js",
   "src/ui/controls.js",
   "src/util/png.js",
+  "src/util/base64.js",
 ];
 
 function read(rel) {
@@ -97,6 +106,71 @@ function wrapModule(rel) {
     `\n});\n`
   );
 }
+
+/** Modules the panel needs on top of the engine. */
+const PANEL_MODULES = [
+  "src/photoshop/host.js",
+  "src/photoshop/document.js",
+  "src/photoshop/layers.js",
+  "src/photoshop/imaging.js",
+  "src/photoshop/metadata.js",
+  "src/photoshop/render.js",
+  "src/photoshop/batch.js",
+  "src/photoshop/swatches.js",
+  "src/ui/panel.js",
+];
+
+/**
+ * Stand-ins for the two modules only Photoshop provides. Deliberately minimal:
+ * enough for the panel to start, report "no document", and build every control.
+ */
+const HOST_STUBS = `
+window.__define("photoshop", function (module) {
+  var doc = null;
+  module.exports = {
+    app: {
+      get activeDocument() { return doc; },
+      foregroundColor: { rgb: { red: 236, green: 62, blue: 50 } },
+      version: "preview"
+    },
+    core: { executeAsModal: function (fn) { return Promise.resolve(fn({ reportProgress: function () {} })); } },
+    action: {
+      batchPlay: function () { return Promise.resolve([{}]); },
+      addNotificationListener: function () {}
+    },
+    imaging: {
+      getPixels: function () { return Promise.reject(new Error("no host")); },
+      putPixels: function () { return Promise.resolve(); },
+      putLayerMask: function () { return Promise.resolve(); },
+      createImageDataFromBuffer: function (b, o) { return { width: o.width, height: o.height, dispose: function () {} }; }
+    }
+  };
+});
+window.__define("uxp", function (module) {
+  var store = {};
+  module.exports = {
+    storage: {
+      formats: { binary: "binary", utf8: "utf8" },
+      localFileSystem: {
+        getDataFolder: function () {
+          return Promise.resolve({
+            getEntry: function (n) {
+              return store[n] === undefined
+                ? Promise.reject(new Error("missing"))
+                : Promise.resolve({ read: function () { return Promise.resolve(store[n]); } });
+            },
+            createFile: function (n) {
+              return Promise.resolve({ write: function (t) { store[n] = t; return Promise.resolve(); } });
+            }
+          });
+        },
+        getFileForOpening: function () { return Promise.resolve(null); },
+        getFileForSaving: function () { return Promise.resolve(null); }
+      }
+    }
+  };
+});
+`;
 
 const PLAYGROUND_UI = `
 (function () {
@@ -519,7 +593,68 @@ ${PLAYGROUND_UI}
   const out = path.join(ROOT, "playground.html");
   fs.writeFileSync(out, html);
   const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
-  console.log(`playground.html  ${kb} KB  (${MODULES.length} modules inlined)`);
+  console.log(`playground.html      ${kb} KB  (${MODULES.length} modules inlined)`);
+
+  buildPanelPreview();
+}
+
+/**
+ * index.html's own body, driven by the real panel.js.
+ *
+ * The entry point is inlined rather than loaded, because main.js lives at the
+ * plugin root specifically so UXP resolves its require from there - and that
+ * distinction is meaningless here.
+ */
+function buildPanelPreview() {
+  const all = MODULES.concat(PANEL_MODULES);
+  const modules = all.map(wrapModule).join("\n");
+
+  const indexHtml = read("index.html");
+  const bodyMatch = /<body>([\s\S]*?)<\/body>/.exec(indexHtml);
+  let body = bodyMatch ? bodyMatch[1] : "";
+  body = body.replace(/<script[\s\S]*?<\/script>/g, "");
+
+  const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Halftone Studio — panel preview</title>
+<style>
+${read("src/ui/styles.css")}
+</style>
+</head>
+<body>
+${body}
+<script>
+${SHIM}
+</script>
+<script>
+${HOST_STUBS}
+</script>
+<script>
+${modules}
+</script>
+<script>
+(function () {
+  var Panel = window.__require("main.js", "./src/ui/panel.js").Panel;
+  var panel = new Panel(document);
+  window.halftonePanel = panel;
+  panel.init().catch(function (e) {
+    var n = document.getElementById("notice");
+    if (n) { n.textContent = String(e && e.message || e); n.className = "notice show error"; }
+    if (window.console) console.error(e);
+  });
+})();
+</script>
+</body>
+</html>
+`;
+
+  const out = path.join(ROOT, "panel-preview.html");
+  fs.writeFileSync(out, html);
+  const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
+  console.log(`panel-preview.html   ${kb} KB  (${all.length} modules inlined)`);
 }
 
 build();

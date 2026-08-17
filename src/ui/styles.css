@@ -68,9 +68,15 @@
   box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
   padding: 0;
+  overflow: hidden;
+}
+
+body {
   background: var(--bg);
   color: var(--text);
   font-family: "Adobe Clean", -apple-system, "Segoe UI", sans-serif;
@@ -79,7 +85,27 @@ body {
   user-select: none;
 }
 
+/*
+ * The scroll container.
+ *
+ * A UXP panel does not scroll its document for you: with `#app` simply flowing
+ * taller than the panel, everything below the fold was unreachable and there was
+ * no scrollbar at all. It needs one element with a definite height and its own
+ * overflow.
+ *
+ * The four insets pin it to the initial containing block - the panel viewport -
+ * which gives it that definite height without depending on an unbroken
+ * height:100% chain through html and body. `height: 100%` alone silently does
+ * nothing the moment one ancestor forgets it.
+ */
 #app {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   padding: 8px;

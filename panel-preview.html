@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Halftone Studio — playground</title>
+<title>Halftone Studio — panel preview</title>
 <style>
 /*
  * Halftone Studio panel styling.
@@ -674,58 +674,55 @@ body {
 .notice.error { border-color: var(--danger); color: var(--text); }
 .notice.warn { border-color: #b8860b; }
 
-
-body { padding: 0; }
-.pg { display: flex; gap: 12px; padding: 12px; align-items: flex-start; }
-.pg-left { flex: 1 1 auto; min-width: 0; position: sticky; top: 12px; }
-.pg-right { flex: 0 0 340px; max-height: calc(100vh - 24px); overflow-y: auto; }
-.preview-wrap { min-height: 300px; }
-.preview-wrap.dragging { border-color: var(--accent); }
-.pg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.pg-title { font-size: 13px; font-weight: 600; }
-.pg-sub { color: var(--text-dim); font-size: 10px; }
-input[type=file] { color: var(--text-dim); font-size: 10px; font-family: inherit; }
-@media (max-width: 900px) {
-  .pg { flex-direction: column; }
-  .pg-right { flex: 1 1 auto; width: 100%; max-height: none; }
-  .pg-left { position: static; width: 100%; }
-}
-
 </style>
 </head>
 <body>
-<div class="pg">
-  <div class="pg-left">
-    <div class="pg-head">
-      <div class="pg-title">Halftone Studio</div>
-      <div class="pg-sub">engine playground — no Photoshop required</div>
-    </div>
-    <div class="pg-head">
-      <input type="file" id="file" accept="image/*" />
-      <span class="pg-sub" id="file-name"></span>
-    </div>
-    <div id="preview-wrap" class="preview-wrap">
-      <div id="preview-empty" class="preview-empty">
-        Drop an image here, or use the file picker above
-      </div>
-      <img id="preview" class="preview" />
-      <div id="preview-badge" class="preview-badge"></div>
-    </div>
-    <div class="toolbar" style="margin-top:8px">
-      <button id="btn-compare" class="btn">Hold to Compare</button>
-      <button id="btn-save" class="btn btn-primary">Save full-size PNG</button>
-      <button id="btn-reset" class="btn">Reset</button>
-    </div>
-    <div id="notice" class="notice"></div>
-    <div class="preset-bar" style="margin-top:8px">
-      <div id="preset-list" class="preset-list"></div>
-    </div>
-  </div>
-  <div class="pg-right">
-    <div id="sections" class="sections"></div>
-  </div>
-</div>
 
+    <div id="app">
+      <div id="status" class="status">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-text">Starting…</span>
+      </div>
+
+      <div id="preview-wrap" class="preview-wrap">
+        <div id="preview-empty" class="preview-empty">
+          Select a layer, then press <b>Load Layer</b>
+        </div>
+        <img id="preview" class="preview" />
+        <div id="preview-badge" class="preview-badge"></div>
+      </div>
+
+      <div class="toolbar">
+        <button id="btn-load" class="btn">Load Layer</button>
+        <button id="btn-apply" class="btn btn-primary">Apply</button>
+        <button id="btn-update" class="btn">Update</button>
+      </div>
+
+      <div class="toolbar">
+        <button id="btn-batch" class="btn btn-small">Batch Apply</button>
+        <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
+      </div>
+
+      <div id="progress" class="progress"><div id="progress-bar" class="progress-bar"></div></div>
+
+      <div id="sections" class="sections"></div>
+
+      <div class="preset-bar">
+        <div class="preset-row">
+          <div id="preset-list" class="preset-list"></div>
+        </div>
+        <div class="toolbar">
+          <button id="btn-save-preset" class="btn btn-small">Save Preset</button>
+          <button id="btn-load-preset" class="btn btn-small">Load Preset</button>
+          <button id="btn-reset" class="btn btn-small">Reset All</button>
+        </div>
+      </div>
+
+      <div id="notice" class="notice"></div>
+    </div>
+
+    
+  
 <script>
 
 (function () {
@@ -767,6 +764,55 @@ input[type=file] { color: var(--text-dim); font-size: 10px; font-family: inherit
     return m.exports;
   };
 })();
+
+</script>
+<script>
+
+window.__define("photoshop", function (module) {
+  var doc = null;
+  module.exports = {
+    app: {
+      get activeDocument() { return doc; },
+      foregroundColor: { rgb: { red: 236, green: 62, blue: 50 } },
+      version: "preview"
+    },
+    core: { executeAsModal: function (fn) { return Promise.resolve(fn({ reportProgress: function () {} })); } },
+    action: {
+      batchPlay: function () { return Promise.resolve([{}]); },
+      addNotificationListener: function () {}
+    },
+    imaging: {
+      getPixels: function () { return Promise.reject(new Error("no host")); },
+      putPixels: function () { return Promise.resolve(); },
+      putLayerMask: function () { return Promise.resolve(); },
+      createImageDataFromBuffer: function (b, o) { return { width: o.width, height: o.height, dispose: function () {} }; }
+    }
+  };
+});
+window.__define("uxp", function (module) {
+  var store = {};
+  module.exports = {
+    storage: {
+      formats: { binary: "binary", utf8: "utf8" },
+      localFileSystem: {
+        getDataFolder: function () {
+          return Promise.resolve({
+            getEntry: function (n) {
+              return store[n] === undefined
+                ? Promise.reject(new Error("missing"))
+                : Promise.resolve({ read: function () { return Promise.resolve(store[n]); } });
+            },
+            createFile: function (n) {
+              return Promise.resolve({ write: function (t) { store[n] = t; return Promise.resolve(); } });
+            }
+          });
+        },
+        getFileForOpening: function () { return Promise.resolve(null); },
+        getFileForSaving: function () { return Promise.resolve(null); }
+      }
+    }
+  };
+});
 
 </script>
 <script>
@@ -6664,347 +6710,2866 @@ module.exports = { encodeString, decodeString, utf8Encode, utf8Decode };
 
 });
 
-</script>
-<script>
+window.__define("src/photoshop/host.js", function (module, exports, require) {
+"use strict";
 
-(function () {
-  var require = function (r) { return window.__require("src/playground.js", r); };
+/**
+ * Single point of contact with the Photoshop host.
+ *
+ * Everything that touches the `photoshop` module goes through here so that:
+ *  - the engine and the UI stay testable outside Photoshop;
+ *  - optional APIs are feature detected once instead of being assumed.
+ *
+ * Nothing in this file invents an API. Where a capability is uncertain it is
+ * probed at runtime and the caller is told what is actually available.
+ */
 
-  var C = require("./ui/controls.js");
-  var P = require("./state/params.js");
-  var PRESETS = require("./presets/presets.js");
-  var PIPE = require("./engine/pipeline.js");
-  var PNG = require("./util/png.js");
-  var DITHER = require("./engine/dither.js");
+let _ps = null;
+let _uxp = null;
 
-  var ALGO_LABELS = {};
-  var ALGO_FAMILY = {};
-  DITHER.ALGORITHMS.forEach(function (a) {
-    ALGO_LABELS[a.id] = a.label;
-    ALGO_FAMILY[a.id] = a.family;
+function ps() {
+  if (_ps) return _ps;
+  try {
+    // eslint-disable-next-line global-require
+    _ps = require("photoshop");
+  } catch (e) {
+    throw new Error("This plugin must run inside Photoshop (the 'photoshop' module is unavailable).");
+  }
+  return _ps;
+}
+
+function uxp() {
+  if (_uxp) return _uxp;
+  try {
+    // eslint-disable-next-line global-require
+    _uxp = require("uxp");
+  } catch (e) {
+    _uxp = null;
+  }
+  return _uxp;
+}
+
+function app() {
+  return ps().app;
+}
+
+function action() {
+  return ps().action;
+}
+
+function core() {
+  return ps().core;
+}
+
+function imaging() {
+  const m = ps().imaging;
+  if (!m) {
+    throw new Error(
+      "The Photoshop imaging API is unavailable. It requires Photoshop 23.3 or newer; " +
+        "this plugin needs it to read and write pixels."
+    );
+  }
+  return m;
+}
+
+/**
+ * Run `fn` inside a modal execution scope. All document mutation and all
+ * pixel I/O has to happen inside one of these.
+ *
+ * @param {(ctx: object) => Promise<any>} fn
+ * @param {string} commandName shown in Photoshop's history / progress UI
+ */
+async function modal(fn, commandName) {
+  return core().executeAsModal(fn, { commandName: commandName || "Halftone Studio" });
+}
+
+/**
+ * @param {object[]} descriptors
+ * @param {object} [options]
+ * @returns {Promise<object[]>}
+ */
+async function batchPlay(descriptors, options) {
+  return action().batchPlay(descriptors, Object.assign({ synchronousExecution: false }, options));
+}
+
+/**
+ * Probe the host once and report what is actually available. Used to fail with
+ * an accurate message rather than a stack trace, and to pick the metadata
+ * strategy.
+ */
+let _caps = null;
+function capabilities() {
+  if (_caps) return _caps;
+  const c = {
+    photoshop: false,
+    imaging: false,
+    getPixels: false,
+    putPixels: false,
+    createImageDataFromBuffer: false,
+    localFileSystem: false,
+    version: null,
+  };
+  try {
+    const p = ps();
+    c.photoshop = true;
+    c.version = p.app && p.app.version ? String(p.app.version) : null;
+    const im = p.imaging;
+    if (im) {
+      c.imaging = true;
+      c.getPixels = typeof im.getPixels === "function";
+      c.putPixels = typeof im.putPixels === "function";
+      c.createImageDataFromBuffer = typeof im.createImageDataFromBuffer === "function";
+    }
+  } catch (e) {
+    /* not in Photoshop */
+  }
+  try {
+    const u = uxp();
+    c.localFileSystem = !!(u && u.storage && u.storage.localFileSystem);
+  } catch (e) {
+    /* no file system permission */
+  }
+  _caps = c;
+  return c;
+}
+
+/** Human readable summary of anything missing that the plugin needs. */
+function missingCapabilities() {
+  const c = capabilities();
+  const missing = [];
+  if (!c.photoshop) missing.push("Photoshop host API");
+  if (!c.getPixels) missing.push("imaging.getPixels");
+  if (!c.putPixels) missing.push("imaging.putPixels");
+  if (!c.createImageDataFromBuffer) missing.push("imaging.createImageDataFromBuffer");
+  return missing;
+}
+
+module.exports = {
+  ps,
+  uxp,
+  app,
+  action,
+  core,
+  imaging,
+  modal,
+  batchPlay,
+  capabilities,
+  missingCapabilities,
+};
+
+});
+
+window.__define("src/photoshop/document.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Document and selection queries. Read-only: nothing here mutates the document.
+ */
+
+const { app, batchPlay } = require("./host.js");
+
+/**
+ * @typedef {object} DocInfo
+ * @property {number} id
+ * @property {string} name
+ * @property {number} width  pixels
+ * @property {number} height pixels
+ * @property {string} mode   e.g. "RGBColorMode"
+ */
+
+/** @returns {DocInfo|null} */
+function activeDocument() {
+  const a = app();
+  const doc = a.activeDocument;
+  if (!doc) return null;
+  return {
+    id: doc.id,
+    name: doc.name,
+    width: Math.round(doc.width),
+    height: Math.round(doc.height),
+    mode: String(doc.mode || ""),
+    raw: doc,
+  };
+}
+
+/**
+ * @typedef {object} LayerInfo
+ * @property {number} id
+ * @property {string} name
+ * @property {string} kind
+ * @property {boolean} visible
+ * @property {object} raw the DOM layer
+ */
+
+/** The layers the user currently has selected. @returns {LayerInfo[]} */
+function selectedLayers() {
+  const doc = app().activeDocument;
+  if (!doc) return [];
+  const sel = doc.activeLayers || [];
+  return sel.map(toLayerInfo);
+}
+
+function toLayerInfo(l) {
+  return {
+    id: l.id,
+    name: l.name,
+    kind: String(l.kind || ""),
+    visible: l.visible,
+    raw: l,
+  };
+}
+
+/** Flatten the whole layer tree into a list. @returns {LayerInfo[]} */
+function allLayers() {
+  const doc = app().activeDocument;
+  if (!doc) return [];
+  const out = [];
+  const walk = (layers) => {
+    for (const l of layers || []) {
+      out.push(toLayerInfo(l));
+      if (l.layers && l.layers.length) walk(l.layers);
+    }
+  };
+  walk(doc.layers);
+  return out;
+}
+
+/** @returns {LayerInfo|null} */
+function findLayerById(id) {
+  return allLayers().find((l) => l.id === id) || null;
+}
+
+/**
+ * Walk up from a layer to its enclosing group chain.
+ * @param {object} domLayer
+ * @returns {object[]} outermost last
+ */
+function ancestors(domLayer) {
+  const out = [];
+  let cur = domLayer && domLayer.parent;
+  // `parent` is the Document at the top of the chain; stop there. The depth
+  // guard is paranoia against a malformed tree looping forever.
+  let guard = 64;
+  while (cur && cur.id !== undefined && cur.kind !== undefined && guard-- > 0) {
+    out.push(cur);
+    cur = cur.parent;
+  }
+  return out;
+}
+
+/**
+ * The document's colour mode, read through batchPlay because the DOM property
+ * is not consistently populated across versions.
+ * @returns {Promise<string>}
+ */
+async function colorMode() {
+  try {
+    const res = await batchPlay(
+      [
+        {
+          _obj: "get",
+          _target: [{ _property: "mode" }, { _ref: "document", _enum: "ordinal", _value: "targetEnum" }],
+        },
+      ],
+      {}
+    );
+    const m = res && res[0] && res[0].mode;
+    return m && m._value ? String(m._value) : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+module.exports = {
+  activeDocument,
+  selectedLayers,
+  allLayers,
+  findLayerById,
+  ancestors,
+  colorMode,
+  toLayerInfo,
+};
+
+});
+
+window.__define("src/photoshop/layers.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Layer operations.
+ *
+ * Every operation prefers the documented UXP DOM API and falls back to a
+ * batchPlay descriptor only where the DOM has no equivalent (Smart Object
+ * conversion) or where the DOM method is not present in the running version.
+ * Each fallback is annotated so it is obvious what is guaranteed and what is
+ * best effort.
+ *
+ * All of these must be called from inside core.executeAsModal.
+ */
+
+const { app, batchPlay } = require("./host.js");
+const { toLayerInfo } = require("./document.js");
+
+/**
+ * Select exactly these layers.
+ * @param {number[]} ids
+ */
+async function selectLayers(ids) {
+  if (!ids || !ids.length) return;
+  await batchPlay(
+    [
+      {
+        _obj: "select",
+        _target: ids.map((id) => ({ _ref: "layer", _id: id })),
+        makeVisible: false,
+      },
+    ],
+    {}
+  );
+}
+
+/**
+ * Convert the currently selected layer(s) into a single Smart Object.
+ *
+ * There is no DOM equivalent for this; `newPlacedLayer` is the descriptor
+ * Photoshop itself records for Layer > Smart Objects > Convert to Smart Object.
+ * The original pixels are preserved inside the Smart Object, which is what
+ * makes the whole workflow non-destructive.
+ *
+ * @returns {Promise<object>} the resulting Smart Object layer (DOM)
+ */
+async function convertToSmartObject() {
+  await batchPlay([{ _obj: "newPlacedLayer" }], {});
+  return app().activeDocument.activeLayers[0];
+}
+
+/** @returns {boolean} */
+function isSmartObject(domLayer) {
+  return String(domLayer && domLayer.kind) === "smartObject";
+}
+
+/**
+ * Create a group containing the given layers.
+ * @param {string} name
+ * @param {object[]} domLayers
+ * @returns {Promise<object>} the group layer (DOM)
+ */
+async function groupLayers(name, domLayers) {
+  const doc = app().activeDocument;
+  if (typeof doc.createLayerGroup === "function") {
+    try {
+      return await doc.createLayerGroup({ name, fromLayers: domLayers });
+    } catch (e) {
+      // fall through to the descriptor
+    }
+  }
+  // Fallback: "Group from Layers" on the current selection.
+  await selectLayers(domLayers.map((l) => l.id));
+  await batchPlay(
+    [
+      {
+        _obj: "make",
+        _target: [{ _ref: "layerSection" }],
+        from: { _ref: "layer", _enum: "ordinal", _value: "targetEnum" },
+      },
+    ],
+    {}
+  );
+  const group = app().activeDocument.activeLayers[0];
+  if (group && name) await renameLayer(group.id, name);
+  return app().activeDocument.activeLayers[0];
+}
+
+/**
+ * Create an empty pixel layer directly above the currently selected layer.
+ * @param {string} name
+ * @returns {Promise<object>} the new layer (DOM)
+ */
+async function createPixelLayer(name) {
+  const doc = app().activeDocument;
+  if (typeof doc.createLayer === "function") {
+    try {
+      const l = await doc.createLayer({ name });
+      if (l) return l;
+    } catch (e) {
+      // fall through
+    }
+  }
+  await batchPlay(
+    [{ _obj: "make", _target: [{ _ref: "layer" }], using: { _obj: "layer", name: name } }],
+    {}
+  );
+  return app().activeDocument.activeLayers[0];
+}
+
+async function renameLayer(id, name) {
+  await batchPlay(
+    [{ _obj: "set", _target: [{ _ref: "layer", _id: id }], to: { _obj: "layer", name: name } }],
+    {}
+  );
+}
+
+async function setVisible(id, visible) {
+  await batchPlay(
+    [
+      {
+        _obj: visible ? "show" : "hide",
+        null: [{ _ref: "layer", _id: id }],
+      },
+    ],
+    {}
+  );
+}
+
+async function deleteLayer(id) {
+  await batchPlay([{ _obj: "delete", _target: [{ _ref: "layer", _id: id }] }], {});
+}
+
+/**
+ * Create a solid-colour fill layer above the current selection.
+ *
+ * `contentLayer` + `solidColorLayer` is the descriptor Photoshop records for
+ * Layer > New Fill Layer > Solid Color. Note the RGB descriptor spells green as
+ * `grain`; that is a genuine historical quirk of the Action Manager, not a typo.
+ *
+ * Fill layers are what make the separated output worth having: they stay
+ * editable (double-click to change the ink), they resample cleanly, and each one
+ * carries its own mask.
+ *
+ * @param {string} name
+ * @param {number[]} rgb 0..255
+ * @returns {Promise<object>} the new layer (DOM)
+ */
+async function createSolidFillLayer(name, rgb) {
+  await batchPlay(
+    [
+      {
+        _obj: "make",
+        _target: [{ _ref: "contentLayer" }],
+        using: {
+          _obj: "contentLayer",
+          name: name,
+          type: {
+            _obj: "solidColorLayer",
+            color: {
+              _obj: "RGBColor",
+              red: rgb[0],
+              grain: rgb[1],
+              blue: rgb[2],
+            },
+          },
+        },
+      },
+    ],
+    {}
+  );
+  const layer = app().activeDocument.activeLayers[0];
+  if (layer && name && layer.name !== name) await renameLayer(layer.id, name);
+  return app().activeDocument.activeLayers[0];
+}
+
+/**
+ * Add a layer mask to the given layer.
+ * @param {number} layerId
+ * @param {"revealAll"|"hideAll"} kind
+ */
+async function addLayerMask(layerId, kind = "revealAll") {
+  await selectLayers([layerId]);
+  await batchPlay(
+    [
+      {
+        _obj: "make",
+        new: { _class: "channel" },
+        at: { _ref: "channel", _enum: "channel", _value: "mask" },
+        using: { _enum: "userMaskEnabled", _value: kind },
+      },
+    ],
+    {}
+  );
+}
+
+/** Find a direct child of a group by name. @returns {object|null} DOM layer */
+function childByName(group, name) {
+  if (!group || !group.layers) return null;
+  for (const l of group.layers) if (l.name === name) return l;
+  return null;
+}
+
+/** Find a direct child of a group whose name starts with `prefix`. */
+function childByPrefix(group, prefix) {
+  if (!group || !group.layers) return null;
+  for (const l of group.layers) if (String(l.name).indexOf(prefix) === 0) return l;
+  return null;
+}
+
+module.exports = {
+  selectLayers,
+  convertToSmartObject,
+  isSmartObject,
+  groupLayers,
+  createPixelLayer,
+  createSolidFillLayer,
+  addLayerMask,
+  renameLayer,
+  setVisible,
+  deleteLayer,
+  childByName,
+  childByPrefix,
+  toLayerInfo,
+};
+
+});
+
+window.__define("src/photoshop/imaging.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Pixel I/O.
+ *
+ * Two calls do the real work: imaging.getPixels to read a layer, and
+ * imaging.putPixels to write one. Both are wrapped here so that the rest of the
+ * plugin only ever sees a plain `{data: Uint8ClampedArray (RGBA), width, height}`
+ * regardless of how many components the host handed back.
+ *
+ * Both must be called inside core.executeAsModal.
+ */
+
+const { imaging, app } = require("./host.js");
+
+/** Cap on the longest edge we ever read. See readLayerPixels(). */
+const READ_MAX_LONGEST = 2600;
+
+/**
+ * Read a layer's pixels as RGBA.
+ *
+ * The read is deliberately capped: the engine measures tone on a downscaled
+ * analysis image anyway and never samples the source during rasterisation, so
+ * pulling 24 million pixels across the bridge for a 6000x4000 document would
+ * cost seconds and hundreds of megabytes for no visible benefit. `targetSize`
+ * asks Photoshop to do the scaling; if a host build ignores it we simply get
+ * the full resolution buffer and the engine downscales it itself, so the code
+ * path is safe either way.
+ *
+ * @param {object} opts
+ * @param {number} opts.documentID
+ * @param {number} opts.layerID
+ * @param {{left:number, top:number, right:number, bottom:number}} opts.bounds
+ * @param {number} [opts.maxLongest]
+ * @returns {Promise<{data: Uint8ClampedArray, width: number, height: number}>}
+ */
+async function readLayerPixels(opts) {
+  const im = imaging();
+  const bounds = opts.bounds;
+  const srcW = bounds.right - bounds.left;
+  const srcH = bounds.bottom - bounds.top;
+  const cap = opts.maxLongest || READ_MAX_LONGEST;
+  const longest = Math.max(srcW, srcH);
+
+  const request = {
+    documentID: opts.documentID,
+    layerID: opts.layerID,
+    sourceBounds: bounds,
+    componentSize: 8,
+    applyAlpha: false,
+    colorSpace: "RGB",
+  };
+  if (longest > cap) {
+    const s = cap / longest;
+    request.targetSize = {
+      width: Math.max(1, Math.round(srcW * s)),
+      height: Math.max(1, Math.round(srcH * s)),
+    };
+  }
+
+  let result;
+  try {
+    result = await im.getPixels(request);
+  } catch (e) {
+    // Some host builds reject an explicit targetSize on certain layer kinds.
+    // Retry at full resolution before giving up; the engine can cope.
+    if (!request.targetSize) throw e;
+    delete request.targetSize;
+    result = await im.getPixels(request);
+  }
+
+  const imageData = result.imageData;
+  try {
+    const width = imageData.width;
+    const height = imageData.height;
+    const components = imageData.components || 4;
+    const raw = await imageData.getData({ chunky: true });
+    return {
+      data: toRGBA(raw, width, height, components),
+      width,
+      height,
+    };
+  } finally {
+    if (imageData && typeof imageData.dispose === "function") imageData.dispose();
+  }
+}
+
+/**
+ * Normalise whatever component layout the host returned into straight RGBA.
+ * @param {Uint8Array|Uint8ClampedArray} raw
+ */
+function toRGBA(raw, width, height, components) {
+  const n = width * height;
+  if (components === 4) {
+    // Already RGBA; copy into a clamped array so downstream maths is safe.
+    return raw instanceof Uint8ClampedArray ? raw : new Uint8ClampedArray(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.length));
+  }
+  const out = new Uint8ClampedArray(n * 4);
+  if (components === 3) {
+    for (let i = 0, p = 0, q = 0; i < n; i++, p += 3, q += 4) {
+      out[q] = raw[p];
+      out[q + 1] = raw[p + 1];
+      out[q + 2] = raw[p + 2];
+      out[q + 3] = 255;
+    }
+  } else if (components === 1) {
+    for (let i = 0, q = 0; i < n; i++, q += 4) {
+      const v = raw[i];
+      out[q] = v;
+      out[q + 1] = v;
+      out[q + 2] = v;
+      out[q + 3] = 255;
+    }
+  } else {
+    throw new Error(`Unsupported component count from getPixels: ${components}`);
+  }
+  return out;
+}
+
+/**
+ * Write an RGBA buffer into an existing layer.
+ *
+ * @param {object} opts
+ * @param {number} opts.documentID
+ * @param {number} opts.layerID
+ * @param {Uint8ClampedArray} opts.data RGBA, width*height*4
+ * @param {number} opts.width
+ * @param {number} opts.height
+ * @param {{left:number, top:number, right:number, bottom:number}} opts.targetBounds
+ */
+async function writeLayerPixels(opts) {
+  const im = imaging();
+  // createImageDataFromBuffer wants a plain typed array view over the bytes.
+  const bytes =
+    opts.data instanceof Uint8Array
+      ? opts.data
+      : new Uint8Array(opts.data.buffer, opts.data.byteOffset, opts.data.length);
+
+  const imageData = await im.createImageDataFromBuffer(bytes, {
+    width: opts.width,
+    height: opts.height,
+    components: 4,
+    componentSize: 8,
+    chunky: true,
+    colorProfile: "sRGB IEC61966-2.1",
+    colorSpace: "RGB",
   });
 
-  var engine = new PIPE.HalftoneEngine();
-  var params = P.defaultParams();
-  var controls = {};
-  var sectionOpen = {};
-  var lastMs = 0;
-  var raf = null;
-  var timer = null;
-  var sourceURL = null;
-  var renderedURL = null;
+  try {
+    await im.putPixels({
+      documentID: opts.documentID,
+      layerID: opts.layerID,
+      imageData,
+      replace: true,
+      targetBounds: opts.targetBounds,
+    });
+  } finally {
+    if (imageData && typeof imageData.dispose === "function") imageData.dispose();
+  }
+}
 
-  var $ = function (id) { return document.getElementById(id); };
+/**
+ * Write a single-channel buffer into a layer's mask.
+ *
+ * The imaging API exposes putLayerMask separately from putPixels. Its presence
+ * is probed rather than assumed, because the colour-separated output depends on
+ * it entirely and the caller needs to be able to fall back cleanly (and say so)
+ * rather than half-build a broken layer stack.
+ *
+ * @param {object} opts
+ * @param {number} opts.documentID
+ * @param {number} opts.layerID
+ * @param {Uint8ClampedArray} opts.data one byte per pixel
+ * @param {number} opts.width
+ * @param {number} opts.height
+ * @param {{left:number, top:number, right:number, bottom:number}} opts.targetBounds
+ */
+async function writeLayerMask(opts) {
+  const im = imaging();
+  if (!canWriteMasks()) {
+    throw new Error("This Photoshop build has no imaging.putLayerMask, so masks cannot be written.");
+  }
+  const bytes =
+    opts.data instanceof Uint8Array
+      ? opts.data
+      : new Uint8Array(opts.data.buffer, opts.data.byteOffset, opts.data.length);
+
+  const imageData = await im.createImageDataFromBuffer(bytes, {
+    width: opts.width,
+    height: opts.height,
+    components: 1,
+    componentSize: 8,
+    chunky: true,
+    colorProfile: "Gray Gamma 2.2",
+    colorSpace: "Grayscale",
+  });
+
+  try {
+    await im.putLayerMask({
+      documentID: opts.documentID,
+      layerID: opts.layerID,
+      imageData,
+      replace: true,
+      targetBounds: opts.targetBounds,
+    });
+  } finally {
+    if (imageData && typeof imageData.dispose === "function") imageData.dispose();
+  }
+}
+
+/** @returns {boolean} whether the colour-separated output is possible here. */
+function canWriteMasks() {
+  try {
+    const im = imaging();
+    return typeof im.putLayerMask === "function" && typeof im.createImageDataFromBuffer === "function";
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Whole-canvas bounds for the active document. */
+function canvasBounds(doc) {
+  return { left: 0, top: 0, right: Math.round(doc.width), bottom: Math.round(doc.height) };
+}
+
+/**
+ * Photoshop's current foreground colour, used by the palette swatches.
+ * @returns {number[]|null} rgb 0..255
+ */
+function foregroundRGB() {
+  try {
+    const c = app().foregroundColor;
+    if (c && c.rgb) return [Math.round(c.rgb.red), Math.round(c.rgb.green), Math.round(c.rgb.blue)];
+  } catch (e) {
+    /* ignore */
+  }
+  return null;
+}
+
+module.exports = {
+  readLayerPixels,
+  writeLayerPixels,
+  writeLayerMask,
+  canWriteMasks,
+  canvasBounds,
+  foregroundRGB,
+  toRGBA,
+  READ_MAX_LONGEST,
+};
+
+});
+
+window.__define("src/photoshop/metadata.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Persisting a render's parameters so it can be re-edited later.
+ *
+ * WHAT UXP ACTUALLY OFFERS
+ * ------------------------
+ * Photoshop has no public API for registering a plugin as a real Smart Filter,
+ * and UXP exposes no "custom data" bag on a layer. So there is no single
+ * blessed place to put this. Rather than pick one and hope, the plugin writes
+ * the same record to three places and reads them back in order of reliability:
+ *
+ *   1. Layer XMP  - `metadata`/`layerXMP` through batchPlay. This travels with
+ *      the layer inside the .psd, survives duplication and reopening, and is
+ *      the only one of the three that is genuinely attached to the layer. It is
+ *      an Action Manager property rather than a documented UXP surface, so
+ *      every write is verified by reading it straight back; if the readback
+ *      does not match, the plugin quietly downgrades to (2) and says so.
+ *
+ *   2. A sidecar JSON file in the plugin's own data folder, keyed by render id.
+ *      Always written, so it works even when (1) is unavailable. It does not
+ *      travel with the .psd to another machine.
+ *
+ *   3. The render id in the group's layer name (`Halftone ▸ HT-xxxxxx`). This
+ *      is the locator that ties a selected layer back to records (1) and (2),
+ *      and it is the one thing a user can see and must not rename.
+ *
+ * Renaming the group breaks (3) but not (1): a render whose XMP survived can
+ * still be recovered from the layer itself.
+ */
+
+const { batchPlay, uxp } = require("./host.js");
+const { encodeString, decodeString } = require("../util/base64.js");
+const { sanitizeParams, SCHEMA_VERSION } = require("../state/params.js");
+
+const NS = "http://yassinetns.dev/ns/halftone/1.0/";
+const NS_PREFIX = "hts";
+const SIDECAR_FILE = "halftone-renders.json";
+const PRESETS_FILE = "halftone-presets.json";
+const SESSION_FILE = "halftone-session.json";
+
+/** Layer name marker. U+25B8 keeps it visually distinct in the layers panel. */
+const GROUP_PREFIX = "Halftone ▸ ";
+const RENDER_LAYER_NAME = "Halftone Render";
+const SOURCE_LAYER_NAME = "Halftone Source";
+
+/** @returns {string} e.g. "HT-4f2a9c" */
+function newRenderId() {
+  const r = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, "0");
+  return `HT-${r()}${r()}`;
+}
+
+function groupName(renderId) {
+  return GROUP_PREFIX + renderId;
+}
+
+/** @returns {string|null} the render id encoded in a layer name */
+function renderIdFromName(name) {
+  const m = /HT-[0-9a-f]{8}/i.exec(String(name || ""));
+  return m ? m[0] : null;
+}
+
+function isHalftoneGroupName(name) {
+  return String(name || "").indexOf(GROUP_PREFIX) === 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * 1. Layer XMP
+ * ------------------------------------------------------------------ */
+
+function buildXMP(record) {
+  const payload = encodeString(JSON.stringify(record));
+  return (
+    '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>' +
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/">' +
+    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
+    `<rdf:Description rdf:about="" xmlns:${NS_PREFIX}="${NS}" ` +
+    `${NS_PREFIX}:renderId="${record.renderId}" ${NS_PREFIX}:version="${record.version}" ` +
+    `${NS_PREFIX}:payload="${payload}"/>` +
+    "</rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"
+  );
+}
+
+function parseXMP(xmp) {
+  if (!xmp || typeof xmp !== "string") return null;
+  const m = new RegExp(`${NS_PREFIX}:payload="([^"]*)"`).exec(xmp);
+  if (!m) return null;
+  try {
+    return JSON.parse(decodeString(m[1]));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * @param {number} layerId
+ * @returns {Promise<object|null>}
+ */
+async function readLayerXMP(layerId) {
+  try {
+    const res = await batchPlay(
+      [{ _obj: "get", _target: [{ _property: "metadata" }, { _ref: "layer", _id: layerId }] }],
+      {}
+    );
+    const meta = res && res[0] && res[0].metadata;
+    return parseXMP(meta && meta.layerXMP);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * @returns {Promise<boolean>} true only if the write was verified by readback
+ */
+async function writeLayerXMP(layerId, record) {
+  try {
+    await batchPlay(
+      [
+        {
+          _obj: "set",
+          _target: [{ _property: "metadata" }, { _ref: "layer", _id: layerId }],
+          to: { _obj: "metadata", layerXMP: buildXMP(record) },
+        },
+      ],
+      {}
+    );
+  } catch (e) {
+    return false;
+  }
+  const back = await readLayerXMP(layerId);
+  return !!(back && back.renderId === record.renderId);
+}
+
+/* ------------------------------------------------------------------ *
+ * 2. Sidecar file
+ * ------------------------------------------------------------------ */
+
+async function dataFolder() {
+  const u = uxp();
+  if (!u || !u.storage || !u.storage.localFileSystem) return null;
+  try {
+    return await u.storage.localFileSystem.getDataFolder();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function readJSONFile(name, fallback) {
+  const folder = await dataFolder();
+  if (!folder) return fallback;
+  try {
+    const entry = await folder.getEntry(name);
+    const text = await entry.read();
+    const parsed = JSON.parse(text);
+    return parsed === null || parsed === undefined ? fallback : parsed;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+async function writeJSONFile(name, value) {
+  const folder = await dataFolder();
+  if (!folder) return false;
+  try {
+    const file = await folder.createFile(name, { overwrite: true });
+    await file.write(JSON.stringify(value, null, 2));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function readSidecar(renderId) {
+  const all = await readJSONFile(SIDECAR_FILE, {});
+  return all && all[renderId] ? all[renderId] : null;
+}
+
+async function writeSidecar(record) {
+  const all = await readJSONFile(SIDECAR_FILE, {});
+  all[record.renderId] = record;
+  // Keep the store from growing without bound.
+  const keys = Object.keys(all);
+  if (keys.length > 400) {
+    keys
+      .sort((a, b) => (all[a].updatedAt || 0) - (all[b].updatedAt || 0))
+      .slice(0, keys.length - 400)
+      .forEach((k) => delete all[k]);
+  }
+  return writeJSONFile(SIDECAR_FILE, all);
+}
+
+/* ------------------------------------------------------------------ *
+ * Public API
+ * ------------------------------------------------------------------ */
+
+/**
+ * @param {string} renderId
+ * @param {object} params
+ * @param {object} [extra] e.g. {sourceLayerId, docName}
+ */
+function makeRecord(renderId, params, extra) {
+  return Object.assign(
+    {
+      renderId,
+      version: SCHEMA_VERSION,
+      updatedAt: Date.now(),
+      params: sanitizeParams(params),
+    },
+    extra || {}
+  );
+}
+
+/**
+ * Persist a record. Never throws: persistence failing must not lose the user's
+ * render, so the result reports which channels actually took.
+ *
+ * @returns {Promise<{xmp: boolean, sidecar: boolean}>}
+ */
+async function saveRecord(layerIds, record) {
+  const ids = Array.isArray(layerIds) ? layerIds : [layerIds];
+  let xmp = false;
+  for (const id of ids) {
+    if (id === undefined || id === null) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const okOne = await writeLayerXMP(id, record);
+    xmp = xmp || okOne;
+  }
+  const sidecar = await writeSidecar(record);
+  return { xmp, sidecar };
+}
+
+/**
+ * Recover a record, most reliable source first.
+ * @param {{renderId: string|null, layerIds: number[]}} locator
+ * @returns {Promise<{record: object, source: string}|null>}
+ */
+async function loadRecord(locator) {
+  for (const id of locator.layerIds || []) {
+    // eslint-disable-next-line no-await-in-loop
+    const fromXMP = await readLayerXMP(id);
+    if (fromXMP && fromXMP.params) return { record: fromXMP, source: "layer XMP" };
+  }
+  if (locator.renderId) {
+    const fromFile = await readSidecar(locator.renderId);
+    if (fromFile && fromFile.params) return { record: fromFile, source: "plugin data folder" };
+  }
+  return null;
+}
+
+/* ---- user presets + last session, same storage, simpler shape ---- */
+
+async function loadUserPresets() {
+  const list = await readJSONFile(PRESETS_FILE, []);
+  return Array.isArray(list) ? list : [];
+}
+
+async function saveUserPresets(list) {
+  return writeJSONFile(PRESETS_FILE, list);
+}
+
+async function loadSession() {
+  return readJSONFile(SESSION_FILE, null);
+}
+
+async function saveSession(params) {
+  return writeJSONFile(SESSION_FILE, { version: SCHEMA_VERSION, params: sanitizeParams(params) });
+}
+
+module.exports = {
+  NS,
+  GROUP_PREFIX,
+  RENDER_LAYER_NAME,
+  SOURCE_LAYER_NAME,
+  newRenderId,
+  groupName,
+  renderIdFromName,
+  isHalftoneGroupName,
+  makeRecord,
+  saveRecord,
+  loadRecord,
+  readLayerXMP,
+  writeLayerXMP,
+  buildXMP,
+  parseXMP,
+  loadUserPresets,
+  saveUserPresets,
+  loadSession,
+  saveSession,
+};
+
+});
+
+window.__define("src/photoshop/render.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Orchestration: turning engine output into a non-destructive layer structure.
+ *
+ * THE STRUCTURE
+ * -------------
+ *   [Group] Halftone ▸ HT-4f2a9c        <- parameters stored here
+ *      ├── Halftone Render               <- generated pixels (visible)
+ *      └── Halftone Source               <- the original, as a Smart Object,
+ *                                           hidden and never written to
+ *
+ * WHY NOT A REAL SMART FILTER
+ * ---------------------------
+ * Photoshop does not let a plugin register its own Smart Filter: the filter
+ * list is closed to UXP, and there is no API to install a re-editable filter
+ * entry on a Smart Object. So a genuine "double click the filter to reopen the
+ * dialog" experience is not achievable, and this plugin does not pretend
+ * otherwise. What it does instead:
+ *
+ *   - the original pixels are never modified; they are sealed inside a Smart
+ *     Object that stays in the document,
+ *   - the render lives on its own layer, so masks, opacity and blend modes the
+ *     user adds to it survive an Update,
+ *   - the parameters ride along with the layer (see metadata.js), so selecting
+ *     an old render restores every slider and Update re-renders from the
+ *     untouched source.
+ *
+ * That is re-editable in every practical sense; it just is not a Smart Filter.
+ *
+ * OUTPUT MODES
+ * ------------
+ *   flat      - one pixel layer holding the composite.
+ *   separated - one solid-colour fill layer per palette colour, each carrying a
+ *               mask with that colour's coverage. The masks are mutually
+ *               exclusive and sum to full coverage, so the stack reproduces the
+ *               flat render exactly while staying editable: double-click a fill
+ *               layer to change that ink everywhere at once, and the layers
+ *               resample cleanly because only the mask is raster.
+ *               This needs imaging.putLayerMask; where that is missing the
+ *               plugin falls back to flat and says so rather than building half
+ *               a layer stack.
+ */
+
+const { app, modal } = require("./host.js");
+const doc = require("./document.js");
+const L = require("./layers.js");
+const IM = require("./imaging.js");
+const META = require("./metadata.js");
+
+/* ------------------------------------------------------------------ *
+ * Context discovery
+ * ------------------------------------------------------------------ */
+
+/**
+ * @typedef {object} HalftoneContext
+ * @property {"existing"|"new"|"none"} mode
+ * @property {object} [group]        DOM group layer
+ * @property {object} [sourceLayer]  DOM smart object layer
+ * @property {object} [renderLayer]  DOM pixel layer
+ * @property {object} [targetLayer]  DOM layer to convert (mode "new")
+ * @property {string} [renderId]
+ * @property {string} [message]
+ */
+
+/**
+ * Work out what the current selection means.
+ * @returns {HalftoneContext}
+ */
+function currentContext() {
+  const d = app().activeDocument;
+  if (!d) return { mode: "none", message: "Open a document to get started." };
+
+  const sel = d.activeLayers || [];
+  if (!sel.length) return { mode: "none", message: "Select a layer to halftone." };
+
+  for (const layer of sel) {
+    const group = META.isHalftoneGroupName(layer.name)
+      ? layer
+      : doc.ancestors(layer).find((a) => META.isHalftoneGroupName(a.name));
+    if (group) {
+      return {
+        mode: "existing",
+        group,
+        sourceLayer: L.childByName(group, META.SOURCE_LAYER_NAME),
+        renderLayer: L.childByName(group, META.RENDER_LAYER_NAME),
+        renderId: META.renderIdFromName(group.name),
+      };
+    }
+  }
+
+  const target = sel[0];
+  if (String(target.kind) === "group") {
+    return {
+      mode: "none",
+      message: "Groups can't be halftoned directly. Select a pixel or Smart Object layer.",
+    };
+  }
+  return { mode: "new", targetLayer: target };
+}
+
+/**
+ * Bounds of a layer, clipped to the canvas. Falls back to the whole canvas.
+ * @returns {{left:number, top:number, right:number, bottom:number}}
+ */
+function layerBounds(domLayer, d) {
+  const canvas = IM.canvasBounds(d);
+  try {
+    const b = domLayer.bounds;
+    if (!b) return canvas;
+    const left = Math.max(canvas.left, Math.floor(num(b.left)));
+    const top = Math.max(canvas.top, Math.floor(num(b.top)));
+    const right = Math.min(canvas.right, Math.ceil(num(b.right)));
+    const bottom = Math.min(canvas.bottom, Math.ceil(num(b.bottom)));
+    if (right - left < 1 || bottom - top < 1) return canvas;
+    return { left, top, right, bottom };
+  } catch (e) {
+    return canvas;
+  }
+}
+
+function num(v) {
+  if (typeof v === "number") return v;
+  if (v && typeof v._value === "number") return v._value;
+  return Number(v) || 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading the source
+ * ------------------------------------------------------------------ */
+
+/**
+ * Read the pixels the engine should work from.
+ *
+ * @param {object} [opts] {maxLongest}
+ * @returns {Promise<{image: object, bounds: object, layerName: string}|null>}
+ */
+async function readSource(opts = {}) {
+  const ctx = currentContext();
+  if (ctx.mode === "none") throw new Error(ctx.message);
+
+  const d = app().activeDocument;
+  const layer = ctx.mode === "existing" ? ctx.sourceLayer : ctx.targetLayer;
+  if (!layer) {
+    throw new Error(
+      `This halftone group has no "${META.SOURCE_LAYER_NAME}" layer, so there is nothing to re-render.`
+    );
+  }
+
+  const bounds = layerBounds(layer, d);
+  let image = null;
+  await modal(async () => {
+    // A hidden Smart Object still reads fine, but a few host builds return an
+    // empty buffer for it, so make it visible for the duration of the read.
+    const wasVisible = layer.visible;
+    if (!wasVisible) await L.setVisible(layer.id, true);
+    try {
+      image = await IM.readLayerPixels({
+        documentID: d.id,
+        layerID: layer.id,
+        bounds,
+        maxLongest: opts.maxLongest,
+      });
+    } finally {
+      if (!wasVisible) await L.setVisible(layer.id, false);
+    }
+  }, "Halftone: read source");
+
+  return {
+    image,
+    bounds,
+    layerName: layer.name,
+    layerId: layer.id,
+    docPPI: Number(d.resolution) || 72,
+    context: ctx,
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Apply / Update
+ * ------------------------------------------------------------------ */
+
+/**
+ * Write the render into the group, in whichever output mode was asked for.
+ *
+ * Returns the mode actually used, which may differ from the requested one when
+ * the host cannot write masks.
+ *
+ * @returns {Promise<{mode: string, layerIds: number[], note: string}>}
+ */
+async function writeRender(engine, params, ctx, opts) {
+  const { doc: d, bounds, width, height, group, anchorLayerId, report } = opts;
+  const wantSeparated = params.output === "separated";
+
+  if (wantSeparated && !IM.canWriteMasks()) {
+    const res = await writeFlat(engine, params, opts);
+    return {
+      mode: "flat",
+      layerIds: res.layerIds,
+      note:
+        "Colour separation needs imaging.putLayerMask, which this Photoshop build does not expose. " +
+        "Rendered as a single flat layer instead.",
+    };
+  }
+
+  if (!wantSeparated) {
+    const res = await writeFlat(engine, params, opts);
+    return { mode: "flat", layerIds: res.layerIds, note: "" };
+  }
+
+  // --- separated -----------------------------------------------------
+  report(0.25);
+  const sep = engine.renderSeparated(params, { width, height });
+  report(0.55);
+
+  const layerIds = [];
+  // Build bottom-up so the paper ends up underneath every ink.
+  const order = [];
+  for (let i = 0; i < sep.palette.length; i++) {
+    if (i !== sep.paperIndex) order.push(i);
+  }
+  order.unshift(sep.paperIndex);
+
+  let anchor = anchorLayerId;
+  for (let k = 0; k < order.length; k++) {
+    const i = order[k];
+    const rgb = hexToRgbTriplet(sep.palette[i]);
+    const isPaper = i === sep.paperIndex;
+    const name = isPaper ? "Paper " + sep.palette[i] : `Ink ${k} ${sep.palette[i]}`;
+
+    // eslint-disable-next-line no-await-in-loop
+    await L.selectLayers([anchor]);
+    // eslint-disable-next-line no-await-in-loop
+    const layer = await L.createSolidFillLayer(name, rgb);
+    // eslint-disable-next-line no-await-in-loop
+    await L.addLayerMask(layer.id, "revealAll");
+    // eslint-disable-next-line no-await-in-loop
+    await IM.writeLayerMask({
+      documentID: d.id,
+      layerID: layer.id,
+      data: sep.masks[i],
+      width,
+      height,
+      targetBounds: bounds,
+    });
+    layerIds.push(layer.id);
+    anchor = layer.id;
+    report(0.55 + 0.4 * ((k + 1) / order.length));
+  }
+
+  void group;
+  void ctx;
+  return {
+    mode: "separated",
+    layerIds,
+    note: `${order.length} fill layers, one per palette colour.`,
+  };
+}
+
+/** Render the composite into a single pixel layer. */
+async function writeFlat(engine, params, opts) {
+  const { doc: d, bounds, width, height, anchorLayerId, report, existingLayerId } = opts;
+
+  const out = await engine.renderAsync(params, {
+    width,
+    height,
+    onProgress: (t) => report(0.2 + t * 0.65),
+  });
+  if (!out) throw new Error("Render was cancelled.");
+
+  let layerId = existingLayerId;
+  if (!layerId) {
+    await L.selectLayers([anchorLayerId]);
+    const layer = await L.createPixelLayer(META.RENDER_LAYER_NAME);
+    layerId = layer.id;
+  }
+
+  report(0.9);
+  await IM.writeLayerPixels({
+    documentID: d.id,
+    layerID: layerId,
+    data: out.data,
+    width,
+    height,
+    targetBounds: bounds,
+  });
+  return { layerIds: [layerId] };
+}
+
+function hexToRgbTriplet(hex) {
+  const n = parseInt(String(hex).replace(/^#/, ""), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/**
+ * Build the halftone structure for one layer.
+ *
+ * Assumes it is already inside a modal scope, which is what lets the batch
+ * runner wrap an arbitrary number of these in a single undo step.
+ *
+ * @param {import("../engine/pipeline.js").HalftoneEngine} engine
+ * @param {object} params
+ * @param {object} targetLayer DOM layer to convert
+ * @param {object} d the document
+ * @param {(t:number)=>void} report
+ * @returns {Promise<object>}
+ */
+async function buildRenderFor(engine, params, targetLayer, d, report) {
+  const renderId = META.newRenderId();
+  const bounds = layerBounds(targetLayer, d);
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+
+  // The panel may have been previewing a different layer (the user can change
+  // the selection between Load and Apply, and a batch walks many layers), so
+  // re-read rather than silently rendering the wrong pixels.
+  if (engine.sourceLayerId !== targetLayer.id) {
+    const image = await IM.readLayerPixels({
+      documentID: d.id,
+      layerID: targetLayer.id,
+      bounds,
+    });
+    engine.setSource(image);
+    engine.sourceLayerId = targetLayer.id;
+  }
+  report(0.05);
+
+  // 1. Seal the original inside a Smart Object. Nothing destructive happens to
+  //    it from here on.
+  await L.selectLayers([targetLayer.id]);
+  const so = await L.convertToSmartObject();
+  await L.renameLayer(so.id, META.SOURCE_LAYER_NAME);
+
+  // 2. Wrap it in a group that carries the render id.
+  const group = await L.groupLayers(META.groupName(renderId), [so]);
+
+  // 3. Everything below the render is the untouched original.
+  await L.setVisible(so.id, false);
+
+  // 4. Write the render.
+  report(0.1);
+  const written = await writeRender(engine, params, null, {
+    doc: d,
+    bounds,
+    width,
+    height,
+    group,
+    anchorLayerId: so.id,
+    report,
+  });
+
+  // 5. Remember how we got here.
+  const record = META.makeRecord(renderId, params, {
+    docName: d.name,
+    bounds,
+    outputMode: written.mode,
+    sourceLayerName: META.SOURCE_LAYER_NAME,
+  });
+  const persistence = await META.saveRecord([group.id].concat(written.layerIds), record);
+
+  return {
+    renderId,
+    persistence,
+    width,
+    height,
+    outputMode: written.mode,
+    note: written.note,
+    groupId: group.id,
+  };
+}
+
+/**
+ * Build a brand new halftone render from the selected layer.
+ *
+ * @param {import("../engine/pipeline.js").HalftoneEngine} engine already holding the source
+ * @param {object} params
+ * @param {{onProgress?: (t:number)=>void}} [hooks]
+ * @returns {Promise<{renderId: string, persistence: object, width: number, height: number}>}
+ */
+async function applyNew(engine, params, hooks = {}) {
+  const ctx = currentContext();
+  if (ctx.mode === "existing") return updateExisting(engine, params, hooks);
+  if (ctx.mode === "none") throw new Error(ctx.message);
+  if (!engine.hasSource()) throw new Error("No source pixels loaded yet.");
+
+  const d = app().activeDocument;
+  let result = null;
+
+  await modal(async (executionContext) => {
+    const report = makeReporter(executionContext, hooks.onProgress);
+    result = await buildRenderFor(engine, params, ctx.targetLayer, d, report);
+    await L.selectLayers([result.groupId]);
+    report(1);
+  }, "Apply Halftone");
+
+  return result;
+}
+
+/**
+ * Re-render an existing halftone group from its untouched source.
+ */
+async function updateExisting(engine, params, hooks = {}) {
+  const ctx = currentContext();
+  if (ctx.mode !== "existing") throw new Error("Select an existing halftone group to update.");
+  if (!ctx.sourceLayer) {
+    throw new Error(`This group has no "${META.SOURCE_LAYER_NAME}" layer to re-render from.`);
+  }
+
+  const d = app().activeDocument;
+  const bounds = layerBounds(ctx.sourceLayer, d);
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+  const renderId = ctx.renderId || META.newRenderId();
+  let persistence = { xmp: false, sidecar: false };
+  let written = { mode: params.output, layerIds: [], note: "" };
+
+  await modal(async (executionContext) => {
+    const report = makeReporter(executionContext, hooks.onProgress);
+
+    // Always re-read: the user may have edited the Smart Object's contents.
+    const wasVisible = ctx.sourceLayer.visible;
+    if (!wasVisible) await L.setVisible(ctx.sourceLayer.id, true);
+    let image;
+    try {
+      image = await IM.readLayerPixels({
+        documentID: d.id,
+        layerID: ctx.sourceLayer.id,
+        bounds,
+      });
+    } finally {
+      if (!wasVisible) await L.setVisible(ctx.sourceLayer.id, false);
+    }
+    engine.setSource(image);
+    engine.sourceLayerId = ctx.sourceLayer.id;
+    report(0.15);
+
+    // Everything in the group except the source is previous output.
+    const stale = (ctx.group.layers || []).filter((l) => l.name !== META.SOURCE_LAYER_NAME);
+    const canReuse =
+      params.output !== "separated" &&
+      stale.length === 1 &&
+      stale[0].name === META.RENDER_LAYER_NAME;
+
+    if (!canReuse) {
+      // A separated render has a variable number of layers, and switching output
+      // mode changes their kind, so the previous output is rebuilt rather than
+      // patched. Reuse is kept for the common flat -> flat case precisely
+      // because that is where preserving the user's mask and blend mode matters.
+      for (const l of stale) {
+        // eslint-disable-next-line no-await-in-loop
+        await L.deleteLayer(l.id);
+      }
+    }
+
+    written = await writeRender(engine, params, ctx, {
+      doc: d,
+      bounds,
+      width,
+      height,
+      group: ctx.group,
+      anchorLayerId: ctx.sourceLayer.id,
+      existingLayerId: canReuse ? stale[0].id : null,
+      report,
+    });
+
+    if (ctx.group && META.renderIdFromName(ctx.group.name) !== renderId) {
+      await L.renameLayer(ctx.group.id, META.groupName(renderId));
+    }
+    const record = META.makeRecord(renderId, params, {
+      docName: d.name,
+      bounds,
+      outputMode: written.mode,
+    });
+    persistence = await META.saveRecord([ctx.group.id].concat(written.layerIds), record);
+    report(1);
+  }, "Update Halftone");
+
+  return {
+    renderId,
+    persistence,
+    width,
+    height,
+    updated: true,
+    outputMode: written.mode,
+    note: written.note,
+  };
+}
+
+/**
+ * Restore the parameters stored with the currently selected halftone render.
+ * @returns {Promise<{params: object, source: string, renderId: string}|null>}
+ */
+async function recallParams() {
+  const ctx = currentContext();
+  if (ctx.mode !== "existing") return null;
+  const layerIds = [];
+  if (ctx.group) layerIds.push(ctx.group.id);
+  // A separated render has no "Halftone Render" layer, so scan every child.
+  for (const l of (ctx.group && ctx.group.layers) || []) {
+    if (l.name !== META.SOURCE_LAYER_NAME) layerIds.push(l.id);
+  }
+  const found = await META.loadRecord({ renderId: ctx.renderId, layerIds });
+  if (!found) return null;
+  return { params: found.record.params, source: found.source, renderId: ctx.renderId };
+}
+
+/**
+ * Bridge engine progress to Photoshop's own progress bar when the host offers
+ * it, and to the panel either way.
+ */
+function makeReporter(executionContext, onProgress) {
+  const canReport =
+    executionContext && typeof executionContext.reportProgress === "function";
+  return (t) => {
+    const clamped = Math.max(0, Math.min(1, t));
+    if (canReport) {
+      try {
+        executionContext.reportProgress({ value: clamped });
+      } catch (e) {
+        /* progress is cosmetic */
+      }
+    }
+    if (onProgress) onProgress(clamped);
+  };
+}
+
+module.exports = {
+  currentContext,
+  readSource,
+  buildRenderFor,
+  applyNew,
+  updateExisting,
+  recallParams,
+  layerBounds,
+};
+
+});
+
+window.__define("src/photoshop/batch.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Batch rendering: apply the same settings to many layers in one pass.
+ *
+ * Everything happens inside a single modal scope, so the whole batch is one undo
+ * step rather than N of them, and one cancel abandons the lot cleanly.
+ *
+ * The subtlety worth knowing about is palette handling. With the palette
+ * unlocked, every layer extracts its own - which is right for unrelated images
+ * and wrong for a sequence, where each frame would land on a slightly different
+ * set of colours and the result would crawl. `sharedPalette` extracts once from
+ * the first layer and pins it for the rest, which is what makes a batch look
+ * like one job instead of N jobs.
+ */
+
+const { app, modal } = require("./host.js");
+const L = require("./layers.js");
+const META = require("./metadata.js");
+const IM = require("./imaging.js");
+const RENDER = require("./render.js");
+
+/**
+ * @typedef {object} BatchTarget
+ * @property {object} layer DOM layer
+ * @property {string} name
+ */
+
+/**
+ * Work out which layers a batch scope refers to.
+ *
+ * Layers that are already halftone output are skipped in every scope: running a
+ * batch twice should be a no-op on what it already produced, not a halftone of
+ * a halftone.
+ *
+ * @param {string} scope "selection" | "group" | "document"
+ * @returns {{targets: BatchTarget[], message: string}}
+ */
+function collectTargets(scope) {
+  const d = app().activeDocument;
+  if (!d) return { targets: [], message: "Open a document first." };
+
+  const eligible = (l) => {
+    if (!l) return false;
+    if (String(l.kind) === "group") return false;
+    if (META.isHalftoneGroupName(l.name)) return false;
+    if (l.name === META.SOURCE_LAYER_NAME || l.name === META.RENDER_LAYER_NAME) return false;
+    // Adjustment and fill layers have no pixels of their own worth screening.
+    const kind = String(l.kind);
+    if (kind === "solidColor" || kind === "gradient" || kind === "pattern") return false;
+    if (kind.indexOf("Adjustment") >= 0 || kind === "adjustment") return false;
+    return true;
+  };
+
+  const insideHalftone = (l) => {
+    let cur = l.parent;
+    let guard = 32;
+    while (cur && cur.name !== undefined && guard-- > 0) {
+      if (META.isHalftoneGroupName(cur.name)) return true;
+      cur = cur.parent;
+    }
+    return false;
+  };
+
+  let candidates = [];
+  let message = "";
+
+  if (scope === "selection") {
+    candidates = (d.activeLayers || []).slice();
+    if (!candidates.length) message = "Select one or more layers to batch.";
+  } else if (scope === "group") {
+    const sel = (d.activeLayers || [])[0];
+    const group =
+      sel && String(sel.kind) === "group"
+        ? sel
+        : sel && sel.parent && String(sel.parent.kind) === "group"
+          ? sel.parent
+          : null;
+    if (!group) {
+      message = "Select a group (or a layer inside one) to batch its contents.";
+    } else {
+      candidates = flatten(group.layers || []);
+    }
+  } else {
+    candidates = flatten(d.layers || []);
+  }
+
+  const targets = candidates
+    .filter((l) => eligible(l) && !insideHalftone(l))
+    .map((l) => ({ layer: l, name: l.name }));
+
+  if (!targets.length && !message) {
+    message = "Nothing to batch: no eligible pixel layers found in this scope.";
+  }
+  return { targets, message };
+}
+
+function flatten(layers, out = []) {
+  for (const l of layers) {
+    if (l.layers && l.layers.length) {
+      // Do not descend into halftone groups; their contents are our own output.
+      if (!META.isHalftoneGroupName(l.name)) flatten(l.layers, out);
+    } else {
+      out.push(l);
+    }
+  }
+  return out;
+}
+
+/**
+ * Run a batch.
+ *
+ * @param {import("../engine/pipeline.js").HalftoneEngine} engine
+ * @param {object} params
+ * @param {object} opts
+ * @param {string} opts.scope
+ * @param {boolean} [opts.sharedPalette]
+ * @param {(done:number, total:number, name:string)=>void} [opts.onItem]
+ * @param {(t:number)=>void} [opts.onProgress]
+ * @param {()=>boolean} [opts.shouldCancel]
+ * @returns {Promise<{done: number, total: number, failures: {name:string, error:string}[],
+ *                    renderIds: string[], cancelled: boolean, palette: string[]|null}>}
+ */
+async function runBatch(engine, params, opts) {
+  const { targets, message } = collectTargets(opts.scope);
+  if (!targets.length) throw new Error(message);
+
+  const d = app().activeDocument;
+  const onItem = opts.onItem || (() => {});
+  const onProgress = opts.onProgress || (() => {});
+  const shouldCancel = opts.shouldCancel || (() => false);
+
+  const failures = [];
+  const renderIds = [];
+  let done = 0;
+  let cancelled = false;
+  let batchParams = params;
+  let sharedPalette = null;
+
+  await modal(async (executionContext) => {
+    const total = targets.length;
+
+    for (let i = 0; i < total; i++) {
+      if (shouldCancel()) {
+        cancelled = true;
+        break;
+      }
+      const target = targets[i];
+      onItem(i, total, target.name);
+
+      // Scale each layer's own progress into the batch's overall progress.
+      const base = i / total;
+      const span = 1 / total;
+      const report = (t) => {
+        const v = base + t * span;
+        onProgress(v);
+        if (executionContext && typeof executionContext.reportProgress === "function") {
+          try {
+            executionContext.reportProgress({ value: v });
+          } catch (e) {
+            /* progress is cosmetic */
+          }
+        }
+      };
+
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await RENDER.buildRenderFor(engine, batchParams, target.layer, d, report);
+        renderIds.push(res.renderId);
+        done++;
+
+        // After the first item, pin the palette so the whole batch shares one
+        // set of colours instead of drifting layer to layer.
+        if (opts.sharedPalette && !sharedPalette) {
+          sharedPalette = engine.extractPaletteHex(batchParams);
+          batchParams = Object.assign({}, batchParams, {
+            palette: sharedPalette,
+            paletteLocked: true,
+          });
+        }
+      } catch (e) {
+        // One bad layer must not abandon the rest of the batch.
+        failures.push({ name: target.name, error: e && e.message ? e.message : String(e) });
+      }
+    }
+    onProgress(1);
+  }, `Halftone batch (${targets.length} layers)`);
+
+  return {
+    done,
+    total: targets.length,
+    failures,
+    renderIds,
+    cancelled,
+    palette: sharedPalette,
+  };
+}
+
+/** Count what a batch would touch, without touching it. */
+function previewBatch(scope) {
+  const { targets, message } = collectTargets(scope);
+  return { count: targets.length, names: targets.map((t) => t.name), message };
+}
+
+module.exports = { collectTargets, runBatch, previewBatch };
+
+});
+
+window.__define("src/photoshop/swatches.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Palette import and export in the two formats Adobe apps actually exchange:
+ *
+ *   .act - Adobe Color Table. 768 raw bytes, 256 RGB triples, optionally
+ *          followed by a 4 byte trailer giving the real colour count. Trivially
+ *          simple and understood by Photoshop's own Indexed Color dialog.
+ *
+ *   .ase - Adobe Swatch Exchange. Big-endian, UTF-16BE names, float32 channels.
+ *          This is the one that round-trips into Illustrator and InDesign.
+ *
+ * Both are written by hand: there is no dependency to pull in, and the formats
+ * are small enough that hand-rolling them is less code than an adapter would be.
+ */
+
+const { uxp } = require("./host.js");
+const { hexToRgb, rgbToHex } = require("../engine/color.js");
+
+/* ------------------------------------------------------------------ *
+ * ACT
+ * ------------------------------------------------------------------ */
+
+/**
+ * @param {string[]} hexes
+ * @returns {Uint8Array} 772 bytes (768 + count trailer)
+ */
+function encodeACT(hexes) {
+  const out = new Uint8Array(772);
+  const n = Math.min(256, hexes.length);
+  for (let i = 0; i < n; i++) {
+    const rgb = hexToRgb(hexes[i]) || [0, 0, 0];
+    out[i * 3] = rgb[0];
+    out[i * 3 + 1] = rgb[1];
+    out[i * 3 + 2] = rgb[2];
+  }
+  // Trailer: colour count, then the transparent index (0xFFFF = none).
+  out[768] = (n >> 8) & 255;
+  out[769] = n & 255;
+  out[770] = 0xff;
+  out[771] = 0xff;
+  return out;
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string[]} hex colours
+ */
+function decodeACT(bytes) {
+  if (!bytes || bytes.length < 768) throw new Error("Not a valid .act file (expected at least 768 bytes).");
+  let count = 256;
+  if (bytes.length >= 770) {
+    const declared = (bytes[768] << 8) | bytes[769];
+    if (declared > 0 && declared <= 256) count = declared;
+  }
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    out.push(rgbToHex(bytes[i * 3], bytes[i * 3 + 1], bytes[i * 3 + 2]));
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * ASE
+ * ------------------------------------------------------------------ */
+
+function writeU16(arr, v) {
+  arr.push((v >> 8) & 255, v & 255);
+}
+
+function writeU32(arr, v) {
+  arr.push((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255);
+}
+
+function writeF32(arr, v) {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setFloat32(0, v, false); // big endian
+  const b = new Uint8Array(buf);
+  arr.push(b[0], b[1], b[2], b[3]);
+}
+
+function writeUTF16BE(arr, str) {
+  for (let i = 0; i < str.length; i++) writeU16(arr, str.charCodeAt(i));
+  writeU16(arr, 0); // null terminator, which ASE counts in the length
+}
+
+/**
+ * @param {string[]} hexes
+ * @param {string} [groupName]
+ * @returns {Uint8Array}
+ */
+function encodeASE(hexes, groupName) {
+  const bytes = [];
+  // Signature "ASEF", version 1.0
+  bytes.push(0x41, 0x53, 0x45, 0x46);
+  writeU16(bytes, 1);
+  writeU16(bytes, 0);
+  writeU32(bytes, hexes.length);
+
+  for (let i = 0; i < hexes.length; i++) {
+    const rgb = hexToRgb(hexes[i]) || [0, 0, 0];
+    const name = `${groupName || "Halftone"} ${i + 1}`;
+
+    const block = [];
+    writeU16(block, name.length + 1); // in UTF-16 code units, including the null
+    writeUTF16BE(block, name);
+    block.push(0x52, 0x47, 0x42, 0x20); // "RGB "
+    writeF32(block, rgb[0] / 255);
+    writeF32(block, rgb[1] / 255);
+    writeF32(block, rgb[2] / 255);
+    writeU16(block, 0); // colour type: global
+
+    writeU16(bytes, 0x0001); // block type: colour entry
+    writeU32(bytes, block.length);
+    for (const b of block) bytes.push(b);
+  }
+  return Uint8Array.from(bytes);
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string[]} hex colours
+ */
+function decodeASE(bytes) {
+  if (!bytes || bytes.length < 12) throw new Error("Not a valid .ase file.");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (
+    bytes[0] !== 0x41 || bytes[1] !== 0x53 || bytes[2] !== 0x45 || bytes[3] !== 0x46
+  ) {
+    throw new Error("Not a valid .ase file (bad ASEF signature).");
+  }
+
+  const blocks = view.getUint32(8, false);
+  const out = [];
+  let p = 12;
+
+  for (let i = 0; i < blocks && p + 6 <= bytes.length; i++) {
+    const type = view.getUint16(p, false);
+    const len = view.getUint32(p + 2, false);
+    const body = p + 6;
+    p = body + len;
+
+    if (type !== 0x0001) continue; // group start / end blocks carry no colour
+
+    let q = body;
+    const nameLen = view.getUint16(q, false);
+    q += 2 + nameLen * 2;
+    if (q + 4 > bytes.length) break;
+    const model = String.fromCharCode(bytes[q], bytes[q + 1], bytes[q + 2], bytes[q + 3]);
+    q += 4;
+
+    let rgb = null;
+    if (model === "RGB ") {
+      rgb = [
+        view.getFloat32(q, false) * 255,
+        view.getFloat32(q + 4, false) * 255,
+        view.getFloat32(q + 8, false) * 255,
+      ];
+    } else if (model === "GRAY") {
+      const g = view.getFloat32(q, false) * 255;
+      rgb = [g, g, g];
+    } else if (model === "CMYK") {
+      const c = view.getFloat32(q, false);
+      const m = view.getFloat32(q + 4, false);
+      const y = view.getFloat32(q + 8, false);
+      const k = view.getFloat32(q + 12, false);
+      // Naive conversion. Exact CMYK needs a profile, which .ase does not carry.
+      rgb = [255 * (1 - c) * (1 - k), 255 * (1 - m) * (1 - k), 255 * (1 - y) * (1 - k)];
+    } else if (model === "LAB ") {
+      // Rare in practice; skip rather than guess badly.
+      continue;
+    }
+    if (rgb) out.push(rgbToHex(rgb[0], rgb[1], rgb[2]));
+  }
+
+  if (!out.length) throw new Error("No RGB, Gray or CMYK swatches found in that .ase file.");
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * File dialogs
+ * ------------------------------------------------------------------ */
+
+function fs() {
+  const u = uxp();
+  if (!u || !u.storage || !u.storage.localFileSystem) {
+    throw new Error("File access is unavailable; check the plugin's localFileSystem permission.");
+  }
+  return u.storage.localFileSystem;
+}
+
+/**
+ * Ask the user for a swatch file and return its colours.
+ * @returns {Promise<{hexes: string[], name: string}|null>} null if cancelled
+ */
+async function importPalette() {
+  const file = await fs().getFileForOpening({ types: ["ase", "act"] });
+  if (!file) return null;
+  const data = await file.read({ format: require("uxp").storage.formats.binary });
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const lower = String(file.name || "").toLowerCase();
+  const hexes = lower.endsWith(".act") ? decodeACT(bytes) : decodeASE(bytes);
+  return { hexes, name: file.name };
+}
+
+/**
+ * Write the palette out.
+ * @param {string[]} hexes
+ * @param {string} format "ase" | "act"
+ * @returns {Promise<string|null>} the file name, or null if cancelled
+ */
+async function exportPalette(hexes, format = "ase") {
+  const ext = format === "act" ? "act" : "ase";
+  const file = await fs().getFileForSaving(`halftone-palette.${ext}`, { types: [ext] });
+  if (!file) return null;
+  const bytes = ext === "act" ? encodeACT(hexes) : encodeASE(hexes);
+  await file.write(bytes, { format: require("uxp").storage.formats.binary });
+  return file.name;
+}
+
+module.exports = {
+  encodeACT,
+  decodeACT,
+  encodeASE,
+  decodeASE,
+  importPalette,
+  exportPalette,
+};
+
+});
+
+window.__define("src/ui/panel.js", function (module, exports, require) {
+"use strict";
+
+/**
+ * Panel controller: owns the parameter state, drives the engine for previews,
+ * and calls into the Photoshop layer for Apply / Update.
+ *
+ * Preview strategy
+ * ----------------
+ * The engine measures halftone cells once from a downscaled analysis image and
+ * caches them, so previewing is a pure rasterisation at panel size - a few
+ * milliseconds regardless of whether the document is 1080px or 6000px. Previews
+ * are therefore rendered synchronously on a requestAnimationFrame tick while a
+ * slider is being dragged, and only fall back to a 90ms debounce if a frame
+ * actually overruns. Apply and Update rasterise at full document resolution
+ * from the very same cells, which is what guarantees the preview is honest.
+ */
+
+const C = require("./controls.js");
+const {
+  PARAM_DEFS,
+  SECTIONS,
+  defaultParams,
+  sanitizeParams,
+  isVisible,
+  sectionVisible,
+} = require("../state/params.js");
+const { ALGORITHMS, ALGORITHM_FAMILIES } = require("../engine/dither.js");
+const { BUILTIN_PRESETS, presetToParams, makeUserPreset } = require("../presets/presets.js");
+const { HalftoneEngine } = require("../engine/pipeline.js");
+const { toDataURL } = require("../util/png.js");
+const { downscaleBox: downscale } = require("../engine/resample.js");
+const HOST = require("../photoshop/host.js");
+const RENDER = require("../photoshop/render.js");
+const META = require("../photoshop/metadata.js");
+const IM = require("../photoshop/imaging.js");
+const BATCH = require("../photoshop/batch.js");
+const SWATCH = require("../photoshop/swatches.js");
+
+const PREVIEW_MAX = 460;
+/** Cap on the dither grid used for previews; above this the preview approximates. */
+const PREVIEW_DITHER_GRID = 700;
+const SLOW_FRAME_MS = 45;
+const DEBOUNCE_MS = 90;
+
+class Panel {
+  constructor(root) {
+    this.root = root || document;
+    this.engine = new HalftoneEngine();
+    this.params = defaultParams();
+    this.controls = {};
+    this.userPresets = [];
+    this.activePresetId = null;
+    this.sourceInfo = null;
+    this.lastFrameMs = 0;
+    this._timer = null;
+    this._raf = null;
+    this._busy = false;
+    this._selectionTimer = null;
+    this.sectionOpen = {};
+    this._sourceURL = null;
+    this._renderedSrc = null;
+    this._cancelBatch = false;
+  }
 
   /* ---------------------------------------------------------------- */
 
-  function buildSections() {
-    var host = $("sections");
+  async init() {
+    this.$ = (id) => this.root.getElementById(id);
+    this.buildSections();
+    this.bindButtons();
+    this.renderPresetChips();
+
+    const missing = HOST.missingCapabilities();
+    if (missing.length) {
+      this.notice(
+        `This Photoshop build is missing: ${missing.join(", ")}. ` +
+          `The imaging API needs Photoshop 23.3 or newer.`,
+        "error"
+      );
+      this.status("Unsupported host", "error");
+      return;
+    }
+
+    // Restore whatever the user was last working with.
+    try {
+      const session = await META.loadSession();
+      if (session && session.params) {
+        this.params = sanitizeParams(session.params);
+        this.rebuild();
+      }
+      this.userPresets = await META.loadUserPresets();
+      this.renderPresetChips();
+    } catch (e) {
+      /* first run */
+    }
+
+    this.watchSelection();
+    this.refreshContext();
+  }
+
+  /* ------------------------------------------------------- UI build */
+
+  /**
+   * Build every section from the schema, showing only what applies to the
+   * current mode and state. Called again whenever a parameter changes something
+   * another parameter's visibility depends on (the mode, mainly), so the panel
+   * never shows a control that does nothing.
+   */
+  buildSections() {
+    const host = this.$("sections");
     host.textContent = "";
-    controls = {};
-    P.SECTIONS.forEach(function (sec) {
-      if (sec.id === "batch" || sec.id === "output") return; // Photoshop-only
-      if (!P.sectionVisible(sec, params)) return;
-      var open = sectionOpen[sec.id] !== false;
-      var s = C.createSection(sec.id, sec.label, open);
-      s.onToggle = function (isOpen) { sectionOpen[sec.id] = isOpen; };
-      P.PARAM_DEFS.forEach(function (def) {
-        if (def.section !== sec.id) return;
-        if (!P.isVisible(def, params)) return;
-        s.body.appendChild(buildControl(def));
-      });
+    this.controls = {};
+
+    for (const sec of SECTIONS) {
+      if (!sectionVisible(sec, this.params)) continue;
+      const open = this.sectionOpen[sec.id] !== false;
+      const s = C.createSection(sec.id, sec.label, open);
+      s.onToggle = (isOpen) => {
+        this.sectionOpen[sec.id] = isOpen;
+      };
+      for (const def of PARAM_DEFS) {
+        if (def.section !== sec.id) continue;
+        if (!isVisible(def, this.params)) continue;
+        s.body.appendChild(this.buildControl(def));
+      }
+      if (sec.id === "colors") {
+        s.body.appendChild(
+          C.el(
+            "div",
+            "hint",
+            "Click a swatch to type a hex value, alt-click to take Photoshop's foreground colour." +
+              (this.params.mode === "halftone"
+                ? " The paper colour is never used as a dot colour."
+                : "")
+          )
+        );
+      }
       host.appendChild(s.el);
-    });
+    }
   }
 
-  function affectsLayout(key) {
-    return key === "mode" || key === "scaleMode" || key === "tonalMapping" ||
-           key === "sharpen" || key === "screenMode";
+  /** Does changing `key` alter which controls should be on screen? */
+  affectsLayout(key) {
+    return (
+      key === "mode" ||
+      key === "scaleMode" ||
+      key === "tonalMapping" ||
+      key === "sharpen"
+    );
   }
 
-  function buildControl(def) {
-    var commit = function (value) { setParam(def.key, value); };
-    var ctl;
+  buildControl(def) {
+    const commit = (value, committed) => {
+      this.setParam(def.key, value, committed);
+    };
+
+    let ctl;
     switch (def.type) {
-      case "slider": ctl = C.createSlider(def, params[def.key], commit); break;
-      case "choice": ctl = C.createChoice(def, params[def.key], commit); break;
+      case "slider":
+        ctl = C.createSlider(def, this.params[def.key], commit);
+        break;
+      case "choice":
+        ctl = C.createChoice(def, this.params[def.key], commit);
+        break;
       case "chips":
-        ctl = C.createChipChoice(def, params[def.key], commit, {
-          labels: ALGO_LABELS,
-          groups: def.key === "ditherAlgorithm" ? DITHER.ALGORITHM_FAMILIES : null,
-          groupOf: def.key === "ditherAlgorithm" ? function (id) { return ALGO_FAMILY[id]; } : null
+        ctl = C.createChipChoice(def, this.params[def.key], commit, {
+          labels: ALGORITHM_LABELS,
+          groups: ALGORITHM_FAMILIES,
+          groupOf: (id) => ALGORITHM_FAMILY_OF[id],
         });
         break;
-      case "toggle": ctl = C.createToggle(def, params[def.key], commit); break;
+      case "toggle":
+        ctl = C.createToggle(def, this.params[def.key], commit);
+        break;
       case "color":
-        ctl = C.createColorField(def, params[def.key], commit, function () { return null; });
+        ctl = C.createColorField(def, this.params[def.key], commit, () => IM.foregroundRGB());
         break;
       case "palette":
         ctl = C.createPalette({
-          value: params.palette,
-          locked: params.lockedSwatches,
-          onChange: function (hexes, locked) {
-            params.palette = hexes;
-            params.lockedSwatches = locked || [];
-            params.paletteLocked = true;
-            params.colorCount = Math.min(8, Math.max(2, hexes.length));
-            if (controls.colorCount) controls.colorCount.set(params.colorCount);
-            if (controls.paletteLocked) controls.paletteLocked.set(true);
-            schedule();
+          value: this.params[def.key],
+          locked: this.params.lockedSwatches,
+          onChange: (hexes, lockedIdx) => {
+            this.params.palette = hexes;
+            this.params.lockedSwatches = lockedIdx || [];
+            this.params.paletteLocked = true;
+            if (this.controls.paletteLocked) this.controls.paletteLocked.set(true);
+            this.params.colorCount = Math.min(8, Math.max(2, hexes.length));
+            if (this.controls.colorCount) this.controls.colorCount.set(this.params.colorCount);
+            this.onParamsChanged(true);
           },
-          onExtract: extractPalette,
-          getForeground: function () { return null; }
+          onExtract: () => this.extractPalette(),
+          onImport: () => this.importPalette(),
+          onExport: () => this.exportPalette(),
+          getForeground: () => IM.foregroundRGB(),
         });
         break;
-      default: ctl = { el: C.el("div"), set: function () {} };
+      default:
+        ctl = { el: C.el("div"), set: () => {} };
     }
-    controls[def.key] = ctl;
+    this.controls[def.key] = ctl;
     return ctl.el;
   }
 
-  function setParam(key, value) {
-    if (params[key] === value) return;
-    params[key] = value;
-    if (key === "colorCount" && params.paletteLocked) syncPaletteToCount();
-    if (key === "paletteLocked" && !value) syncPaletteFromImage();
-    if (affectsLayout(key)) { buildSections(); syncControls(); }
-    schedule();
+  bindButtons() {
+    this.$("btn-load").addEventListener("click", () => this.loadLayer());
+    this.$("btn-apply").addEventListener("click", () => this.apply());
+    this.$("btn-update").addEventListener("click", () => this.update());
+    this.$("btn-reset").addEventListener("click", () => this.resetAll());
+    this.$("btn-batch").addEventListener("click", () => this.batchApply());
+    this.bindCompare();
+    this.$("btn-save-preset").addEventListener("click", () => this.savePreset());
+    this.$("btn-load-preset").addEventListener("click", () => this.promptLoadPreset());
   }
 
-  function syncControls() {
-    P.PARAM_DEFS.forEach(function (def) {
-      var c = controls[def.key];
-      if (c && c.set) c.set(params[def.key], params.lockedSwatches);
-    });
+  /* --------------------------------------------------- state changes */
+
+  setParam(key, value, committed) {
+    if (this.params[key] === value) {
+      if (committed) this.onParamsChanged(true);
+      return;
+    }
+    this.params[key] = value;
+    this.activePresetId = null;
+
+    // Changing the colour count only means something if the palette follows it.
+    if (key === "colorCount" && this.params.paletteLocked) this.syncPaletteToCount();
+    if (key === "paletteLocked" && !value) this.syncPaletteFromImage();
+    if (this.affectsLayout(key)) {
+      this.buildSections();
+      this.syncControls();
+    }
+
+    this.onParamsChanged(committed);
   }
 
-  function mergeLocked(extracted) {
-    var locks = params.lockedSwatches || [];
+  onParamsChanged(committed) {
+    this.renderPresetChips();
+    this.schedulePreview();
+    if (committed) this.persistSession();
+  }
+
+  syncPaletteToCount() {
+    const count = this.params.colorCount;
+    if (this.engine.hasSource()) {
+      try {
+        this.params.palette = this.mergeLocked(this.engine.extractPaletteHex(this.params));
+      } catch (e) {
+        this.params.palette = padHexes(this.params.palette, count);
+      }
+    } else {
+      this.params.palette = padHexes(this.params.palette, count);
+    }
+    if (this.controls.palette) this.controls.palette.set(this.params.palette, this.params.lockedSwatches);
+  }
+
+  syncPaletteFromImage() {
+    if (!this.engine.hasSource()) return;
+    try {
+      this.params.palette = this.mergeLocked(this.engine.extractPaletteHex(this.params));
+      if (this.controls.palette) this.controls.palette.set(this.params.palette, this.params.lockedSwatches);
+    } catch (e) {
+      /* keep the current palette */
+    }
+  }
+
+  /**
+   * Re-extract, keeping any swatch the user pinned.
+   *
+   * The locked entries are put back at their own indices afterwards, so pinning
+   * a brand colour and letting the engine choose the rest works as expected.
+   */
+  mergeLocked(extracted) {
+    const locks = this.params.lockedSwatches || [];
     if (!locks.length) return extracted;
-    var out = extracted.slice();
-    locks.forEach(function (i) {
-      if (i < out.length && params.palette[i]) out[i] = params.palette[i];
-    });
+    const out = extracted.slice();
+    for (const i of locks) {
+      if (i < out.length && this.params.palette[i]) out[i] = this.params.palette[i];
+    }
     return out;
   }
 
-  function extractPalette() {
-    if (!engine.hasSource()) { notice("Load an image first."); return; }
-    params.palette = mergeLocked(engine.extractPaletteHex(params));
-    params.paletteLocked = true;
-    if (controls.palette) controls.palette.set(params.palette, params.lockedSwatches);
-    if (controls.paletteLocked) controls.paletteLocked.set(true);
-    schedule();
-  }
-
-  function syncPaletteToCount() {
-    if (!engine.hasSource()) return;
-    params.palette = mergeLocked(engine.extractPaletteHex(params));
-    if (controls.palette) controls.palette.set(params.palette, params.lockedSwatches);
-  }
-
-  function syncPaletteFromImage() {
-    if (!engine.hasSource()) return;
-    params.palette = mergeLocked(engine.extractPaletteHex(params));
-    if (controls.palette) controls.palette.set(params.palette, params.lockedSwatches);
-  }
-
-  /* ---------------------------------------------------------------- */
-
-  function schedule() {
-    if (!engine.hasSource()) return;
-    if (lastMs > 45) {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(function () { timer = null; draw(); }, 90);
+  extractPalette() {
+    if (!this.engine.hasSource()) {
+      this.notice("Load a layer first, then the palette can be read from its pixels.", "warn");
       return;
     }
-    if (raf) return;
-    raf = requestAnimationFrame(function () { raf = null; draw(); });
+    const fresh = this.engine.extractPaletteHex(this.params);
+    this.params.palette = this.mergeLocked(fresh);
+    this.params.paletteLocked = true;
+    if (this.controls.palette) this.controls.palette.set(this.params.palette, this.params.lockedSwatches);
+    if (this.controls.paletteLocked) this.controls.paletteLocked.set(true);
+    this.onParamsChanged(true);
+    const kept = (this.params.lockedSwatches || []).length;
+    this.notice(
+      `Extracted ${this.params.palette.length} colours` + (kept ? `, keeping ${kept} locked.` : ".")
+    );
   }
 
-  function previewSize() {
-    var wrap = $("preview-wrap");
-    var avail = Math.max(200, Math.min(900, wrap.clientWidth - 2));
-    var scale = Math.min(1, avail / engine.source.width);
-    return {
-      width: Math.max(1, Math.round(engine.source.width * scale)),
-      height: Math.max(1, Math.round(engine.source.height * scale))
-    };
+  async importPalette() {
+    await this.guard("Importing swatches…", async () => {
+      const res = await SWATCH.importPalette();
+      if (!res) return;
+      const hexes = res.hexes.slice(0, 8);
+      this.params.palette = hexes;
+      this.params.colorCount = Math.max(2, Math.min(8, hexes.length));
+      this.params.paletteLocked = true;
+      this.params.lockedSwatches = [];
+      this.rebuild();
+      this.schedulePreview();
+      this.notice(
+        `Imported ${res.hexes.length} swatches from ${res.name}` +
+          (res.hexes.length > 8 ? `, using the first 8.` : ".")
+      );
+    });
   }
 
-  function draw() {
-    if (!engine.hasSource()) return;
-    var t0 = Date.now();
-    try {
-      var size = previewSize();
-      var out = engine.render(params, {
-        width: size.width, height: size.height, maxDitherGrid: 900
-      });
-      renderedURL = PNG.toDataURL(out.data, out.width, out.height);
-      $("preview").src = renderedURL;
-      $("preview").className = "preview visible";
-      $("preview-empty").className = "preview-empty hidden";
-      lastMs = Date.now() - t0;
-      var unit = params.mode === "dither" ? "px" : "cells";
-      var screens = out.angles ? (" · " + out.angles.length + " screens @ " + out.angles.join("/") + "°") : "";
-      $("preview-badge").textContent =
-        (engine.stats.cells || 0) + " " + unit + screens + " · " + lastMs + "ms" +
-        (out.exact ? "" : " · approx");
-      notice("");
-    } catch (e) {
-      lastMs = Date.now() - t0;
-      notice("Render failed: " + e.message);
-      if (window.console) console.error(e);
+  async exportPalette() {
+    await this.guard("Exporting swatches…", async () => {
+      const name = await SWATCH.exportPalette(this.params.palette, "ase");
+      if (name) this.notice(`Palette written to ${name}.`);
+    });
+  }
+
+  syncControls() {
+    for (const def of PARAM_DEFS) {
+      const c = this.controls[def.key];
+      if (c && c.set) c.set(this.params[def.key]);
     }
   }
 
-  function notice(text) {
-    var n = $("notice");
-    n.textContent = text || "";
-    n.className = text ? "notice show error" : "notice";
+  /** Rebuild the whole panel from `this.params` (after a preset or a recall). */
+  rebuild() {
+    this.buildSections();
+    this.syncControls();
+    this.renderPresetChips();
   }
 
-  /* ---------------------------------------------------------------- */
+  resetAll() {
+    this.params = defaultParams();
+    this.activePresetId = null;
+    this.rebuild();
+    this.schedulePreview();
+    this.persistSession();
+    this.notice("All parameters reset to defaults.");
+  }
 
-  function loadImage(file) {
-    var url = URL.createObjectURL(file);
-    var img = new Image();
-    img.onload = function () {
-      var cv = document.createElement("canvas");
-      // Cap the source the same way the plugin caps its read from Photoshop.
-      var cap = 2600;
-      var s = Math.min(1, cap / Math.max(img.width, img.height));
-      cv.width = Math.round(img.width * s);
-      cv.height = Math.round(img.height * s);
-      var ctx = cv.getContext("2d");
-      ctx.drawImage(img, 0, 0, cv.width, cv.height);
-      var data = ctx.getImageData(0, 0, cv.width, cv.height);
-      engine.setSource({
-        data: new Uint8ClampedArray(data.data),
-        width: cv.width,
-        height: cv.height
-      });
-      sourceURL = cv.toDataURL("image/png");
-      if (!params.paletteLocked) syncPaletteFromImage();
-      $("file-name").textContent = file.name + "  " + cv.width + "x" + cv.height;
-      draw();
-      URL.revokeObjectURL(url);
+  /* ------------------------------------------------------- previewing */
+
+  schedulePreview() {
+    if (!this.engine.hasSource()) return;
+    if (this.lastFrameMs > SLOW_FRAME_MS) {
+      // The last frame overran; debounce instead of trying to keep up.
+      if (this._timer) clearTimeout(this._timer);
+      this._timer = setTimeout(() => {
+        this._timer = null;
+        this.drawPreview();
+      }, DEBOUNCE_MS);
+      return;
+    }
+    if (this._raf) return;
+    const schedule =
+      typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+    this._raf = schedule(() => {
+      this._raf = null;
+      this.drawPreview();
+    });
+  }
+
+  previewSize() {
+    const src = this.engine.source;
+    const wrap = this.$("preview-wrap");
+    const avail = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
+    const scale = Math.min(1, avail / src.width);
+    return {
+      width: Math.max(1, Math.round(src.width * scale)),
+      height: Math.max(1, Math.round(src.height * scale)),
     };
-    img.onerror = function () { notice("Could not decode that image."); };
-    img.src = url;
   }
 
-  function renderPresets() {
-    var host = $("preset-list");
+  drawPreview() {
+    if (!this.engine.hasSource()) return;
+    const t0 = Date.now();
+    try {
+      const size = this.previewSize();
+      const out = this.engine.render(
+        this.params,
+        Object.assign({ maxDitherGrid: PREVIEW_DITHER_GRID }, size)
+      );
+      this.$("preview").src = toDataURL(out.data, out.width, out.height);
+      this.$("preview").className = "preview visible";
+      this.$("preview-empty").className = "preview-empty hidden";
+      this.lastFrameMs = Date.now() - t0;
+      const unit = this.params.mode === "dither" ? "px" : "cells";
+      const screens = out.angles ? ` · ${out.angles.length} screens @ ${out.angles.join("/")}°` : "";
+      this._lastBadge =
+        `${this.engine.stats.cells || 0} ${unit}${screens} · ${this.lastFrameMs}ms` +
+        (out.exact ? "" : " · approx");
+      this.$("preview-badge").textContent = this._lastBadge;
+    } catch (e) {
+      this.lastFrameMs = Date.now() - t0;
+      this.notice(`Preview failed: ${e.message}`, "error");
+    }
+  }
+
+  /* --------------------------------------------------- Photoshop ops */
+
+  async loadLayer() {
+    await this.guard("Loading layer…", async () => {
+      const src = await RENDER.readSource();
+      this.engine.setSource(src.image);
+      this.engine.sourceLayerId = src.layerId;
+      this.engine.docPPI = src.docPPI || 72;
+      this.sourceInfo = src;
+      if (!this.params.paletteLocked) this.syncPaletteFromImage();
+      this.drawPreview();
+
+      // If this layer is an existing render, bring its settings back.
+      const recalled = await RENDER.recallParams();
+      if (recalled) {
+        this.params = sanitizeParams(recalled.params);
+        this.rebuild();
+        this.drawPreview();
+        this.notice(
+          `Loaded "${src.layerName}" and restored the settings of ${recalled.renderId} (from ${recalled.source}).`
+        );
+      } else {
+        this.notice(
+          `Loaded "${src.layerName}" at ${src.image.width}x${src.image.height} for previewing.`
+        );
+      }
+      this.refreshContext();
+    });
+  }
+
+  async apply() {
+    if (!this.engine.hasSource()) {
+      await this.loadLayer();
+      if (!this.engine.hasSource()) return;
+    }
+    await this.guard("Applying…", async () => {
+      const res = await RENDER.applyNew(this.engine, this.params, {
+        onProgress: (t) => this.progress(t),
+      });
+      this.reportPersistence(res);
+      this.refreshContext();
+    });
+  }
+
+  async update() {
+    await this.guard("Updating…", async () => {
+      const res = await RENDER.updateExisting(this.engine, this.params, {
+        onProgress: (t) => this.progress(t),
+      });
+      this.reportPersistence(res);
+      this.drawPreview();
+      this.refreshContext();
+    });
+  }
+
+  reportPersistence(res) {
+    const where = res.persistence.xmp
+      ? "with the layer"
+      : res.persistence.sidecar
+        ? "in the plugin's data folder (this Photoshop install only)"
+        : "nowhere - persistence failed";
+    const verb = res.updated ? "Updated" : "Created";
+    const fellBack = this.params.output === "separated" && res.outputMode !== "separated";
+    this.notice(
+      `${verb} ${res.renderId} at ${res.width}x${res.height} (${res.outputMode}). ` +
+        `Settings saved ${where}.` +
+        (res.note ? ` ${res.note}` : ""),
+      fellBack || !(res.persistence.xmp || res.persistence.sidecar) ? "warn" : ""
+    );
+  }
+
+  /* ----------------------------------------------------------- batch */
+
+  async batchApply() {
+    const preview = BATCH.previewBatch(this.params.batchScope);
+    if (!preview.count) {
+      this.notice(preview.message, "warn");
+      return;
+    }
+    this._cancelBatch = false;
+    await this.guard(`Batching ${preview.count} layers…`, async () => {
+      const res = await BATCH.runBatch(this.engine, this.params, {
+        scope: this.params.batchScope,
+        sharedPalette: this.params.batchSharedPalette,
+        onItem: (i, total, name) => this.status(`Batch ${i + 1}/${total}: ${name}`, "busy"),
+        onProgress: (t) => this.progress(t),
+        shouldCancel: () => this._cancelBatch,
+      });
+
+      // The engine now holds the last batched layer, not what the panel was
+      // previewing, so drop the stale preview rather than showing a lie.
+      this.engine.sourceLayerId = null;
+
+      const parts = [`Batched ${res.done} of ${res.total} layers.`];
+      if (res.palette) parts.push(`Shared palette: ${res.palette.join(" ")}.`);
+      if (res.cancelled) parts.push("Cancelled before the end.");
+      if (res.failures.length) {
+        parts.push(
+          `${res.failures.length} failed: ` +
+            res.failures.map((f) => `${f.name} (${f.error})`).join("; ")
+        );
+      }
+      this.notice(parts.join(" "), res.failures.length || res.cancelled ? "warn" : "");
+    });
+  }
+
+  /* --------------------------------------------------------- compare */
+
+  /**
+   * Hold the Compare button to swap the preview for the untouched source.
+   * Cheaper and less error-prone than a toggle: you cannot leave it stuck on.
+   */
+  bindCompare() {
+    const btn = this.$("btn-compare");
+    if (!btn) return;
+    const show = () => {
+      if (!this.engine.hasSource()) return;
+      const img = this.$("preview");
+      this._renderedSrc = img.src;
+      img.src = this.sourceDataURL();
+      this.$("preview-badge").textContent = "original";
+    };
+    const hide = () => {
+      if (!this._renderedSrc) return;
+      // Restore rather than re-render: nothing can have changed while the
+      // button was held, and a re-render would race a pending preview tick.
+      this.$("preview").src = this._renderedSrc;
+      this._renderedSrc = null;
+      this.$("preview-badge").textContent = this._lastBadge || "";
+    };
+    btn.addEventListener("pointerdown", show);
+    btn.addEventListener("pointerup", hide);
+    btn.addEventListener("pointercancel", hide);
+    btn.addEventListener("pointerleave", hide);
+  }
+
+  /** The source, downscaled to preview size and cached. */
+  sourceDataURL() {
+    const size = this.previewSize();
+    const key = `${this.engine.sourceId}|${size.width}x${size.height}`;
+    if (this._sourceURL && this._sourceURL.key === key) return this._sourceURL.url;
+    const small = downscale(this.engine.source, size.width, size.height);
+    const url = toDataURL(small.data, small.width, small.height);
+    this._sourceURL = { key, url };
+    return url;
+  }
+
+  /* ------------------------------------------------------- selection */
+
+  watchSelection() {
+    try {
+      HOST.action().addNotificationListener(
+        [{ event: "select" }, { event: "delete" }, { event: "make" }],
+        () => {
+          if (this._selectionTimer) clearTimeout(this._selectionTimer);
+          this._selectionTimer = setTimeout(() => this.refreshContext(), 120);
+        }
+      );
+    } catch (e) {
+      // Without the listener the panel simply does not auto-refresh; the user
+      // can still press Load Layer. Not worth failing over.
+    }
+  }
+
+  refreshContext() {
+    let ctx;
+    try {
+      ctx = RENDER.currentContext();
+    } catch (e) {
+      this.status(e.message, "error");
+      return;
+    }
+
+    const update = this.$("btn-update");
+    if (ctx.mode === "existing") {
+      update.removeAttribute("disabled");
+      this.status(`Halftone group ${ctx.renderId || ""} selected — Update re-renders it.`, "ready");
+    } else if (ctx.mode === "new") {
+      update.setAttribute("disabled", "true");
+      this.status(`"${ctx.targetLayer.name}" selected — Apply creates a new halftone.`, "ready");
+    } else {
+      update.setAttribute("disabled", "true");
+      this.status(ctx.message, "");
+    }
+  }
+
+  /* --------------------------------------------------------- presets */
+
+  allPresets() {
+    return BUILTIN_PRESETS.concat(this.userPresets);
+  }
+
+  renderPresetChips() {
+    const host = this.$("preset-list");
+    if (!host) return;
     host.textContent = "";
-    PRESETS.BUILTIN_PRESETS.forEach(function (preset) {
-      var chip = C.el("button", "preset-chip", preset.name);
-      chip.addEventListener("click", function () {
-        params = PRESETS.presetToParams(preset);
-        if (!params.paletteLocked) syncPaletteFromImage();
-        buildSections();
-        syncControls();
-        schedule();
+    for (const preset of this.allPresets()) {
+      const chip = C.el(
+        "button",
+        "preset-chip" +
+          (preset.user ? " user" : "") +
+          (preset.id === this.activePresetId ? " active" : ""),
+        preset.name
+      );
+      chip.addEventListener("click", (e) => {
+        if (e.altKey && preset.user) {
+          this.deletePreset(preset);
+          return;
+        }
+        this.applyPreset(preset);
       });
+      if (preset.user) chip.title = `${preset.name} — alt-click to delete`;
       host.appendChild(chip);
-    });
+    }
   }
 
-  /* ---------------------------------------------------------------- */
+  applyPreset(preset) {
+    this.params = presetToParams(preset);
+    this.activePresetId = preset.id;
+    if (!this.params.paletteLocked) this.syncPaletteFromImage();
+    this.rebuild();
+    this.schedulePreview();
+    this.persistSession();
+    this.notice(`Preset "${preset.name}" loaded.`);
+  }
 
-  function init() {
-    buildSections();
-    renderPresets();
+  async deletePreset(preset) {
+    this.userPresets = this.userPresets.filter((p) => p.id !== preset.id);
+    if (this.activePresetId === preset.id) this.activePresetId = null;
+    const saved = await META.saveUserPresets(this.userPresets);
+    this.renderPresetChips();
+    this.notice(
+      saved ? `Preset "${preset.name}" deleted.` : `Preset "${preset.name}" removed for this session only.`,
+      saved ? "" : "warn"
+    );
+  }
 
-    $("file").addEventListener("change", function (e) {
-      if (e.target.files && e.target.files[0]) loadImage(e.target.files[0]);
-    });
+  async savePreset() {
+    const name = await this.promptText("Preset name", "My Halftone");
+    if (!name) return;
+    const preset = makeUserPreset(name, this.params);
+    this.userPresets = this.userPresets.filter((p) => p.name !== preset.name).concat([preset]);
+    const saved = await META.saveUserPresets(this.userPresets);
+    this.activePresetId = preset.id;
+    this.renderPresetChips();
+    this.notice(
+      saved
+        ? `Preset "${preset.name}" saved.`
+        : `Preset "${preset.name}" is active but could not be written to disk.`,
+      saved ? "" : "warn"
+    );
+  }
 
-    var wrap = $("preview-wrap");
-    ["dragenter", "dragover"].forEach(function (t) {
-      wrap.addEventListener(t, function (e) {
-        e.preventDefault();
-        wrap.className = "preview-wrap dragging";
+  async promptLoadPreset() {
+    // The chips are the picker; this button just makes that discoverable and
+    // handles the "I have too many presets to scan" case.
+    const names = this.allPresets().map((p) => p.name);
+    const name = await this.promptText(`Load preset (${names.join(", ")})`, names[0] || "");
+    if (!name) return;
+    const found = this.allPresets().find(
+      (p) => p.name.toLowerCase() === String(name).trim().toLowerCase()
+    );
+    if (!found) {
+      this.notice(`No preset named "${name}".`, "warn");
+      return;
+    }
+    this.applyPreset(found);
+  }
+
+  /**
+   * A small modal text prompt. `window.prompt` does not exist in UXP, so the
+   * panel builds its own inline field.
+   */
+  promptText(label, initial) {
+    return new Promise((resolve) => {
+      const notice = this.$("notice");
+      notice.textContent = "";
+      notice.className = "notice show";
+      const row = C.el("div", "ctl");
+      row.appendChild(C.el("div", "ctl-label", label));
+      const input = C.el("input", "ctl-value");
+      input.type = "text";
+      input.style.textAlign = "left";
+      input.style.width = "120px";
+      input.style.minWidth = "80px";
+      input.style.flexGrow = "1";
+      input.style.flexShrink = "1";
+      input.value = initial || "";
+      const okBtn = C.el("button", "seg-item", "OK");
+      okBtn.style.width = "38px";
+      okBtn.style.minWidth = "38px";
+      okBtn.style.flexGrow = "0";
+      okBtn.style.flexShrink = "0";
+      const cancelBtn = C.el("button", "seg-item", "Cancel");
+      cancelBtn.style.width = "50px";
+      cancelBtn.style.minWidth = "50px";
+      cancelBtn.style.flexGrow = "0";
+      cancelBtn.style.flexShrink = "0";
+      row.appendChild(input);
+      row.appendChild(okBtn);
+      row.appendChild(cancelBtn);
+      notice.appendChild(row);
+      input.focus();
+      if (input.select) input.select();
+
+      const done = (value) => {
+        notice.textContent = "";
+        notice.className = "notice";
+        resolve(value);
+      };
+      okBtn.addEventListener("click", () => done(input.value.trim() || null));
+      cancelBtn.addEventListener("click", () => done(null));
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") done(input.value.trim() || null);
+        else if (e.key === "Escape") done(null);
       });
     });
-    ["dragleave", "drop"].forEach(function (t) {
-      wrap.addEventListener(t, function (e) {
-        e.preventDefault();
-        wrap.className = "preview-wrap";
-      });
-    });
-    wrap.addEventListener("drop", function (e) {
-      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) loadImage(f);
-    });
-
-    $("btn-reset").addEventListener("click", function () {
-      params = P.defaultParams();
-      buildSections();
-      syncControls();
-      schedule();
-    });
-
-    $("btn-save").addEventListener("click", function () {
-      if (!renderedURL) return;
-      var full = engine.render(params);
-      var a = document.createElement("a");
-      a.href = PNG.toDataURL(full.data, full.width, full.height);
-      a.download = "halftone.png";
-      a.click();
-    });
-
-    var cmp = $("btn-compare");
-    cmp.addEventListener("pointerdown", function () {
-      if (sourceURL) $("preview").src = sourceURL;
-    });
-    ["pointerup", "pointerleave", "pointercancel"].forEach(function (t) {
-      cmp.addEventListener(t, function () {
-        if (renderedURL) $("preview").src = renderedURL;
-      });
-    });
-
-    window.addEventListener("resize", function () { schedule(); });
-
-    // A built-in test image, so the page does something the moment it opens.
-    makeSampleImage();
   }
 
-  function makeSampleImage() {
-    var w = 900, h = 620;
-    var cv = document.createElement("canvas");
-    cv.width = w; cv.height = h;
-    var ctx = cv.getContext("2d");
-    var g = ctx.createLinearGradient(0, 0, w, h);
-    g.addColorStop(0, "#fdf6e3");
-    g.addColorStop(0.5, "#e8804f");
-    g.addColorStop(1, "#141021");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-    var glow = ctx.createRadialGradient(w * 0.38, h * 0.42, 10, w * 0.38, h * 0.42, h * 0.45);
-    glow.addColorStop(0, "rgba(255,214,102,0.95)");
-    glow.addColorStop(1, "rgba(255,214,102,0)");
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, w, h);
-    var bar = ctx.createLinearGradient(0, 0, w, 0);
-    bar.addColorStop(0, "#000");
-    bar.addColorStop(1, "#fff");
-    ctx.fillStyle = bar;
-    ctx.fillRect(0, h - 70, w, 70);
-    var data = ctx.getImageData(0, 0, w, h);
-    engine.setSource({ data: new Uint8ClampedArray(data.data), width: w, height: h });
-    sourceURL = cv.toDataURL("image/png");
-    $("file-name").textContent = "built-in sample  " + w + "x" + h;
-    draw();
+  /* ----------------------------------------------------------- misc */
+
+  async persistSession() {
+    try {
+      await META.saveSession(this.params);
+    } catch (e) {
+      /* best effort */
+    }
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
+  /**
+   * Run an async Photoshop operation with busy state, progress and a single
+   * place where errors turn into a readable message.
+   */
+  async guard(label, fn) {
+    if (this._busy) return;
+    this._busy = true;
+    this.setButtonsEnabled(false);
+    this.status(label, "busy");
+    this.progress(0, true);
+    try {
+      await fn();
+      this.status("Ready", "ready");
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      this.notice(msg, "error");
+      this.status(msg, "error");
+    } finally {
+      this._busy = false;
+      this.setButtonsEnabled(true);
+      this.progress(0, false);
+      this.refreshContext();
+    }
   }
+
+  setButtonsEnabled(enabled) {
+    for (const id of [
+      "btn-load",
+      "btn-apply",
+      "btn-update",
+      "btn-reset",
+      "btn-batch",
+      "btn-save-preset",
+      "btn-load-preset",
+    ]) {
+      const b = this.$(id);
+      if (!b) continue;
+      if (enabled) b.removeAttribute("disabled");
+      else b.setAttribute("disabled", "true");
+    }
+  }
+
+  status(text, kind) {
+    this.$("status-text").textContent = text;
+    this.$("status-dot").className = "status-dot" + (kind ? " " + kind : "");
+  }
+
+  progress(t, active) {
+    const wrap = this.$("progress");
+    const bar = this.$("progress-bar");
+    if (active !== undefined) wrap.className = "progress" + (active ? " active" : "");
+    bar.style.width = Math.round(Math.max(0, Math.min(1, t)) * 100) + "%";
+  }
+
+  notice(text, kind) {
+    const n = this.$("notice");
+    n.textContent = text;
+    n.className = "notice show" + (kind ? " " + kind : "");
+  }
+}
+
+const ALGORITHM_LABELS = {};
+const ALGORITHM_FAMILY_OF = {};
+for (const a of ALGORITHMS) {
+  ALGORITHM_LABELS[a.id] = a.label;
+  ALGORITHM_FAMILY_OF[a.id] = a.family;
+}
+
+function padHexes(hexes, count) {
+  const out = (hexes || []).slice(0, count);
+  while (out.length < count) out.push(out.length ? out[out.length - 1] : "#808080");
+  return out;
+}
+
+module.exports = { Panel };
+
+});
+
+</script>
+<script>
+(function () {
+  var Panel = window.__require("main.js", "./src/ui/panel.js").Panel;
+  var panel = new Panel(document);
+  window.halftonePanel = panel;
+  panel.init().catch(function (e) {
+    var n = document.getElementById("notice");
+    if (n) { n.textContent = String(e && e.message || e); n.className = "notice show error"; }
+    if (window.console) console.error(e);
+  });
 })();
-
 </script>
 </body>
 </html>
