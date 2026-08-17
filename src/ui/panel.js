@@ -39,6 +39,18 @@ const SWATCH = require("../photoshop/swatches.js");
 const FILES = require("../photoshop/files.js");
 
 const PREVIEW_MAX = 460;
+/**
+ * How much of the panel's height the pinned preview may take.
+ *
+ * The preview no longer scrolls away, which is the point - but that also means
+ * a tall portrait image would otherwise fill the panel and leave no room for the
+ * controls it is supposed to be showing you the effect of. So it is capped as a
+ * fraction of the panel, with a floor low enough to survive a short panel and a
+ * ceiling so it does not sprawl on a tall one.
+ */
+const PREVIEW_HEIGHT_FRACTION = 0.42;
+const PREVIEW_HEIGHT_MIN = 110;
+const PREVIEW_HEIGHT_MAX = 380;
 /** Cap on the dither grid used for previews; above this the preview approximates. */
 const PREVIEW_DITHER_GRID = 700;
 const SLOW_FRAME_MS = 45;
@@ -433,8 +445,18 @@ class Panel {
   previewSize() {
     const src = this.engine.source;
     const wrap = this.$("preview-wrap");
-    const avail = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
-    const scale = Math.min(1, avail / src.width);
+    const availW = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
+
+    const app = this.$("app");
+    const panelH = (app && app.clientHeight) || 720;
+    const availH = Math.max(
+      PREVIEW_HEIGHT_MIN,
+      Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION))
+    );
+
+    // Fit inside both, never upscale: an image smaller than the panel is shown
+    // at its own size rather than blown up into a blur.
+    const scale = Math.min(1, availW / src.width, availH / src.height);
     return {
       width: Math.max(1, Math.round(src.width * scale)),
       height: Math.max(1, Math.round(src.height * scale)),

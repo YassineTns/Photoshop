@@ -130,17 +130,29 @@ body {
 }
 
 /*
- * The scroll container.
+ * THE FROZEN HEAD AND THE SCROLLING BODY
  *
- * A UXP panel does not scroll its document for you: with `#app` simply flowing
- * taller than the panel, everything below the fold was unreachable and there was
- * no scrollbar at all. It needs one element with a definite height and its own
- * overflow.
+ * `#app` fills the panel and does not scroll. It holds exactly two children:
  *
- * The four insets pin it to the initial containing block - the panel viewport -
- * which gives it that definite height without depending on an unbroken
- * height:100% chain through html and body. `height: 100%` alone silently does
- * nothing the moment one ancestor forgets it.
+ *   #head    the brand, the preview, the status line and the action buttons.
+ *            Never scrolls, so the preview is on screen the whole time you are
+ *            working through the controls. A slider you cannot see the effect
+ *            of is not a slider you can use.
+ *   #scroll  everything else. Takes whatever height is left and scrolls it.
+ *
+ * A UXP panel does not scroll its document for you, so the scrolling region has
+ * to be an element with a definite height and its own overflow. `#app` gets that
+ * height from the four insets, which pin it to the initial containing block -
+ * the panel viewport - rather than depending on an unbroken height:100% chain
+ * through html and body, which silently does nothing the moment one ancestor
+ * forgets it. `#scroll` then takes the remainder with flex-grow.
+ *
+ * `min-height: 0` on `#scroll` is for Chromium, not for UXP: a browser gives
+ * flex items an automatic minimum size, which would stop it shrinking below its
+ * content and so stop it ever scrolling. UXP does not implement that minimum,
+ * so there it is already free to shrink. Stating it explicitly makes the two
+ * engines agree - which is exactly what the layout test needs in order to mean
+ * anything.
  */
 #app {
   position: absolute;
@@ -148,8 +160,7 @@ body {
   right: 0;
   bottom: 0;
   left: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 9px;
@@ -158,10 +169,35 @@ body {
   background-image: linear-gradient(180deg, var(--glow-soft), transparent 220px);
 }
 
+#head {
+  flex-grow: 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  /* A hard line, so a control clipped at the top of the list reads as scrolled
+     under the head rather than as a rendering fault. */
+  border-bottom: 1px solid var(--border-strong);
+  padding-bottom: 9px;
+}
+
+#scroll {
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  /* Room for the scrollbar, so it never sits on top of a control. */
+  padding-right: 2px;
+  padding-top: 9px;
+}
+
 /*
- * Nothing in the scroll container may be compressed.
+ * Nothing inside either region may be compressed.
  *
- * `#app` is a column flex container with a definite height, so by default every
+ * Both are column flex containers with a definite height, so by default every
  * child is shrinkable - and they were shrunk, squeezing each section down and
  * clipping its rows against `overflow: hidden`. Worse, UXP paints native inputs
  * in a layer that ignores that clip, so the sliders vanished while their number
@@ -169,13 +205,17 @@ body {
  *
  * A browser hides this: CSS gives flex items an automatic minimum size, so they
  * refuse to shrink below their content. UXP does not implement that, so the
- * floor has to be stated. With shrinking off, content simply overflows and the
- * container scrolls, which is the whole point of it.
+ * floor has to be stated. With shrinking off, content simply overflows and
+ * `#scroll` scrolls, which is the whole point of it.
  */
-#app > * {
+#head > *,
+#scroll > * {
   margin-bottom: 8px;
   flex-shrink: 0;
 }
+
+/* The head's own padding provides the gap; a trailing margin would double it. */
+#head > *:last-child { margin-bottom: 0; }
 
 /* ------------------------------------------------------------ brand */
 
@@ -321,7 +361,7 @@ body {
   background-size: 18px 18px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  min-height: 152px;
+  min-height: 112px;
   display: flex;
   flex-direction: row;
   align-items: center;

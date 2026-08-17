@@ -66,7 +66,11 @@ reload each time.
 
 1. Select a pixel or Smart Object layer.
 2. Press **Load Layer**. The panel reads the pixels and shows a live preview.
-3. Pick a **Mode**, adjust anything. The preview follows every slider in real time.
+3. Pick a **Mode**, adjust anything. The preview follows every slider in real
+   time, and it is **pinned**: the header holds it while the controls scroll
+   underneath, so it is on screen whichever setting you are reaching for. It is
+   capped at 42% of the panel height so it never crowds out the controls it is
+   showing you the effect of.
 4. Press **Apply**. The plugin builds:
 
 ```
@@ -485,8 +489,10 @@ with that minimum removed**, which is the closest a browser can get to being UXP
 It now drives the *real* panel at 300/360/420px in both modes and both themes,
 and asserts geometry: no sibling overlap, no stacked-row collision, nothing
 overflowing, nothing collapsed to zero, no control rendering zero options, no
-start-up errors, and that the panel scrolls far enough to reach its own last
-section. 300 assertions. It cannot prove UXP agrees with Chromium, but every rule
+start-up errors, and that the controls scroll far enough to reach the last
+section. It also asserts the pinned preview stays pinned: that scrolling the
+controls to the bottom moves it by less than a pixel, that it is still fully on
+screen when they are, and that it never takes more than 55% of the panel. 420 assertions. It cannot prove UXP agrees with Chromium, but every rule
 that broke was one Chromium would have caught, because the fix in each case was
 to stop relying on a feature UXP lacks.
 

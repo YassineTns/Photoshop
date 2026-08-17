@@ -93,25 +93,41 @@ const PROBE = () => {
     scroll: null,
   };
   const app = document.getElementById("app");
+  const scroller = document.getElementById("scroll");
+  const head = document.getElementById("head");
   const host = app.getBoundingClientRect();
+
+  // The preview is pinned: it lives in #head, which never scrolls. Record where
+  // it is before scrolling so we can prove it has not moved afterwards.
+  const previewBefore = document.getElementById("preview-wrap").getBoundingClientRect();
 
   // Scrolling: content taller than the panel must be reachable, and the last
   // section must actually come into view when scrolled to the bottom.
-  app.scrollTop = app.scrollHeight;
+  scroller.scrollTop = scroller.scrollHeight;
   const sections = [...document.querySelectorAll(".section")];
   const last = sections[sections.length - 1];
+  const previewAfter = document.getElementById("preview-wrap").getBoundingClientRect();
   out.scroll = {
-    overflowY: getComputedStyle(app).overflowY,
-    content: Math.round(app.scrollHeight),
-    panel: Math.round(app.clientHeight),
-    scrolled: Math.round(app.scrollTop),
-    maxScroll: Math.round(app.scrollHeight - app.clientHeight),
+    overflowY: getComputedStyle(scroller).overflowY,
+    appOverflowY: getComputedStyle(app).overflowY,
+    content: Math.round(scroller.scrollHeight),
+    panel: Math.round(scroller.clientHeight),
+    scrolled: Math.round(scroller.scrollTop),
+    maxScroll: Math.round(scroller.scrollHeight - scroller.clientHeight),
     lastReachable: last
       ? last.getBoundingClientRect().bottom <= window.innerHeight + 2
       : false,
     sections: sections.length,
+    // The pinned head: unmoved by scrolling, and the scrolling region starts
+    // below it rather than under it.
+    previewMoved: Math.abs(previewAfter.top - previewBefore.top),
+    previewVisible:
+      previewAfter.top >= host.top - 1 && previewAfter.bottom <= host.bottom + 1,
+    previewFraction: previewAfter.height / host.height,
+    scrollBelowHead:
+      scroller.getBoundingClientRect().top >= head.getBoundingClientRect().bottom - 1,
   };
-  app.scrollTop = 0;
+  scroller.scrollTop = 0;
 
   document.querySelectorAll(".ctl").forEach((row) => {
     const label = (row.textContent || "").trim().slice(0, 24);
@@ -248,8 +264,8 @@ for (const width of WIDTHS) {
       // item below its content collapses here.
       await page.addStyleTag({
         content:
-          "#app > *, .sections, .section, .section-body, .ctl, .toolbar, .preset-bar" +
-          " { min-height: 0 !important; }",
+          "#head > *, #scroll > *, .sections, .section, .section-body, .ctl," +
+          " .toolbar, .preset-bar { min-height: 0 !important; }",
       });
       await page.waitForTimeout(150);
       r = await page.evaluate(PROBE);
@@ -279,8 +295,19 @@ function assertGeometry(r, tag) {
   );
   ok(
     r.scroll.overflowY === "auto" || r.scroll.overflowY === "scroll",
-    `${tag}: the panel is a scroll container (overflow-y: ${r.scroll.overflowY})`
+    `${tag}: the body is a scroll container (overflow-y: ${r.scroll.overflowY})`
   );
+  ok(
+    r.scroll.appOverflowY === "hidden",
+    `${tag}: the panel itself does not scroll, so the head cannot leave (${r.scroll.appOverflowY})`
+  );
+  ok(r.scroll.previewMoved < 1, `${tag}: the preview does not move when the controls scroll (${r.scroll.previewMoved.toFixed(1)}px)`);
+  ok(r.scroll.previewVisible, `${tag}: the preview is still fully on screen at the bottom of the list`);
+  ok(
+    r.scroll.previewFraction < 0.55,
+    `${tag}: the pinned preview leaves room for the controls (${(r.scroll.previewFraction * 100).toFixed(0)}% of the panel)`
+  );
+  ok(r.scroll.scrollBelowHead, `${tag}: the scrolling body starts below the frozen head`);
   ok(
     r.scroll.content > r.scroll.panel,
     `${tag}: content exceeds the panel, so scrolling is the case that matters ` +

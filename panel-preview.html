@@ -130,17 +130,29 @@ body {
 }
 
 /*
- * The scroll container.
+ * THE FROZEN HEAD AND THE SCROLLING BODY
  *
- * A UXP panel does not scroll its document for you: with `#app` simply flowing
- * taller than the panel, everything below the fold was unreachable and there was
- * no scrollbar at all. It needs one element with a definite height and its own
- * overflow.
+ * `#app` fills the panel and does not scroll. It holds exactly two children:
  *
- * The four insets pin it to the initial containing block - the panel viewport -
- * which gives it that definite height without depending on an unbroken
- * height:100% chain through html and body. `height: 100%` alone silently does
- * nothing the moment one ancestor forgets it.
+ *   #head    the brand, the preview, the status line and the action buttons.
+ *            Never scrolls, so the preview is on screen the whole time you are
+ *            working through the controls. A slider you cannot see the effect
+ *            of is not a slider you can use.
+ *   #scroll  everything else. Takes whatever height is left and scrolls it.
+ *
+ * A UXP panel does not scroll its document for you, so the scrolling region has
+ * to be an element with a definite height and its own overflow. `#app` gets that
+ * height from the four insets, which pin it to the initial containing block -
+ * the panel viewport - rather than depending on an unbroken height:100% chain
+ * through html and body, which silently does nothing the moment one ancestor
+ * forgets it. `#scroll` then takes the remainder with flex-grow.
+ *
+ * `min-height: 0` on `#scroll` is for Chromium, not for UXP: a browser gives
+ * flex items an automatic minimum size, which would stop it shrinking below its
+ * content and so stop it ever scrolling. UXP does not implement that minimum,
+ * so there it is already free to shrink. Stating it explicitly makes the two
+ * engines agree - which is exactly what the layout test needs in order to mean
+ * anything.
  */
 #app {
   position: absolute;
@@ -148,8 +160,7 @@ body {
   right: 0;
   bottom: 0;
   left: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 9px;
@@ -158,10 +169,35 @@ body {
   background-image: linear-gradient(180deg, var(--glow-soft), transparent 220px);
 }
 
+#head {
+  flex-grow: 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  /* A hard line, so a control clipped at the top of the list reads as scrolled
+     under the head rather than as a rendering fault. */
+  border-bottom: 1px solid var(--border-strong);
+  padding-bottom: 9px;
+}
+
+#scroll {
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  /* Room for the scrollbar, so it never sits on top of a control. */
+  padding-right: 2px;
+  padding-top: 9px;
+}
+
 /*
- * Nothing in the scroll container may be compressed.
+ * Nothing inside either region may be compressed.
  *
- * `#app` is a column flex container with a definite height, so by default every
+ * Both are column flex containers with a definite height, so by default every
  * child is shrinkable - and they were shrunk, squeezing each section down and
  * clipping its rows against `overflow: hidden`. Worse, UXP paints native inputs
  * in a layer that ignores that clip, so the sliders vanished while their number
@@ -169,13 +205,17 @@ body {
  *
  * A browser hides this: CSS gives flex items an automatic minimum size, so they
  * refuse to shrink below their content. UXP does not implement that, so the
- * floor has to be stated. With shrinking off, content simply overflows and the
- * container scrolls, which is the whole point of it.
+ * floor has to be stated. With shrinking off, content simply overflows and
+ * `#scroll` scrolls, which is the whole point of it.
  */
-#app > * {
+#head > *,
+#scroll > * {
   margin-bottom: 8px;
   flex-shrink: 0;
 }
+
+/* The head's own padding provides the gap; a trailing margin would double it. */
+#head > *:last-child { margin-bottom: 0; }
 
 /* ------------------------------------------------------------ brand */
 
@@ -321,7 +361,7 @@ body {
   background-size: 18px 18px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  min-height: 152px;
+  min-height: 112px;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1087,67 +1127,77 @@ body {
 </head>
 <body>
 
+    <!--
+      Two regions, and the split is the point: #head never scrolls, so the
+      preview stays on screen while you work through the controls in #scroll
+      underneath it. Adjusting a slider you cannot see the effect of is not
+      adjusting anything.
+    -->
     <div id="app">
-      <div class="brand">
-        <div class="brand-mark">
-          <div class="brand-dot brand-dot-1"></div>
-          <div class="brand-dot brand-dot-2"></div>
-          <div class="brand-dot brand-dot-3"></div>
-          <div class="brand-dot brand-dot-4"></div>
+      <div id="head">
+        <div class="brand">
+          <div class="brand-mark">
+            <div class="brand-dot brand-dot-1"></div>
+            <div class="brand-dot brand-dot-2"></div>
+            <div class="brand-dot brand-dot-3"></div>
+            <div class="brand-dot brand-dot-4"></div>
+          </div>
+          <div class="brand-name">
+            <span class="brand-name-a">HALFTONE</span><span class="brand-name-b">STUDIO</span>
+          </div>
+          <div id="brand-mode" class="brand-mode">Halftone</div>
         </div>
-        <div class="brand-name">
-          <span class="brand-name-a">HALFTONE</span><span class="brand-name-b">STUDIO</span>
-        </div>
-        <div id="brand-mode" class="brand-mode">Halftone</div>
-      </div>
-      <div class="rule"></div>
+        <div class="rule"></div>
 
-      <div id="preview-wrap" class="preview-wrap">
-        <div id="preview-empty" class="preview-empty">
-          Select a layer, then press <b>Load Layer</b>
+        <div id="preview-wrap" class="preview-wrap">
+          <div id="preview-empty" class="preview-empty">
+            Select a layer, then press <b>Load Layer</b>
+          </div>
+          <img id="preview" class="preview" />
+          <div id="preview-badge" class="preview-badge"></div>
         </div>
-        <img id="preview" class="preview" />
-        <div id="preview-badge" class="preview-badge"></div>
-      </div>
 
-      <div id="status" class="status">
-        <span id="status-dot" class="status-dot"></span>
-        <span id="status-text">Starting…</span>
-      </div>
-
-      <div id="progress" class="progress"><div id="progress-bar" class="progress-bar"></div></div>
-
-      <div class="actions">
-        <div class="toolbar">
-          <button id="btn-load" class="btn">Load Layer</button>
-          <button id="btn-apply" class="btn btn-primary">Apply</button>
-          <button id="btn-update" class="btn">Update</button>
+        <div id="status" class="status">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status-text">Starting…</span>
         </div>
-        <div class="toolbar toolbar-tail">
-          <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
-          <button id="btn-batch" class="btn btn-small">Batch Apply</button>
-          <button id="btn-svg" class="btn btn-small">Export SVG</button>
-        </div>
-        <div class="toolbar toolbar-tail">
-          <button id="btn-cancel" class="btn btn-small btn-cancel">Stop After This Layer</button>
-        </div>
-      </div>
 
-      <div id="sections" class="sections"></div>
+        <div id="progress" class="progress"><div id="progress-bar" class="progress-bar"></div></div>
 
-      <div class="preset-bar">
-        <div class="bar-label"><span class="bar-tick"></span>Presets</div>
-        <div class="preset-row">
-          <div id="preset-list" class="preset-list"></div>
-        </div>
-        <div class="toolbar">
-          <button id="btn-save-preset" class="btn btn-small">Save</button>
-          <button id="btn-load-preset" class="btn btn-small">Load</button>
-          <button id="btn-reset" class="btn btn-small">Reset All</button>
+        <div class="actions">
+          <div class="toolbar">
+            <button id="btn-load" class="btn">Load Layer</button>
+            <button id="btn-apply" class="btn btn-primary">Apply</button>
+            <button id="btn-update" class="btn">Update</button>
+          </div>
+          <div class="toolbar toolbar-tail">
+            <button id="btn-compare" class="btn btn-small">Hold to Compare</button>
+            <button id="btn-batch" class="btn btn-small">Batch Apply</button>
+            <button id="btn-svg" class="btn btn-small">Export SVG</button>
+          </div>
+          <div class="toolbar toolbar-tail">
+            <button id="btn-cancel" class="btn btn-small btn-cancel">Stop After This Layer</button>
+          </div>
         </div>
       </div>
 
-      <div id="notice" class="notice"></div>
+      <div id="scroll">
+        <div id="sections" class="sections"></div>
+
+        <div class="preset-bar">
+          <div class="bar-label"><span class="bar-tick"></span>Presets</div>
+          <div class="preset-row">
+            <div id="preset-list" class="preset-list"></div>
+          </div>
+          <div class="toolbar">
+            <button id="btn-save-preset" class="btn btn-small">Save</button>
+            <button id="btn-load-preset" class="btn btn-small">Load</button>
+            <button id="btn-reset" class="btn btn-small">Reset All</button>
+          </div>
+        </div>
+
+        <div id="notice" class="notice"></div>
+      </div>
     </div>
 
     
@@ -10216,6 +10266,18 @@ const SWATCH = require("../photoshop/swatches.js");
 const FILES = require("../photoshop/files.js");
 
 const PREVIEW_MAX = 460;
+/**
+ * How much of the panel's height the pinned preview may take.
+ *
+ * The preview no longer scrolls away, which is the point - but that also means
+ * a tall portrait image would otherwise fill the panel and leave no room for the
+ * controls it is supposed to be showing you the effect of. So it is capped as a
+ * fraction of the panel, with a floor low enough to survive a short panel and a
+ * ceiling so it does not sprawl on a tall one.
+ */
+const PREVIEW_HEIGHT_FRACTION = 0.42;
+const PREVIEW_HEIGHT_MIN = 110;
+const PREVIEW_HEIGHT_MAX = 380;
 /** Cap on the dither grid used for previews; above this the preview approximates. */
 const PREVIEW_DITHER_GRID = 700;
 const SLOW_FRAME_MS = 45;
@@ -10610,8 +10672,18 @@ class Panel {
   previewSize() {
     const src = this.engine.source;
     const wrap = this.$("preview-wrap");
-    const avail = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
-    const scale = Math.min(1, avail / src.width);
+    const availW = Math.max(160, Math.min(PREVIEW_MAX, (wrap && wrap.clientWidth) || PREVIEW_MAX));
+
+    const app = this.$("app");
+    const panelH = (app && app.clientHeight) || 720;
+    const availH = Math.max(
+      PREVIEW_HEIGHT_MIN,
+      Math.min(PREVIEW_HEIGHT_MAX, Math.round(panelH * PREVIEW_HEIGHT_FRACTION))
+    );
+
+    // Fit inside both, never upscale: an image smaller than the panel is shown
+    // at its own size rather than blown up into a blur.
+    const scale = Math.min(1, availW / src.width, availH / src.height);
     return {
       width: Math.max(1, Math.round(src.width * scale)),
       height: Math.max(1, Math.round(src.height * scale)),
