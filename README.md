@@ -428,9 +428,7 @@ Units are chosen so that nothing depends on document resolution.
 | | Angle | 0–90° | Screen angle (halftone) |
 | Halftone | Radius | 0–200% | Max dot size as a % of the cell half-size; >100% overlaps |
 | | Dot Curve | 0–1 | 0 = area tracks tone (classic), 1 = radius tracks tone |
-| | Shape | circle, ellipse, square, diamond, cross, engrave, line | |
-| | Wave | 0–200% | Undulate each row of dots, as a % of the cell. Neighbours move together, so a line screen becomes one continuous wavy line — the engraved look |
-| | Wavelength | 2–64 cells | How many cells one wave takes |
+| | Shape | circle, ellipse, square, diamond, cross, line | |
 | | Dot Gain | 0–20% | Ink spread on paper, added to every dot radius |
 | | Screen | AM / FM | AM varies dot size; FM keeps it fixed and varies placement |
 | | Screens | single / per ink | One screen, or one angled screen per ink |
@@ -484,15 +482,8 @@ as often as its own control points do.
 It is drawn from positioned elements rather than a canvas, because UXP's canvas
 support varies by host version and the rest of the panel does not depend on it.
 
-**Engraving.** The `engrave` shape is a line whose thickness carries tone, plus a
-second line crossing it once the first is thick enough that a darker tone could
-not be told from the one before — that crossover is why engraved portraits read
-as modelled rather than flat. Both bars span the whole cell so neighbours join
-into unbroken lines. Add **Wave** and you have the banknote look; the
-**Engraved Note** preset is that, set up.
-
 **Presets.** Halftone: Classic B&W, Soft Print, Comic, Newspaper, RGB Pop, Retro
-Poster, Engraved Note. Dither: Mac Classic, Newsprint Dither, Handheld Green, Blue Noise, Zone
+Poster. Dither: Mac Classic, Newsprint Dither, Handheld Green, Blue Noise, Zone
 Poster. Save your own with **Save Preset**.
 
 ---
@@ -500,7 +491,7 @@ Poster. Save your own with **Save Preset**.
 ## Tests
 
 ```bash
-npm test              # engine (420 assertions) + mocked host (227 assertions)
+npm test              # engine (415 assertions) + mocked host (227 assertions)
 npm run test:visual   # also writes PNGs to test/out/ for eyeballing
 npm run test:heavy    # adds the 6000x4000 case
 npm run test:layout   # panel geometry, needs playwright (skips if absent)

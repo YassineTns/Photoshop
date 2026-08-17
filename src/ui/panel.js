@@ -247,8 +247,7 @@ class Panel {
       key === "mode" ||
       key === "scaleMode" ||
       key === "tonalMapping" ||
-      key === "sharpen" ||
-      key === "waveAmount"
+      key === "sharpen"
     );
   }
 
@@ -614,6 +613,9 @@ class Panel {
     let start = null;
     wrap.addEventListener("pointerdown", (e) => {
       if (!this.canPan()) return;
+      // The compare seam lives inside the preview, so its own drag would also
+      // start a pan and the image would slide out from under the handle.
+      if (this._comparing) return;
       panning = true;
       const box = this.previewBox();
       start = { x: e.clientX, y: e.clientY, cx: this.view.cx, cy: this.view.cy, box };
@@ -1595,7 +1597,7 @@ const SECTION_SUMMARY = {
   // Not `mode`: the badge in the header already says which engine is running.
   mode: ["lumaMode"],
   scale: ["scaleMode", "density", "dpi", "ditherResolution"],
-  halftone: ["shape", "screenType", "waveAmount", "radius", "angle"],
+  halftone: ["shape", "screenType", "radius", "angle"],
   press: ["jitterPosition", "jitterSize", "misregistration"],
   dither: ["ditherAlgorithm", "ditherStrength"],
   preprocess: ["blur", "sharpen", "noiseReduction"],

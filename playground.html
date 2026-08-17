@@ -2596,13 +2596,6 @@ window.__define("src/engine/shapes.js", function (module, exports, require) {
 
 const SQRT2 = Math.SQRT2;
 
-/**
- * How thick the engraved line gets, as a fraction of the cell, before the
- * crossing bar appears. Too low and everything is cross-hatched; too high and
- * the shadows block up before the crossing has anything to do.
- */
-const ENGRAVE_CROSS_START = 0.2;
-
 /** Ellipse semi-axes as multiples of the radius; a*b = 1 keeps the area equal. */
 const ELLIPSE_RATIO = 1.3;
 const ELLIPSE_A = Math.sqrt(ELLIPSE_RATIO);
@@ -2706,43 +2699,6 @@ const SHAPES = {
       return 2 * (2 * arm) * (2 * t) - (2 * t) * (2 * t);
     },
     extent: (r) => r * 1.35 + 1,
-  },
-
-  /*
-   * The banknote engraving mark.
-   *
-   * Line engraving carries tone two ways at once: a continuous line whose
-   * *thickness* follows the tone, and, once that line is thick enough to be
-   * closing up, a second line crossing it. That crossover is what stops the
-   * shadows becoming a solid black bar and is the reason engraved portraits
-   * read as modelled rather than flat.
-   *
-   * Both bars span the whole cell, so neighbouring cells join into unbroken
-   * lines rather than a row of separate dashes - which is the difference
-   * between an engraving and a line screen.
-   */
-  engrave: {
-    id: "engrave",
-    label: "Engrave",
-    sdf: (dx, dy, r, cell) => {
-      const halfW = cell * 0.5 + 0.5;
-      // Equal area to a circle of radius r, as every other shape here.
-      const halfH = (r * r * Math.PI) / (4 * halfW);
-      const ax = Math.abs(dx);
-      const ay = Math.abs(dy);
-      const main = boxSdf(ax, ay, halfW, halfH);
-      // The crossing bar starts only once the main line is thick enough that a
-      // darker tone could not be told from the one before it.
-      const cross = halfH - cell * ENGRAVE_CROSS_START;
-      if (cross <= 0) return main;
-      return Math.min(main, boxSdf(ax, ay, cross, halfW));
-    },
-    area: (r) => Math.PI * r * r,
-    extent: (r, cell) => {
-      const halfW = cell * 0.5 + 0.5;
-      const halfH = (r * r * Math.PI) / (4 * halfW);
-      return Math.max(halfW, halfH) + 1;
-    },
   },
 
   line: {
@@ -3711,12 +3667,6 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   const viewX = p.viewX || 0;
   const viewY = p.viewY || 0;
   const cull = (grid.cell * Math.max(1, p.radius / 100)) + 2;
-  // Wave: displace each cell along the grid's own Y axis by a smooth function
-  // of its column, so neighbouring cells shift together and the row of dots
-  // becomes one undulating line rather than a jittered row. Deterministic by
-  // construction - it is a function of position, not of a generator.
-  const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
-  const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
 
   const rowStart = chunk.rowStart || 0;
   const rowEnd = chunk.rowEnd === undefined ? grid.rows : Math.min(grid.rows, chunk.rowEnd);
@@ -3764,11 +3714,6 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const col3 = p.palette[pi];
 
       cellCentre(grid, col, row, centre);
-      if (waveAmp) {
-        const d = waveAmp * Math.sin(waveK * col);
-        centre[0] -= grid.sin * d;
-        centre[1] += grid.cos * d;
-      }
       const px = centre[0] - viewX;
       const py = centre[1] - viewY;
       if (px < -cull || py < -cull || px > width + cull || py > height + cull) continue;
@@ -3841,8 +3786,6 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
     // Misregistration: the whole plate lands a hair off, so it is a constant
     // offset for the screen rather than per-dot noise.
     const cull = grid.cell * Math.max(1, p.radius / 100) + 2;
-    const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
-    const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
     const mx = screen.offsetX || 0;
     const my = screen.offsetY || 0;
 
@@ -3860,11 +3803,6 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
         }
         r += gain;
         cellCentre(grid, col, row, centre);
-        if (waveAmp) {
-          const d = waveAmp * Math.sin(waveK * col);
-          centre[0] -= grid.sin * d;
-          centre[1] += grid.cos * d;
-        }
         let px = centre[0] + mx - viewX;
         let py = centre[1] + my - viewY;
         if (px < -cull || py < -cull || px > width + cull || py > height + cull) continue;
@@ -5349,19 +5287,6 @@ function shapeMarkup(shapeId, cx, cy, r, cell, colour, rot) {
         `</g>`
       );
     }
-    case "engrave": {
-      const halfW = cell * 0.5;
-      const halfH = (r * r * Math.PI) / (4 * halfW);
-      const cross = halfH - cell * 0.2;
-      const main =
-        `<rect x="${fmt(cx - halfW)}" y="${fmt(cy - halfH)}" width="${fmt(halfW * 2)}" height="${fmt(halfH * 2)}"/>`;
-      if (cross <= 0) return `<g${t}${fill}>${main}</g>`;
-      return (
-        `<g${t}${fill}>${main}` +
-        `<rect x="${fmt(cx - cross)}" y="${fmt(cy - halfW)}" width="${fmt(cross * 2)}" height="${fmt(halfW * 2)}"/>` +
-        `</g>`
-      );
-    }
     case "line": {
       const halfW = cell * 0.5;
       const halfH = (r * r * Math.PI) / (4 * halfW);
@@ -5392,8 +5317,6 @@ function halftoneSVG(cells, p, width, height) {
   const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
   const jOut = [0, 0, 1, 0];
   const fm = p.screenType === "fm" ? p.fmThreshold : null;
-  const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
-  const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
 
   // Grouped by colour: far smaller output, and it gives the printer one object
   // per ink to select.
@@ -5427,11 +5350,6 @@ function halftoneSVG(cells, p, width, height) {
       const hex = rgbToHex(col3[0], col3[1], col3[2]);
 
       cellCentre(grid, col, row, centre);
-      if (waveAmp) {
-        const d = waveAmp * Math.sin(waveK * col);
-        centre[0] -= grid.sin * d;
-        centre[1] += grid.cos * d;
-      }
       let rot = 0;
       let cx = centre[0];
       let cy = centre[1];
@@ -5479,8 +5397,6 @@ function screensSVG(screens, p, width, height) {
     const hex = rgbToHex(screen.color[0], screen.color[1], screen.color[2]);
     const mx = screen.offsetX || 0;
     const my = screen.offsetY || 0;
-    const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
-    const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
     const list = [];
 
     for (let row = 0; row < grid.rows; row++) {
@@ -5497,11 +5413,6 @@ function screensSVG(screens, p, width, height) {
         }
         r += gain;
         cellCentre(grid, col, row, centre);
-        if (waveAmp) {
-          const d = waveAmp * Math.sin(waveK * col);
-          centre[0] -= grid.sin * d;
-          centre[1] += grid.cos * d;
-        }
         let cx = centre[0] + mx;
         let cy = centre[1] + my;
         let rot = 0;
@@ -5796,48 +5707,9 @@ const PARAM_DEFS = [
     section: "halftone",
     type: "chips",
     def: "circle",
-    options: ["circle", "ellipse", "square", "diamond", "cross", "engrave", "line"],
-    optionLabels: {
-      circle: "Circle",
-      ellipse: "Ellipse",
-      square: "Square",
-      diamond: "Diamond",
-      cross: "Cross",
-      engrave: "Engrave",
-      line: "Line",
-    },
+    options: ["circle", "ellipse", "square", "diamond", "cross", "line"],
     modes: ["halftone"],
     hint: "Ellipse joins its neighbours gradually, avoiding the hard 50% tone jump a circle makes.",
-  },
-  {
-    key: "waveAmount",
-    label: "Wave",
-    section: "halftone",
-    modes: ["halftone"],
-    type: "slider",
-    min: 0,
-    max: 200,
-    step: 1,
-    def: 0,
-    unit: "%",
-    hint:
-      "Undulate each row of dots, as a percentage of the cell. Neighbouring " +
-      "cells move together, so a line screen becomes one continuous wavy line " +
-      "- the engraved banknote look. Works with any shape.",
-  },
-  {
-    key: "waveLength",
-    label: "Wavelength",
-    section: "halftone",
-    modes: ["halftone"],
-    type: "slider",
-    min: 2,
-    max: 64,
-    step: 1,
-    def: 12,
-    unit: " cells",
-    showIf: (p) => p.waveAmount > 0,
-    hint: "How many cells one wave takes.",
   },
   {
     key: "dotGain",
@@ -7089,8 +6961,6 @@ class HalftoneEngine {
         seed: params.seed,
       },
       dotGain: params.dotGain,
-      waveAmount: params.waveAmount,
-      waveLength: params.waveLength,
       gradeBias: params.gradeBias,
       radiusCurve: params.radiusCurve,
       invert: params.invert,
@@ -7790,39 +7660,6 @@ const BUILTIN_PRESETS = [
       highlightSplit: 0.68,
       contrast: 1.2,
       saturation: 1.15,
-      invert: false,
-    },
-  },
-  {
-    id: "engraved-note",
-    name: "Engraved Note",
-    /*
-     * The banknote look: one dark ink on a warm paper, a fine wavy line screen
-     * that cross-hatches as it darkens. The wave is what separates an engraving
-     * from a line screen - it is why the lines appear to follow the form rather
-     * than to be ruled across it. Angled off the horizontal so the undulation
-     * reads as engraving rather than as a printing fault, and graded hard so
-     * the crossover lands in the mid-tones where the modelling is.
-     */
-    params: {
-      mode: "halftone",
-      shape: "engrave",
-      density: 150,
-      angle: 8,
-      radius: 108,
-      radiusCurve: 0.25,
-      waveAmount: 55,
-      waveLength: 9,
-      palette: ["#EFE7D2", "#1B3A2F"],
-      paletteLocked: true,
-      colorCount: 2,
-      background: "#EFE7D2",
-      contrast: 1.25,
-      gamma: 0.95,
-      gradeBias: 0.15,
-      sharpen: 60,
-      sharpenRadius: 1.2,
-      saturation: 0,
       invert: false,
     },
   },

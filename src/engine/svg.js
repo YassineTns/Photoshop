@@ -68,19 +68,6 @@ function shapeMarkup(shapeId, cx, cy, r, cell, colour, rot) {
         `</g>`
       );
     }
-    case "engrave": {
-      const halfW = cell * 0.5;
-      const halfH = (r * r * Math.PI) / (4 * halfW);
-      const cross = halfH - cell * 0.2;
-      const main =
-        `<rect x="${fmt(cx - halfW)}" y="${fmt(cy - halfH)}" width="${fmt(halfW * 2)}" height="${fmt(halfH * 2)}"/>`;
-      if (cross <= 0) return `<g${t}${fill}>${main}</g>`;
-      return (
-        `<g${t}${fill}>${main}` +
-        `<rect x="${fmt(cx - cross)}" y="${fmt(cy - halfW)}" width="${fmt(cross * 2)}" height="${fmt(halfW * 2)}"/>` +
-        `</g>`
-      );
-    }
     case "line": {
       const halfW = cell * 0.5;
       const halfH = (r * r * Math.PI) / (4 * halfW);
@@ -111,8 +98,6 @@ function halftoneSVG(cells, p, width, height) {
   const jit = p.jitter && !jitterIsIdentity(p.jitter) ? p.jitter : null;
   const jOut = [0, 0, 1, 0];
   const fm = p.screenType === "fm" ? p.fmThreshold : null;
-  const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
-  const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
 
   // Grouped by colour: far smaller output, and it gives the printer one object
   // per ink to select.
@@ -146,11 +131,6 @@ function halftoneSVG(cells, p, width, height) {
       const hex = rgbToHex(col3[0], col3[1], col3[2]);
 
       cellCentre(grid, col, row, centre);
-      if (waveAmp) {
-        const d = waveAmp * Math.sin(waveK * col);
-        centre[0] -= grid.sin * d;
-        centre[1] += grid.cos * d;
-      }
       let rot = 0;
       let cx = centre[0];
       let cy = centre[1];
@@ -198,8 +178,6 @@ function screensSVG(screens, p, width, height) {
     const hex = rgbToHex(screen.color[0], screen.color[1], screen.color[2]);
     const mx = screen.offsetX || 0;
     const my = screen.offsetY || 0;
-    const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
-    const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
     const list = [];
 
     for (let row = 0; row < grid.rows; row++) {
@@ -216,11 +194,6 @@ function screensSVG(screens, p, width, height) {
         }
         r += gain;
         cellCentre(grid, col, row, centre);
-        if (waveAmp) {
-          const d = waveAmp * Math.sin(waveK * col);
-          centre[0] -= grid.sin * d;
-          centre[1] += grid.cos * d;
-        }
         let cx = centre[0] + mx;
         let cy = centre[1] + my;
         let rot = 0;

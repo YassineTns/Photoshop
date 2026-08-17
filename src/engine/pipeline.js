@@ -557,8 +557,6 @@ class HalftoneEngine {
         seed: params.seed,
       },
       dotGain: params.dotGain,
-      waveAmount: params.waveAmount,
-      waveLength: params.waveLength,
       gradeBias: params.gradeBias,
       radiusCurve: params.radiusCurve,
       invert: params.invert,

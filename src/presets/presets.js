@@ -309,39 +309,6 @@ const BUILTIN_PRESETS = [
       invert: false,
     },
   },
-  {
-    id: "engraved-note",
-    name: "Engraved Note",
-    /*
-     * The banknote look: one dark ink on a warm paper, a fine wavy line screen
-     * that cross-hatches as it darkens. The wave is what separates an engraving
-     * from a line screen - it is why the lines appear to follow the form rather
-     * than to be ruled across it. Angled off the horizontal so the undulation
-     * reads as engraving rather than as a printing fault, and graded hard so
-     * the crossover lands in the mid-tones where the modelling is.
-     */
-    params: {
-      mode: "halftone",
-      shape: "engrave",
-      density: 150,
-      angle: 8,
-      radius: 108,
-      radiusCurve: 0.25,
-      waveAmount: 55,
-      waveLength: 9,
-      palette: ["#EFE7D2", "#1B3A2F"],
-      paletteLocked: true,
-      colorCount: 2,
-      background: "#EFE7D2",
-      contrast: 1.25,
-      gamma: 0.95,
-      gradeBias: 0.15,
-      sharpen: 60,
-      sharpenRadius: 1.2,
-      saturation: 0,
-      invert: false,
-    },
-  },
 ];
 
 /**

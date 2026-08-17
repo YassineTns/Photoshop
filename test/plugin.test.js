@@ -849,18 +849,15 @@ async function main() {
       for (const scaleMode of ["relative", "dpi"]) {
         for (const tonal of [false, true]) {
           for (const screenMode of ["single", "perInk"]) {
-            for (const waveAmount of [0, 40]) {
-              panel.params = sanitizeAll({
-                mode,
-                scaleMode,
-                screenMode,
-                tonalMapping: tonal,
-                sharpen: 50,
-                waveAmount,
-              });
-              panel.buildSections();
-              Object.keys(panel.controls).forEach((k) => everSeen.add(k));
-            }
+            panel.params = sanitizeAll({
+              mode,
+              scaleMode,
+              screenMode,
+              tonalMapping: tonal,
+              sharpen: 50,
+            });
+            panel.buildSections();
+            Object.keys(panel.controls).forEach((k) => everSeen.add(k));
           }
         }
       }

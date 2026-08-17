@@ -39,13 +39,6 @@
 
 const SQRT2 = Math.SQRT2;
 
-/**
- * How thick the engraved line gets, as a fraction of the cell, before the
- * crossing bar appears. Too low and everything is cross-hatched; too high and
- * the shadows block up before the crossing has anything to do.
- */
-const ENGRAVE_CROSS_START = 0.2;
-
 /** Ellipse semi-axes as multiples of the radius; a*b = 1 keeps the area equal. */
 const ELLIPSE_RATIO = 1.3;
 const ELLIPSE_A = Math.sqrt(ELLIPSE_RATIO);
@@ -149,43 +142,6 @@ const SHAPES = {
       return 2 * (2 * arm) * (2 * t) - (2 * t) * (2 * t);
     },
     extent: (r) => r * 1.35 + 1,
-  },
-
-  /*
-   * The banknote engraving mark.
-   *
-   * Line engraving carries tone two ways at once: a continuous line whose
-   * *thickness* follows the tone, and, once that line is thick enough to be
-   * closing up, a second line crossing it. That crossover is what stops the
-   * shadows becoming a solid black bar and is the reason engraved portraits
-   * read as modelled rather than flat.
-   *
-   * Both bars span the whole cell, so neighbouring cells join into unbroken
-   * lines rather than a row of separate dashes - which is the difference
-   * between an engraving and a line screen.
-   */
-  engrave: {
-    id: "engrave",
-    label: "Engrave",
-    sdf: (dx, dy, r, cell) => {
-      const halfW = cell * 0.5 + 0.5;
-      // Equal area to a circle of radius r, as every other shape here.
-      const halfH = (r * r * Math.PI) / (4 * halfW);
-      const ax = Math.abs(dx);
-      const ay = Math.abs(dy);
-      const main = boxSdf(ax, ay, halfW, halfH);
-      // The crossing bar starts only once the main line is thick enough that a
-      // darker tone could not be told from the one before it.
-      const cross = halfH - cell * ENGRAVE_CROSS_START;
-      if (cross <= 0) return main;
-      return Math.min(main, boxSdf(ax, ay, cross, halfW));
-    },
-    area: (r) => Math.PI * r * r,
-    extent: (r, cell) => {
-      const halfW = cell * 0.5 + 0.5;
-      const halfH = (r * r * Math.PI) / (4 * halfW);
-      return Math.max(halfW, halfH) + 1;
-    },
   },
 
   line: {

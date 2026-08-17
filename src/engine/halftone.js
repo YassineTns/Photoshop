@@ -324,12 +324,6 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
   const viewX = p.viewX || 0;
   const viewY = p.viewY || 0;
   const cull = (grid.cell * Math.max(1, p.radius / 100)) + 2;
-  // Wave: displace each cell along the grid's own Y axis by a smooth function
-  // of its column, so neighbouring cells shift together and the row of dots
-  // becomes one undulating line rather than a jittered row. Deterministic by
-  // construction - it is a function of position, not of a generator.
-  const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
-  const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
 
   const rowStart = chunk.rowStart || 0;
   const rowEnd = chunk.rowEnd === undefined ? grid.rows : Math.min(grid.rows, chunk.rowEnd);
@@ -377,11 +371,6 @@ function rasterize(cells, p, width, height, out, chunk = {}) {
       const col3 = p.palette[pi];
 
       cellCentre(grid, col, row, centre);
-      if (waveAmp) {
-        const d = waveAmp * Math.sin(waveK * col);
-        centre[0] -= grid.sin * d;
-        centre[1] += grid.cos * d;
-      }
       const px = centre[0] - viewX;
       const py = centre[1] - viewY;
       if (px < -cull || py < -cull || px > width + cull || py > height + cull) continue;
@@ -454,8 +443,6 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
     // Misregistration: the whole plate lands a hair off, so it is a constant
     // offset for the screen rather than per-dot noise.
     const cull = grid.cell * Math.max(1, p.radius / 100) + 2;
-    const waveAmp = p.waveAmount ? (p.waveAmount / 100) * grid.cell : 0;
-    const waveK = waveAmp ? (Math.PI * 2) / Math.max(2, p.waveLength || 12) : 0;
     const mx = screen.offsetX || 0;
     const my = screen.offsetY || 0;
 
@@ -473,11 +460,6 @@ function rasterizeScreens(screens, p, width, height, out, chunk = {}) {
         }
         r += gain;
         cellCentre(grid, col, row, centre);
-        if (waveAmp) {
-          const d = waveAmp * Math.sin(waveK * col);
-          centre[0] -= grid.sin * d;
-          centre[1] += grid.cos * d;
-        }
         let px = centre[0] + mx - viewX;
         let py = centre[1] + my - viewY;
         if (px < -cull || py < -cull || px > width + cull || py > height + cull) continue;
